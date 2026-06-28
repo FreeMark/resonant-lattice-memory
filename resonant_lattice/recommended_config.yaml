@@ -1,0 +1,108 @@
+# recommended_config.yaml — Resonant Lattice Memory
+# ===========================================================================
+# Code defaults DO NOT override an existing config.yaml. If you already have a
+# plugins.resonant_lattice section, merge these keys into it so the live profile
+# matches the values shipped with the memory-evolution roadmap (Phases 1–8).
+#
+# Apply by copying the block below into your profile's config.yaml
+# (typically $HERMES_HOME/config.yaml).
+#
+# Legend: phases P1–P3 and P6 ship ON by default; the heavier / newer phases
+# (P4 gist, P5 relational, P7 self-model, P8 narrative) ship OFF by default and
+# are turned ON here as the recommended configuration.
+#
+# New users following only code defaults will get a solid but lighter system
+# (core features only). For the full roadmap experience (including gist, relations,
+# self-model, narrative) copy the values below.
+#
+# All default values are now centralized in resonant_lattice/config_schema.py:DEFAULTS
+# for a single source of truth.
+plugins:
+  resonant_lattice:
+
+    # ── Models ─────────────────────────────────────────────────────────────
+    # Consolidation/abstraction runs async, off the hot path — prefer a stronger
+    # reasoning model; the embedding model stays small. EXACT Ollama tags.
+    embed_model: nomic-embed-text       # small/fast, 768-d (store auto-detects dim)
+    reason_model: deepseek-v4-flash:cloud   # excellent fast cloud option (wicked fast + strong reasoning; ~0.1% of 5h / 0.02% weekly on $20 tier)
+    # Ideal is fully local. When local inference capacity is limited, cloud models for the memory layer (off hot path) are recommended.
+    # Local step-up: ibm/granite4.1:8b (or 30b Q4_K_M for max fidelity, never below Q4).
+    # granite4.1:8b is markedly faster than larger models on the cycle hot paths;
+    # a 12b (e.g. gemma) works but is ~10× slower per call in practice.
+
+    # ── Tier / Hebbian config (Phase A repair) ──────────────────────────────
+    initial_resonance: 4
+    promotion_resonance_threshold: 4    # the promotion bar
+    short_tier_cycles: 3                # dream-cycle dwell before short→mid
+    mid_tier_cycles: 6                  # dream-cycle dwell before mid→long
+    decay_per_cycle: 0.5                # resonance bled from short/mid each cycle
+    max_long_facts: 1000                # cap on the undecaying long tier (0 = unlimited)
+
+    # ── Grounding / anti-fabrication (Phases D, E) ──────────────────────────
+    verify_source_quote: true           # attest each fact's source_quote vs transcript
+    quote_match_threshold: 0.82         # windowed fuzzy prose ratio (raise = stricter)
+    gate_self_writes: true              # block autonomous ingest of self/infra chatter
+
+    # ── Milestone A — "memory has time" (P1, P2, P3; ON by default) ─────────
+    keep_superseded: true               # P1b: retire conflict losers as history, not delete
+    max_superseded_history: 2000
+    freshness_halflife_cycles: 50       # P2: gentle recency nudge in recall ranking
+    surface_freshness_in_recall: true   # P2: annotate "[confirmed ~N cycles ago]"
+    stale_decay_boost: 0.0              # P2: optional use-it-or-lose-it decay (0 = off)
+    novelty_enabled: true               # P3: surprising one-shot facts enter stronger
+    novelty_boost: 2.0
+
+    # ── Milestone B — "forgets gracefully & talks back" ─────────────────────
+    # P4 gist-preserving forgetting (LLM-bound) — RECOMMENDED ON: before pruning a
+    # dying-but-once-important cluster, summarise it into one category='gist' fact
+    # so meaning survives detail loss. Frequency-gated to bound LLM cost.
+    gist_before_prune: true
+    gist_floor: 0.0
+    gist_min_peak_resonance: 4.0        # only gist facts that mattered once
+    gist_frequency: 4                   # run every N dream cycles
+    gist_min_cluster_size: 2
+    gist_max_clusters: 3
+    # P6 conflicts-as-conversation (ON by default): surface mature unresolved
+    # conflicts in recall so the agent can disambiguate via the tool actions.
+    surface_conflicts: true
+    conflict_surface_min_group_age_cycles: 2
+
+    # ── Milestone C — "reasons & knows itself" ──────────────────────────────
+    # P5 HRR relational reasoning — RECOMMENDED ON. Extracts (subject, relation,
+    # object) triples from new facts into a queryable graph (relational/infer tool
+    # actions). Deterministic entity-grounded extraction is the default; the
+    # optional LLM triple pass adds an Ollama call per new fact, so leave it OFF
+    # unless you want richer relation vocabulary and can afford the latency.
+    enable_relations: true
+    relation_extract_llm: false         # opt-in LLM augmentation (heavier)
+    relation_min_confidence: 0.5        # gate noisy triples (entity-grounded score higher)
+    relation_recall_hrr_floor: 0.4      # P5b fuzzy-match floor for the HRR fallback
+    max_inference_hops: 2               # P5c bounded transitive inference depth
+
+    # P7 deliberate self-model — RECOMMENDED ON. A curated, never-auto-ingested
+    # identity store (separate agent_identity table; only set_self_model writes it).
+    # Surfaces a curated, authoritative identity block in the system prompt.
+    enable_self_model: true
+    # Optional starting identity (INSERT-OR-IGNORE — never clobbers values the
+    # agent curates later). Tailor to your agent; example shape:
+    # self_model_seed:
+    #   name: "Hermes"
+    #   role: "a local-first neuroplastic memory agent"
+    #   relationship_with_user: "long-term collaborator"
+
+    # P8 narrative / autobiographical layer — RECOMMENDED ON. At session end the
+    # reasoning model writes a one-paragraph gist of the session into the durable
+    # session_summaries table (survives episode pruning); the most recent are
+    # surfaced as cross-session "recent history" in the system prompt.
+    enable_narrative: true
+    narrative_keep: 30                  # bound on retained session summaries
+    narrative_surface: 3                # how many recent summaries to show in-prompt
+    narrative_min_episodes: 2           # skip trivially short sessions
+
+    # Importance-weighted retention — RECOMMENDED ON for financial/compliance
+    # agents. A fact in a high-stakes category (policy/compliance/spend/financial)
+    # decays this much slower per cycle, so an important-but-rarely-recalled fact
+    # resists fading and reaches the decay-exempt long tier where generic noise
+    # would prune. Closes the "importance != frequency" gap. Bounded by the long-
+    # tier cap, so it does not reintroduce unbounded growth.
+    importance_decay_discount: 0.6

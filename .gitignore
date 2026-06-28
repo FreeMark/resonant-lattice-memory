@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# local state / scratch
+*.db
+*.db-wal
+*.db-shm
+*.bak
+*.keys
+*.he
+
+# test-run noise (the .md summaries + .jsonl metrics ARE committed; raw logs are not)
+results/*.log

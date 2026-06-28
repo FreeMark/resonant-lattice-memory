@@ -1,0 +1,10 @@
+{"ingested": 5000, "live_rows": 5009, "db_mb": 60.6, "recall@1": 1.0, "recall@10": 1.0, "latency_ms": 48.2, "ingest_per_s": 22.7, "elapsed_s": 223.0}
+{"ingested": 10000, "live_rows": 9948, "db_mb": 120.5, "recall@1": 1.0, "recall@10": 1.0, "latency_ms": 64.0, "ingest_per_s": 15.8, "elapsed_s": 543.1}
+{"ingested": 15000, "live_rows": 14814, "db_mb": 179.8, "recall@1": 1.0, "recall@10": 1.0, "latency_ms": 81.0, "ingest_per_s": 12.6, "elapsed_s": 943.2}
+{"ingested": 20000, "live_rows": 19658, "db_mb": 238.8, "recall@1": 1.0, "recall@10": 1.0, "latency_ms": 89.6, "ingest_per_s": 11.1, "elapsed_s": 1398.4}
+{"ingested": 25000, "live_rows": 24491, "db_mb": 294.8, "recall@1": 1.0, "recall@10": 1.0, "latency_ms": 101.0, "ingest_per_s": 9.9, "elapsed_s": 1910.6}
+{"ingested": 30000, "live_rows": 29249, "db_mb": 352.9, "recall@1": 1.0, "recall@10": 1.0, "latency_ms": 115.8, "ingest_per_s": 8.9, "elapsed_s": 2479.7}
+{"ingested": 35000, "live_rows": 34007, "db_mb": 411.5, "recall@1": 1.0, "recall@10": 1.0, "latency_ms": 120.5, "ingest_per_s": 8.2, "elapsed_s": 3095.2}
+{"ingested": 40000, "live_rows": 38714, "db_mb": 466.1, "recall@1": 1.0, "recall@10": 1.0, "latency_ms": 133.3, "ingest_per_s": 7.6, "elapsed_s": 3765.3}
+{"ingested": 45000, "live_rows": 43378, "db_mb": 523.8, "recall@1": 1.0, "recall@10": 1.0, "latency_ms": 146.4, "ingest_per_s": 6.9, "elapsed_s": 4496.6}
+{"ingested": 50000, "live_rows": 48052, "db_mb": 578.0, "recall@1": 1.0, "recall@10": 1.0, "latency_ms": 149.1, "ingest_per_s": 6.5, "elapsed_s": 5269.2}

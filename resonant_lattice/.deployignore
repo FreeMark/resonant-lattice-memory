@@ -1,0 +1,15 @@
+test_*.py
+eval_*.py
+eval_*.json
+contest_*.py
+*_PLAN.md
+REMEDIATION_PLAN.md
+original-holographic.py
+RESEARCH_SCHOLAR.md
+WEBDEV_CURRICULUM.md
+REFACTOR_NOTES.md
+__pycache__/
+*.pyc
+*.bak
+archive/
+dev/

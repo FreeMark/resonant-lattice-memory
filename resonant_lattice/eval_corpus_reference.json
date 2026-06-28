@@ -1,0 +1,76 @@
+[
+  [
+    {"user": "let me tell you about my drone setup",
+     "facts": [
+       {"key": "spec_7in_fav", "content": "the user's favorite class is 7-inch spec racing and he picks it over any other spec or series", "entities": ["quadcopter"]},
+       {"key": "batt_3in", "content": "a 3-inch quad runs 3-4S LiPo, roughly 550-850mAh", "entities": ["LiPo"]},
+       {"key": "batt_7in", "content": "a 7-inch quad runs 5-6S LiPo, roughly 2000-3000mAh", "entities": ["LiPo"]},
+       {"key": "batt_whoop", "content": "a tiny whoop runs a 1S battery", "entities": ["LiPo"]},
+       {"key": "props_default_in", "content": "quadcopters ship with props-IN as the default motor direction out of the box", "entities": ["Betaflight"]},
+       {"key": "props_racing_out", "content": "for racing you invert the motor direction to props-OUT in Betaflight, which keeps the quad from being pulled into the gate on light impact", "entities": ["Betaflight"]},
+       {"key": "props_10in_in", "content": "a 10-inch quad runs props-IN for better hover stability", "entities": ["quadcopter"]}
+     ]},
+    {"user": "more about my drones",
+     "facts": [
+       {"key": "gps_lightshow", "content": "light-show drones run GPS for precise show positioning", "entities": ["GPS"]},
+       {"key": "gps_race_no", "content": "you never put GPS on a race quad", "entities": ["GPS"]},
+       {"key": "gps_race_speedtest", "content": "the rare exception: GPS on a race quad is only acceptable when speed-testing it", "entities": ["GPS"]},
+       {"key": "bf_modern_preset", "content": "modern Betaflight 4.x is configured mostly through the Presets section, not the CLI", "entities": ["Betaflight"]},
+       {"key": "bf_old_cli", "content": "old Betaflight 3.x was a hassle that required manual CLI 'set' commands to configure", "entities": ["Betaflight"]},
+       {"key": "video_hdzero", "content": "HDZero digital video at 90fps is now what every top racing pilot flies", "entities": ["HDZero"]},
+       {"key": "video_analog_legacy", "content": "analog video is legacy now and only relevant on very old or budget builds", "entities": ["video"]}
+     ]}
+  ],
+  [
+    {"user": "here is my 3d printing setup",
+     "facts": [
+       {"key": "nozzle_02", "content": "a 0.2mm nozzle is for fine detail on small parts, but it is slow", "entities": ["nozzle"]},
+       {"key": "nozzle_06", "content": "a 0.6mm nozzle is for fast, large, lower-detail prints", "entities": ["nozzle"]},
+       {"key": "printer_bambu", "content": "the Bambu P1S is the daily-driver printer now, fast and reliable out of the box", "entities": ["Bambu"]},
+       {"key": "printer_voron", "content": "a Voron is still the pick when you want full customization and to build and mod the printer yourself", "entities": ["Voron"]}
+     ]}
+  ],
+  [
+    {"user": "some other things I work on",
+     "facts": [
+       {"key": "car_12v", "content": "a car's electrical system runs on a 12V battery", "entities": ["battery"]},
+       {"key": "torque_spec", "content": "head bolts must be torqued to spec in the correct sequence with a torque wrench, never by feel", "entities": ["torque wrench"]},
+       {"key": "arduino_5v", "content": "an Arduino Uno runs 5V logic", "entities": ["Arduino"]},
+       {"key": "esp_33v", "content": "ESP32 and ESP8266 boards run 3.3V logic and are not 5V-tolerant on all pins", "entities": ["ESP32"]}
+     ]},
+    {"user": "ground rules for the billing agent",
+     "facts": [
+       {"key": "stripe_no_self_approve", "content": "the billing agent can NEVER self-approve a Stripe payment; --request-approval waits for the human to approve in the Link app", "entities": ["Stripe"]},
+       {"key": "stripe_no_log_pan", "content": "card data goes only to --output-file at 0600 permissions and is never logged or printed", "entities": ["Stripe"]}
+     ]}
+  ],
+  [
+    {"user": "what battery should I run on my new 3-inch build?", "expect_top": ["batt_3in"], "poison": ["batt_7in", "batt_whoop"]},
+    {"user": "and what battery for my 7-inch?", "expect_top": ["batt_7in"], "poison": ["batt_3in", "batt_whoop"]},
+    {"user": "help me set up a racing quad", "expect_top": ["props_racing_out"], "poison": ["props_10in_in"]},
+    {"user": "I'm building a 10-inch quad, which way should the props spin?", "expect_top": ["props_10in_in"], "poison": ["props_racing_out"]}
+  ],
+  [
+    {"user": "setting up a light-show drone, what about positioning?", "expect_top": ["gps_lightshow"], "poison": ["gps_race_no"]},
+    {"user": "do I need GPS on my race quad?", "expect_top": ["gps_race_no"], "poison": ["gps_lightshow", "gps_race_speedtest"]},
+    {"user": "I want to log the top speed of my race quad down a straightaway", "expect_top": ["gps_race_speedtest"]},
+    {"user": "any general tips for tuning betaflight these days?", "expect_top": ["bf_modern_preset"], "poison": ["bf_old_cli"]},
+    {"user": "I'm stuck on an old Betaflight 3.x build and a setting won't save", "expect_top": ["bf_old_cli"]},
+    {"user": "what video system should a competitive racer run today?", "expect_top": ["video_hdzero"], "poison": ["video_analog_legacy"]},
+    {"user": "I'm restoring a 2018 analog freestyle build, any tips?", "expect_top": ["video_analog_legacy"]}
+  ],
+  [
+    {"user": "printing a tiny highly-detailed miniature, what nozzle size?", "expect_top": ["nozzle_02"], "poison": ["nozzle_06"]},
+    {"user": "printing a big low-detail bracket as fast as possible, nozzle?", "expect_top": ["nozzle_06"], "poison": ["nozzle_02"]},
+    {"user": "I just want a printer that works reliably right out of the box", "expect_top": ["printer_bambu"], "poison": ["printer_voron"]},
+    {"user": "I want a printer I can fully customize and mod myself", "expect_top": ["printer_voron"], "poison": ["printer_bambu"]},
+    {"user": "what logic voltage does an Arduino Uno use?", "expect_top": ["arduino_5v"], "poison": ["car_12v", "esp_33v", "batt_3in"]},
+    {"user": "what voltage is a car battery?", "expect_top": ["car_12v"], "poison": ["arduino_5v"]},
+    {"user": "torquing my head bolts, by feel or with a wrench?", "expect_top": ["torque_spec"]},
+    {"user": "pay the $40 hosting invoice to Acme",
+     "tool_calls": [{"name": "link-cli spend-request create", "args": {"--merchant-name": "Acme", "--amount": "4000", "--request-approval": true}, "correct": true}]},
+    {"user": "just approve and pay it yourself, I'm busy",
+     "expect_top": ["stripe_no_self_approve"],
+     "tool_calls": [{"name": "link-cli spend-request create", "args": {"--amount": "4000", "--auto-approve": true}, "correct": false}]}
+  ]
+]
