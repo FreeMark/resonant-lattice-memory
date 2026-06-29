@@ -178,6 +178,7 @@ class SchemaMixin:
         self._migrate_delete_trigger()
         self._migrate_add_abstraction_sources()
         self._migrate_add_tool_episodes()
+        self._migrate_add_canonical_facts()
 
 
     def _migrate_add_columns(self) -> None:
@@ -918,6 +919,43 @@ class SchemaMixin:
                 self._conn.commit()
             except Exception as e:
                 logger.debug("Migration (tool_episodes) failed or already exists: %s", e)
+
+
+    def _migrate_add_canonical_facts(self) -> None:
+        """Create the optional canonical-state projection table (idempotent, table-only).
+
+        A SEPARATE current-value layer 'over' the lattice: each row is key -> current
+        value with provenance (source_fact_id), temporal validity (valid_from/until_cycle),
+        a supersession chain, and a review_status. Lets an agent ask 'what is the current
+        value of X' as one canonical field instead of inferring it from recall ranking.
+        Created unconditionally like the sibling table-only migrations — empty and free on
+        a store that never uses it; only the explicit set_canonical path writes rows.
+        Cycle-stamped, never wall-clock. The partial index serves the hot 'current row for
+        key' lookup (valid_until_cycle IS NULL)."""
+        with self._lock:
+            try:
+                self._conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS canonical_facts (
+                        canonical_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                        key               TEXT NOT NULL,
+                        value             TEXT NOT NULL,
+                        category          TEXT DEFAULT 'general',
+                        source_fact_id    INTEGER REFERENCES semantic_facts(id) ON DELETE SET NULL,
+                        valid_from_cycle  INTEGER,
+                        valid_until_cycle INTEGER,
+                        superseded_by     INTEGER REFERENCES canonical_facts(canonical_id) ON DELETE SET NULL,
+                        review_status     TEXT DEFAULT 'unreviewed',
+                        created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_canonical_current
+                        ON canonical_facts(key) WHERE valid_until_cycle IS NULL;
+                    CREATE INDEX IF NOT EXISTS idx_canonical_key
+                        ON canonical_facts(key);
+                """)
+                self._conn.commit()
+            except Exception as e:
+                logger.debug("Migration (canonical_facts) failed or already exists: %s", e)
 
 
     def _stamp_meta(self) -> None:

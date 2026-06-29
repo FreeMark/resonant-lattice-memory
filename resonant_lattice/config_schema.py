@@ -370,6 +370,17 @@ CONFIG_SCHEMA = [
                     "contradiction for resolution; with conflict_limbo ON a false flag only protects + "
                     "nudges, never destroys. Set False to disable the heuristic.",
      "default": True},
+    {"key": "quarantine_high_stakes_conflicts",
+     "description": "Conflict CONTAINMENT (default OFF; recommended ON for money/compliance agents). When a "
+                    "fact is in an UNRESOLVED conflict (conflict_group_id set) AND its category is "
+                    "high-stakes (see importance_categories) AND it is NOT pinned, withhold it from the "
+                    "autonomous recall block and surface a [WITHHELD] notice instead of ranking it. Turns "
+                    "'the right value is somewhere in top-k' into 'the agent cannot silently act on a "
+                    "contested high-stakes value before it is resolved'. A PINNED member is the user-declared "
+                    "authority and is never withheld; non-high-stakes conflicts are untouched (still ranked + "
+                    "[CONFLICT LOCK]-tagged). Recall-path only (the explicit search action is unaffected); "
+                    "the facts stay in the store and are still flagged for resolve_conflict.",
+     "default": False},
 ]
 
 # Central source of truth for all runtime defaults.

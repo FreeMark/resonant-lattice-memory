@@ -29,7 +29,13 @@ LATTICE_STORE_SCHEMA = {
         "request_abstraction, force_consolidation, force_dream_cycle, stats, "
         "memory_audit (includes feature_status), pending_conflicts, resolve_conflict, facts_about_entity, "
         "entities_for_fact, related_entities, explain_abstraction, tool_history, "
-        "relational, infer, get_self_model, set_self_model, narrative.\n"
+        "relational, infer, get_self_model, set_self_model, narrative, "
+        "set_canonical, get_canonical.\n"
+        "Canonical state: set_canonical(key, value[, category]) records the CURRENT "
+        "value of a key as a single authoritative field (updating it preserves "
+        "history); get_canonical(key) reads it (no key = list all / by category). "
+        "Use it for facts that have one current truth (vendor terms, an address, a "
+        "config value) instead of inferring 'current' from recall ranking.\n"
         "You INFLUENCE memory, you never destroy it. There is deliberately NO delete: "
         "to retire a fact you believe is wrong or stale, call feedback with "
         "feedback='unhelpful' — that lowers its resonance so it FADES toward dormancy "
@@ -79,7 +85,7 @@ LATTICE_STORE_SCHEMA = {
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["add", "search", "get_fact", "fact_history", "feedback", "pin", "unpin", "request_abstraction", "force_consolidation", "force_dream_cycle", "stats", "memory_audit", "pending_conflicts", "resolve_conflict", "facts_about_entity", "entities_for_fact", "related_entities", "explain_abstraction", "tool_history", "relational", "infer", "get_self_model", "set_self_model", "narrative"],
+                "enum": ["add", "search", "get_fact", "fact_history", "feedback", "pin", "unpin", "request_abstraction", "force_consolidation", "force_dream_cycle", "stats", "memory_audit", "pending_conflicts", "resolve_conflict", "facts_about_entity", "entities_for_fact", "related_entities", "explain_abstraction", "tool_history", "relational", "infer", "get_self_model", "set_self_model", "narrative", "set_canonical", "get_canonical"],
             },
             "content": {"type": "string", "description": "Fact content (for add/feedback)"},
             "query": {"type": "string", "description": "Search query, entity/tool name for entity-graph actions, or a natural-language relational question (relational)"},
@@ -121,7 +127,7 @@ class ToolHandlerMixin:
             )
 
         action = args.get("action")
-        if action in ("add", "feedback", "pin", "unpin", "request_abstraction", "remove", "resolve_conflict", "force_consolidation", "force_dream_cycle", "set_self_model") \
+        if action in ("add", "feedback", "pin", "unpin", "request_abstraction", "remove", "resolve_conflict", "force_consolidation", "force_dream_cycle", "set_self_model", "set_canonical") \
                 and not self._write_enabled:
             return tool_error("Memory is read-only in this agent context (non-primary).")
         try:
@@ -409,6 +415,30 @@ class ToolHandlerMixin:
                 limit = int(args.get("limit", self._narrative_keep))
                 results = self._store.get_recent_narrative(limit=limit)
                 return json.dumps({"narrative": results, "count": len(results)})
+
+            elif action == "set_canonical":
+                # Canonical-state projection: the explicit CURRENT-value layer over
+                # the lattice. Write-gated (primary context only). Updating a key
+                # closes the prior value (history preserved) and makes this current.
+                key = args.get("key")
+                value = args.get("value")
+                if not key or value is None:
+                    return tool_error("set_canonical requires key and value")
+                cid = self._store.set_canonical(
+                    key, value, category=args.get("category", "general"),
+                    source_fact_id=args.get("fact_id"), cycle=self._memory_cycle)
+                return json.dumps({"status": "canonical set", "canonical_id": cid,
+                                   **(self._store.get_canonical(key) or {})})
+
+            elif action == "get_canonical":
+                # Read the current canonical value for a key; with no key, list all
+                # current canonical records (optionally filtered by category). Read-only.
+                key = args.get("key")
+                if key:
+                    rec = self._store.get_canonical(key)
+                    return json.dumps({"canonical": rec, "found": rec is not None})
+                recs = self._store.list_canonical(category=args.get("category"))
+                return json.dumps({"canonical": recs, "count": len(recs)})
 
             else:
                 return tool_error(f"Unknown action: {action}")

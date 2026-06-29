@@ -209,6 +209,13 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         # important-but-rarely-used fact is retained (importance != frequency).
         self._importance_decay_discount = float(self._config.get("importance_decay_discount", DEFAULTS["importance_decay_discount"]))
         self._importance_categories = self._config.get("importance_categories", DEFAULTS["importance_categories"])
+        # Conflict CONTAINMENT (default OFF; recommended ON for money/compliance): withhold
+        # unpinned, high-stakes, UNRESOLVED-conflict facts from the autonomous recall block and
+        # surface a [WITHHELD] notice instead — so the agent can't silently act on a contested
+        # high-stakes value before resolve_conflict. Pinned authority is never withheld.
+        self._quarantine_high_stakes_conflicts = bool(
+            self._config.get("quarantine_high_stakes_conflicts",
+                             DEFAULTS["quarantine_high_stakes_conflicts"]))
         # Phase 1b supersedion (default ON): a conflict loser bled to 0 is retired
         # as tier='superseded' history (superseded_by=winner) BEFORE prune instead
         # of being deleted — a memory is the history of what you believed. Set

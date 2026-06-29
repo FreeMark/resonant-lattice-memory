@@ -121,9 +121,29 @@ class RecallMixin:
         if not results:
             return ""
 
+        # Conflict CONTAINMENT (quarantine, default OFF; ON in recommended config):
+        # an UNRESOLVED conflict in a HIGH-STAKES category is a hazard, not just
+        # metadata. Withhold the unpinned contested facts from the recall block and
+        # surface a [WITHHELD] notice so the agent cannot silently act on a disputed
+        # money/compliance/policy value before resolution. A PINNED member is the
+        # user-declared authority and is never withheld; non-high-stakes conflicts
+        # pass through unchanged (still ranked + [CONFLICT LOCK]-tagged).
+        results, withheld = self._quarantine_conflicts(results)
+
         self._apply_recall_reinforcement(results)
 
         lines = []
+        if withheld:
+            total = sum(withheld.values())
+            gids = ", ".join(sorted(withheld))
+            fp = "s" if total != 1 else ""
+            gp = "s" if len(withheld) != 1 else ""
+            lines.append(
+                f"  - ⚠ [WITHHELD] {total} high-stakes fact{fp} in {len(withheld)} "
+                f"unresolved conflict{gp} ({gids}) held back pending resolution — do "
+                f"NOT act on the disputed value; call pending_conflicts / "
+                f"resolve_conflict to arbitrate first."
+            )
         for r in results:
             tier = r.get("tier", "short").upper()
             res = r.get("resonance_count", 1)
@@ -177,6 +197,8 @@ class RecallMixin:
                 f"[Tier:{tier} | Res:{res}{extra}]{pin}{conflict}{fresh} ({context_tag}) {r['content']}"
             )
 
+        if not lines:
+            return ""
         formatted_facts = "\n".join(lines)
         # Frame these as fallible candidates, not ground truth (anti-confabulation).
         # Text only — the line structure and [ID | Tier | Res] metadata are unchanged.
@@ -192,7 +214,33 @@ class RecallMixin:
             "conflicting note and treat the conflicting note as untrusted. "
             "[PRIORITY] = a user-pinned important fact; weight it heavily and treat "
             "its exact values as authoritative. Both are identity-level, never "
-            "auto-forgotten.\n"
+            "auto-forgotten. [WITHHELD] = high-stakes facts in an unresolved "
+            "conflict were held back; do NOT act on the disputed value until you "
+            "resolve_conflict.\n"
             f"{formatted_facts}\n"
             "</resonant_memory>"
         )
+
+    def _quarantine_conflicts(self, results: List[Dict]):
+        """Split recall results into (kept, withheld_group_counts).
+
+        A fact is WITHHELD when quarantine is enabled AND it is in an unresolved
+        conflict (conflict_group_id set) AND its category is high-stakes
+        (importance_categories) AND it is NOT pinned. Pinned members stay (the
+        user-declared authority); non-high-stakes conflicts pass through unchanged.
+        Returns (kept_results, {group_id: withheld_count})."""
+        if not getattr(self, "_quarantine_high_stakes_conflicts", False):
+            return results, {}
+        hs = getattr(self._store, "importance_categories", set()) if self._store else set()
+        if not hs:
+            return results, {}
+        kept: List[Dict] = []
+        withheld: Dict[str, int] = {}
+        for r in results:
+            gid = r.get("conflict_group_id")
+            cat = (r.get("category") or "").strip().lower()
+            if gid and not r.get("pinned") and cat in hs:
+                withheld[gid] = withheld.get(gid, 0) + 1
+            else:
+                kept.append(r)
+        return kept, withheld
