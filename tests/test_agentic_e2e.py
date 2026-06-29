@@ -29,7 +29,7 @@ import urllib.request
 import _common as C
 
 AGENTS = [
-    ("gemma142k:latest", os.environ.get("RL_AGENT_EP_GEMMA", "http://localhost:11434")),
+    ("gemma4:12b", os.environ.get("RL_AGENT_EP_GEMMA", "http://localhost:11434")),
     ("nemotron-3-super:cloud", "http://localhost:11434"),
 ]
 

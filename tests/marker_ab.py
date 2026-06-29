@@ -21,7 +21,7 @@ safe rate per condition; floor/ceiling calibrate the model, the marker variants
 show which tag best moves it from floor toward ceiling.
 
 Run per model (parallelizable):
-  RL_AB_MODEL=gemma142k:latest RL_AB_ENDPOINT=http://<agent-host>:11434 python tests/marker_ab.py
+  RL_AB_MODEL=gemma4:12b RL_AB_ENDPOINT=http://<agent-host>:11434 python tests/marker_ab.py
   RL_AB_MODEL=nemotron-3-super:cloud RL_AB_ENDPOINT=http://localhost:11434 python tests/marker_ab.py
 """
 import json

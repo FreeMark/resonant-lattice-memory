@@ -192,7 +192,7 @@ The ideal setup runs the entire stack locally. When local inference capacity is 
 
 | Slot | Model | Endpoint | Why |
 |---|---|---|---|
-| Primary agent (hermes `model.*`) | `gemma142k:latest` (gemma4:12b @142k) | `http://<gpu1>:11434/v1` | local, fast, long-context, robust tool-calling |
+| Primary agent (hermes `model.*`) | `gemma4:12b` | `http://<gpu1>:11434/v1` | local, fast, long-context, robust tool-calling |
 | Memory/dream (`reason_model`) | `deepseek-v4-flash:cloud` (fast cloud winner) or `gemma4:26b` / `nemotron-3-ultra` (NVIDIA) | `http://<gpu2-or-cloud>:11434` | off hot path; fast + high quality extraction (cloud excellent when local limited; Nemotron thematic for NVIDIA) |
 | Embedding (`embed_model`) | `embeddinggemma:300m` | `http://<small-gpu>:11434` | best precision/byte, 768-d, keep-alive pinned |
 
@@ -206,7 +206,7 @@ Observed cost on the lowest $20 Ollama tier during full heavy E2E + tool-groundi
 
 | Slot | Model | Endpoint | Why |
 |---|---|---|---|
-| Primary agent (hermes `model.*`) | `gemma142k:latest` (gemma4:12b @142k) | `http://<local or small-gpu>:11434/v1` | local, fast, long-context, robust tool-calling |
+| Primary agent (hermes `model.*`) | `gemma4:12b` | `http://<local or small-gpu>:11434/v1` | local, fast, long-context, robust tool-calling |
 | Memory/dream (`reason_model`) | `deepseek-v4-flash:cloud` | `http://localhost:11434` (Ollama Cloud) | wicked fast + strong quality; extremely low usage; ideal when local resources are limited |
 | Embedding (`embed_model`) | `nomic-embed-text` or `embeddinggemma:300m` | `http://<local>:11434` | simple, pinned keep-alive, negligible cost |
 

@@ -31,5 +31,5 @@ need a model use Ollama; everything is reproducible.
 - `durability_results.md` — concurrency-safe (no lost writes, no deadlock) + crash/restart intact (ACID).
 
 **Agent behaviour (real models in the loop)**
-- `agentic_e2e_results.md` — grounded recall across a restart + rule-following + poison-resistance, scored on real model output (gemma142k + nemotron-3-super), 9/9 each.
+- `agentic_e2e_results.md` — grounded recall across a restart + rule-following + poison-resistance, scored on real model output (gemma4:12b + nemotron-3-super), 9/9 each.
 - `marker_ab_*.md` — A/B of the recall-block authority marker: `[PRIORITY]` makes the agent obey a pinned rule 15/15 vs 8/15 with no marker, on two model families.

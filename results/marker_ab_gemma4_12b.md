@@ -1,4 +1,4 @@
-# Marker A/B - gemma142k:latest
+# Marker A/B - gemma4:12b
 
 **Endpoint**: http://<agent-host>:11434  
 **Scenarios**: 15  
