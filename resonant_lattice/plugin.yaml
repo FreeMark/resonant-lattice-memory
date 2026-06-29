@@ -1,4 +1,4 @@
 name: resonant_lattice
-version: "1.1.0"
+version: "1.2.0"
 description: "Resonant Lattice Memory — neuroplastic Hebbian long-term memory: 3-tier resonance, HRR compositional encoding, entity graph, cycle-driven dream cycles (decay/promote/abstract/conflict-duel), anti-fabrication, pin/no-delete agent control, optional at-rest/homomorphic-blind encryption."
 hooks: [on_session_end, on_session_switch, on_pre_compress, on_delegation, on_memory_write]

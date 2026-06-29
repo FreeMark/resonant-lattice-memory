@@ -19,7 +19,7 @@ and the `LatticeStore` mixins (see MODULE_MAP.md / README.md):
 
 from __future__ import annotations
 
-__version__ = "1.1.0"  # Bumped during remediation (Phase 5: deployment hygiene)
+__version__ = "1.2.0"  # conflict containment (quarantine) + canonical-state layer
 
 import json
 import logging

@@ -108,7 +108,7 @@ print("Clean deploy done to", dst)
 `plugin.yaml` (ships with the plugin; declares the optional hooks it implements):
 ```yaml
 name: resonant_lattice
-version: "1.1.0"  # matches __version__ in __init__.py
+version: "1.2.0"  # matches __version__ in __init__.py
 description: "Resonant Lattice Memory — neuroplastic Hebbian long-term memory…"
 hooks: [on_session_end, on_session_switch, on_pre_compress, on_delegation, on_memory_write]
 ```
