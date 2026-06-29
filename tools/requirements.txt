@@ -1,0 +1,4 @@
+# Dependencies for the rl_monitor TUI (tools/rl_monitor.py).
+# Not required by the memory plugin itself — only to run the dashboard.
+# `rich` is pulled in transitively by textual.
+textual>=2.0   # tested on 8.2.7

@@ -35,7 +35,7 @@ from rich.table import Table
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import RichLog, Static
+from textual.widgets import DataTable, Footer, RichLog, Static
 
 
 # ───────────────────────── read-only store view ─────────────────────────
@@ -457,6 +457,37 @@ def _truncate(s: str, n: int) -> str:
     return (s[: n - 1] + "…") if len(s) > n else s
 
 
+def _spark(value: float, maxv: float, width: int = 10) -> str:
+    filled = int(round(width * value / maxv)) if maxv else 0
+    filled = max(0, min(width, filled))
+    return "█" * filled + "·" * (width - filled)
+
+
+def toggle_pin(db_path: str, fid: int) -> tuple[bool, str]:
+    """The ONE sanctioned write: flip a fact's `pinned` flag (which is exactly
+    what the store's pin action is — a column). Uses a brief, separate read-write
+    connection with a short busy timeout, so the monitoring connection stays
+    strictly read-only and reads never block the agent."""
+    if not os.path.exists(db_path):
+        return False, "db not found"
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path, timeout=2.0)
+        conn.execute("PRAGMA busy_timeout=2000")
+        row = conn.execute("SELECT pinned FROM semantic_facts WHERE id=?", (fid,)).fetchone()
+        if row is None:
+            return False, f"#{fid} not found"
+        newval = 0 if row[0] else 1
+        conn.execute("UPDATE semantic_facts SET pinned=? WHERE id=?", (newval, fid))
+        conn.commit()
+        return True, f"{'pinned' if newval else 'unpinned'} #{fid}"
+    except sqlite3.Error as e:
+        return False, f"pin failed: {e}"
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 # ───────────────────────── the dashboard ─────────────────────────
 _TIERS = [("short", "cyan"), ("mid", "yellow"), ("long", "green")]
 _TIER_COLOR = {"short": "cyan", "mid": "yellow", "long": "green"}
@@ -474,40 +505,50 @@ class MonitorApp(App):
     #conflicts { width: 1fr; border: round $accent; height: 1fr; padding: 0 1; margin: 1 0 0 1; }
     #health { border: round $accent; height: auto; padding: 0 1; margin: 1 0 0 0; }
     """
-    BINDINGS = [("q", "quit", "Quit")]
+    BINDINGS = [("p", "toggle_pin", "Pin/unpin"), ("q", "quit", "Quit")]
 
     def __init__(self, reader: MemoryReader, *, interval: float = 1.0,
-                 refresh_mode: str = "interval", demo: bool = False):
+                 refresh_mode: str = "interval", demo: bool = False,
+                 read_only: bool = False):
         super().__init__()
         self.reader = reader
         self.interval = interval
         self.refresh_mode = refresh_mode
         self.demo = demo
+        self.read_only = read_only
         self._last_dv: Optional[int] = None
         self._last_cycle: tuple[int, int] = (-1, -1)
         self._last_dream: int = -1
         self._prev_states: Optional[dict] = None
+        self._selected_fid: Optional[int] = None
+        self._fact_index: dict = {}
 
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Static(id="header")
             with Horizontal(id="midrow"):
                 yield Static(id="tiers")
-                yield Static(id="top")
+                yield DataTable(id="top", cursor_type="row", show_header=False,
+                                zebra_stripes=False)
             with Horizontal(id="lowrow"):
                 yield RichLog(id="feed", max_lines=1000, wrap=False,
                               highlight=False, markup=False)
                 yield Static(id="conflicts")
             yield Static(id="health")
+        yield Footer()
 
     def on_mount(self) -> None:
         self.query_one("#header", Static).border_title = "Resonant Lattice Monitor"
         self.query_one("#tiers", Static).border_title = "Tiers"
-        self.query_one("#top", Static).border_title = "Top resonance"
+        dt = self.query_one("#top", DataTable)
+        dt.border_title = "Top resonance"
+        dt.border_subtitle = "select a fact · p = pin/unpin"
+        dt.add_columns("res", "bar", "tier", "content")
         self.query_one("#feed", RichLog).border_title = "Activity (cycles)"
         self.query_one("#conflicts", Static).border_title = "Conflicts"
         self.query_one("#health", Static).border_title = "Health"
         self._refresh()
+        dt.focus()
         self.set_interval(self.interval, self._tick)
 
     def _tick(self) -> None:
@@ -542,7 +583,7 @@ class MonitorApp(App):
         self._last_dream = dc
         header.update(self._render_header(mc, dc, snap))
         tiers.update(self._render_tiers(snap))
-        self.query_one("#top", Static).update(self._render_top(self.reader.top_facts()))
+        self._refresh_top(self.reader.top_facts())
         self.query_one("#conflicts", Static).update(
             self._render_conflicts(self.reader.conflict_groups()))
         self.query_one("#health", Static).update(self._render_health(self.reader.health()))
@@ -664,10 +705,81 @@ class MonitorApp(App):
             t.append("   orphans ", style="dim"); t.append(str(h["orphans"]), style="white")
         return t
 
+    # ── interactive leaderboard ──
+    def _refresh_top(self, facts: list) -> None:
+        dt = self.query_one("#top", DataTable)
+        prev = self._selected_fid
+        dt.clear()
+        self._fact_index = {f["id"]: f for f in facts}
+        maxv = max([f["resonance"] for f in facts] + [1.0])
+        for f in facts:
+            color = _TIER_COLOR.get(f["tier"], "white")
+            star = "★" if f["pinned"] else " "
+            dt.add_row(
+                Text(f"{f['resonance']:.1f}", style=f"bold {color}"),
+                Text(_spark(f["resonance"], maxv), style=color),
+                Text(f"{star}{f['tier'][:4]}", style="bold blue" if f["pinned"] else color),
+                Text(_truncate(f["content"], 38), style="white"),
+                key=str(f["id"]),
+            )
+        order = [f["id"] for f in facts]
+        if prev in order:
+            try:
+                dt.move_cursor(row=order.index(prev), animate=False)
+            except Exception:
+                pass
+        self._update_detail()
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        key = event.row_key.value if event.row_key else None
+        self._selected_fid = int(key) if key is not None else None
+        self._update_detail()
+
+    def _update_detail(self) -> None:
+        dt = self.query_one("#top", DataTable)
+        f = self._fact_index.get(self._selected_fid) if self._selected_fid is not None else None
+        if f:
+            state = "PINNED" if f["pinned"] else "unpinned"
+            dt.border_subtitle = f"#{f['id']} · {f['tier']} · r{f['resonance']:.1f} · {state}"
+        else:
+            dt.border_subtitle = "select a fact · p = pin/unpin"
+
+    def action_toggle_pin(self) -> None:
+        if self.read_only:
+            self.notify("read-only mode: pin disabled", severity="warning")
+            return
+        fid = self._selected_fid
+        if fid is None:
+            self.notify("no fact selected", severity="warning")
+            return
+        ok, msg = toggle_pin(self.reader.db_path, fid)
+        self.notify(msg, severity="information" if ok else "error")
+        if ok:
+            self._refresh()
+
 
 # ───────────────────────── entry point ─────────────────────────
 def _default_db_path() -> str:
     return os.path.join(os.path.expanduser("~/.hermes"), "resonant_lattice_memory.db")
+
+
+def render_once(reader: MemoryReader, demo: bool) -> None:
+    """Print one static snapshot of the dashboard and exit (no live TUI). Handy
+    for a quick glance over SSH, a screenshot, or CI."""
+    from rich.console import Console
+    from rich.panel import Panel
+    console = Console()
+    if not reader.available():
+        console.print(f"[yellow]no memory DB at {reader.db_path}[/]")
+        return
+    app = MonitorApp(reader, demo=demo)
+    mc, dc = reader.cycle_counts()
+    snap = reader.snapshot()
+    console.print(Panel(app._render_header(mc, dc, snap), title="Resonant Lattice Monitor"))
+    console.print(Panel(app._render_tiers(snap), title="Tiers"))
+    console.print(Panel(app._render_top(reader.top_facts()), title="Top resonance"))
+    console.print(Panel(app._render_conflicts(reader.conflict_groups()), title="Conflicts"))
+    console.print(Panel(app._render_health(reader.health()), title="Health"))
 
 
 def main(argv=None) -> None:
@@ -683,21 +795,36 @@ def main(argv=None) -> None:
                          "memory clock advances (cycle)")
     ap.add_argument("--demo-interval", type=float, default=1.2,
                     help="seconds per synthetic cycle in --demo (default 1.2)")
+    ap.add_argument("--read-only", action="store_true",
+                    help="disable the pin/unpin write action (pure observation)")
+    ap.add_argument("--once", action="store_true",
+                    help="print one static snapshot and exit (no live TUI)")
     args = ap.parse_args(argv)
 
     stop = threading.Event()
+    sim = None
     if args.demo:
         tmpdir = tempfile.mkdtemp(prefix="rl_monitor_demo_")
         db_path = os.path.join(tmpdir, "demo_memory.db")
         sim = DemoSimulator(db_path)
-        sim.step()  # one cycle so the board isn't empty at launch
-        threading.Thread(
-            target=sim.run_forever, args=(args.demo_interval, stop), daemon=True).start()
+        for _ in range(8 if args.once else 1):
+            sim.step()  # seed enough state to show at launch
     else:
         db_path = args.db or _default_db_path()
 
     reader = MemoryReader(db_path)
-    app = MonitorApp(reader, interval=args.interval, refresh_mode=args.refresh, demo=args.demo)
+    if args.once:
+        try:
+            render_once(reader, args.demo)
+        finally:
+            reader.close()
+        return
+
+    if sim is not None:
+        threading.Thread(
+            target=sim.run_forever, args=(args.demo_interval, stop), daemon=True).start()
+    app = MonitorApp(reader, interval=args.interval, refresh_mode=args.refresh,
+                     demo=args.demo, read_only=args.read_only)
     try:
         app.run()
     finally:

@@ -26,6 +26,7 @@ build and harden it.
 | `resonant_lattice/` | The plugin (runtime code, `plugin.yaml`, `recommended_config.yaml`, architecture docs, the 97-test unit suite, the eval harness). |
 | `tests/` | The test suite (substrate → behaviour → scale → durability), plus the live end-to-end exercise `live_e2e.py`. |
 | `results/` | All test evidence in one place: per-test outputs, metrics (`.jsonl`), model-comparison summaries, and the single-file [`CONSOLIDATED_RESULTS.md`](results/CONSOLIDATED_RESULTS.md). |
+| `tools/` | [`rl_monitor`](tools/README.md) — a live, read-only `nvtop`-style TUI to watch the memory work (tiers, cycle-by-cycle activity feed, conflicts, health). `python tools/rl_monitor.py --demo`. |
 | `resonant_lattice/DEPLOY_HERMES.md` | The exact, field-tested hermes install procedure. |
 | `resonant_lattice/MODULE_MAP.md` · `MEMORY_ROADMAP.md` | Architecture + design. |
 
