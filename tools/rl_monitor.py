@@ -34,7 +34,7 @@ from typing import Optional
 from rich.table import Table
 from rich.text import Text
 from textual.app import App, ComposeResult
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.widgets import RichLog, Static
 
 
@@ -177,6 +177,66 @@ class MemoryReader:
         except sqlite3.Error:
             pass
         return out
+
+    def top_facts(self, limit: int = 8) -> list:
+        """The loudest-ringing live facts (highest resonance), excluding history."""
+        out = []
+        try:
+            for r in self._connect().execute(
+                "SELECT id, content, tier, resonance_count, pinned FROM semantic_facts "
+                "WHERE tier != 'superseded' ORDER BY resonance_count DESC, id ASC LIMIT ?",
+                (limit,),
+            ):
+                out.append({
+                    "id": r["id"], "content": r["content"], "tier": r["tier"],
+                    "resonance": r["resonance_count"] or 0.0, "pinned": r["pinned"],
+                })
+        except sqlite3.Error:
+            pass
+        return out
+
+    def conflict_groups(self, limit: int = 6) -> list:
+        """Active (unresolved) conflict groups with their contradicting contents."""
+        out = []
+        try:
+            for r in self._connect().execute(
+                "SELECT conflict_group_id AS g, COUNT(*) AS n, "
+                "       group_concat(substr(content, 1, 38), ' ⟂ ') AS items "
+                "FROM semantic_facts WHERE conflict_group_id IS NOT NULL "
+                "GROUP BY g ORDER BY n DESC LIMIT ?",
+                (limit,),
+            ):
+                out.append({"group": r["g"], "n": r["n"], "items": r["items"] or ""})
+        except sqlite3.Error:
+            pass
+        return out
+
+    def health(self, near_cap: float = 49.0) -> dict:
+        """Cheap drift signals: category mix, superseded history, resonance
+        saturation, and (if the entity graph exists) orphan entities."""
+        conn = self._connect()
+        h = {"by_category": {}, "superseded": 0, "near_cap": 0, "max_res": 0.0, "orphans": None}
+        try:
+            for r in conn.execute(
+                "SELECT category, COUNT(*) AS c FROM semantic_facts "
+                "WHERE tier != 'superseded' GROUP BY category"
+            ):
+                h["by_category"][r["category"] or "?"] = r["c"]
+        except sqlite3.Error:
+            pass
+        h["superseded"] = self._scalar(
+            conn, "SELECT COUNT(*) FROM semantic_facts WHERE tier = 'superseded'")
+        h["near_cap"] = self._scalar(
+            conn, "SELECT COUNT(*) FROM semantic_facts WHERE resonance_count >= ?", (near_cap,))
+        h["max_res"] = self._scalar(conn, "SELECT MAX(resonance_count) FROM semantic_facts") or 0.0
+        try:
+            h["orphans"] = conn.execute(
+                "SELECT COUNT(*) FROM entities WHERE entity_id NOT IN "
+                "(SELECT DISTINCT entity_id FROM fact_entities)"
+            ).fetchone()[0]
+        except sqlite3.Error:
+            h["orphans"] = None  # no entity-graph table on this store
+        return h
 
 
 # ───────────────────────── synthetic demo source ─────────────────────────
@@ -392,16 +452,27 @@ def diff_states(prev: dict, cur: dict) -> dict:
     }
 
 
+def _truncate(s: str, n: int) -> str:
+    s = s or ""
+    return (s[: n - 1] + "…") if len(s) > n else s
+
+
 # ───────────────────────── the dashboard ─────────────────────────
 _TIERS = [("short", "cyan"), ("mid", "yellow"), ("long", "green")]
+_TIER_COLOR = {"short": "cyan", "mid": "yellow", "long": "green"}
 
 
 class MonitorApp(App):
     CSS = """
     Screen { background: $surface; }
-    #header { border: round $accent; height: auto; padding: 0 1; margin: 0 0 1 0; }
-    #tiers  { border: round $accent; height: auto; padding: 1 1; }
-    #feed   { border: round $accent; height: 1fr; padding: 0 1; margin: 1 0 0 0; }
+    #header { border: round $accent; height: auto; padding: 0 1; }
+    #midrow { height: auto; }
+    #tiers  { width: 2fr; border: round $accent; height: auto; padding: 1 1; margin: 1 0 0 0; }
+    #top    { width: 3fr; border: round $accent; height: auto; padding: 0 1; margin: 1 0 0 1; }
+    #lowrow { height: 1fr; }
+    #feed   { width: 2fr; border: round $accent; height: 1fr; padding: 0 1; margin: 1 0 0 0; }
+    #conflicts { width: 1fr; border: round $accent; height: 1fr; padding: 0 1; margin: 1 0 0 1; }
+    #health { border: round $accent; height: auto; padding: 0 1; margin: 1 0 0 0; }
     """
     BINDINGS = [("q", "quit", "Quit")]
 
@@ -420,14 +491,22 @@ class MonitorApp(App):
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Static(id="header")
-            yield Static(id="tiers")
-            yield RichLog(id="feed", max_lines=1000, wrap=False,
-                          highlight=False, markup=False)
+            with Horizontal(id="midrow"):
+                yield Static(id="tiers")
+                yield Static(id="top")
+            with Horizontal(id="lowrow"):
+                yield RichLog(id="feed", max_lines=1000, wrap=False,
+                              highlight=False, markup=False)
+                yield Static(id="conflicts")
+            yield Static(id="health")
 
     def on_mount(self) -> None:
         self.query_one("#header", Static).border_title = "Resonant Lattice Monitor"
         self.query_one("#tiers", Static).border_title = "Tiers"
+        self.query_one("#top", Static).border_title = "Top resonance"
         self.query_one("#feed", RichLog).border_title = "Activity (cycles)"
+        self.query_one("#conflicts", Static).border_title = "Conflicts"
+        self.query_one("#health", Static).border_title = "Health"
         self._refresh()
         self.set_interval(self.interval, self._tick)
 
@@ -463,6 +542,10 @@ class MonitorApp(App):
         self._last_dream = dc
         header.update(self._render_header(mc, dc, snap))
         tiers.update(self._render_tiers(snap))
+        self.query_one("#top", Static).update(self._render_top(self.reader.top_facts()))
+        self.query_one("#conflicts", Static).update(
+            self._render_conflicts(self.reader.conflict_groups()))
+        self.query_one("#health", Static).update(self._render_health(self.reader.health()))
 
     def _emit_events(self, mc: int, dc: int, d: dict) -> None:
         dream = dc > self._last_dream
@@ -538,6 +621,48 @@ class MonitorApp(App):
             bar = Text("█" * filled + "·" * (width - filled), style=color)
             tbl.add_row(Text(name, style=f"bold {color}"), bar, Text(f"{v:,}", style=color))
         return tbl
+
+    def _render_top(self, facts: list) -> Table:
+        if not facts:
+            return Text("(no facts yet)", style="dim")
+        maxv = max([f["resonance"] for f in facts] + [1.0])
+        tbl = Table.grid(padding=(0, 1))
+        tbl.add_column(justify="right")  # resonance
+        tbl.add_column()                 # mini bar
+        tbl.add_column()                 # tier + pin
+        tbl.add_column()                 # content
+        for f in facts:
+            color = _TIER_COLOR.get(f["tier"], "white")
+            filled = int(round(10 * f["resonance"] / maxv)) if maxv else 0
+            spark = Text("█" * filled + "·" * (10 - filled), style=color)
+            star = "★" if f["pinned"] else " "
+            tag = Text(f"{star}{f['tier'][:4]}", style=f"bold blue" if f["pinned"] else color)
+            content = Text(_truncate(f["content"], 40),
+                           style="white" if not f["pinned"] else "bold white")
+            tbl.add_row(Text(f"{f['resonance']:.1f}", style=f"bold {color}"), spark, tag, content)
+        return tbl
+
+    def _render_conflicts(self, groups: list) -> Text:
+        if not groups:
+            return Text("✓ no active conflicts", style="green")
+        t = Text()
+        for g in groups:
+            t.append(f"⚔ {g['group']} ", style="bold red")
+            t.append(f"({g['n']})\n", style="red")
+            t.append("  " + _truncate(g["items"], 58) + "\n", style="dim")
+        return t
+
+    def _render_health(self, h: dict) -> Text:
+        cats = sorted(h["by_category"].items(), key=lambda kv: -kv[1])[:6]
+        t = Text()
+        t.append("categories ", style="dim")
+        t.append("  ".join(f"{k} {v}" for k, v in cats) or "—", style="white")
+        t.append("   │   superseded ", style="dim"); t.append(str(h["superseded"]), style="white")
+        t.append("   near-cap ", style="dim"); t.append(str(h["near_cap"]), style="white")
+        t.append("   max-res ", style="dim"); t.append(f"{h['max_res']:.1f}", style="white")
+        if h["orphans"] is not None:
+            t.append("   orphans ", style="dim"); t.append(str(h["orphans"]), style="white")
+        return t
 
 
 # ───────────────────────── entry point ─────────────────────────
