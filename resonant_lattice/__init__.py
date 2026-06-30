@@ -19,7 +19,7 @@ and the `LatticeStore` mixins (see MODULE_MAP.md / README.md):
 
 from __future__ import annotations
 
-__version__ = "1.2.0"  # conflict containment (quarantine) + canonical-state layer
+__version__ = "1.2.1"  # fail-closed containment + search gating + semantic batch rollback
 
 import json
 import logging
