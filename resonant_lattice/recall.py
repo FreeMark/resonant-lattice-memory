@@ -44,14 +44,15 @@ class RecallMixin:
             return ""
         sid = session_id or self._session_id
         cached = self._prefetch_cache.pop(sid, None)
-        # Use the background recall as a proxy for this turn's needs. It was
-        # computed from the previous user message, which is a strong predictor
-        # of the next turn's topic — this is what makes the latency hiding real
-        # (the old exact-match guard never fired, so the warm path was dead).
-        # Exact-match still short-circuits; otherwise we accept the proxy when
-        # it produced something, and only recompute synchronously on a miss.
-        if cached is not None and (cached[0] == query or cached[1]):
-            return cached[1]
+        # The background recall is a latency-hiding proxy computed from the PREVIOUS
+        # message. Exact-match always short-circuits. Otherwise reuse the proxy ONLY
+        # when the new query is on the same topic (lexical-overlap gate): a topic
+        # shift must NOT inject stale, high-confidence memory from the prior turn —
+        # so on low overlap we recompute synchronously for the current query.
+        if cached is not None:
+            cached_q, cached_block = cached
+            if cached_q == query or (cached_block and self._prefetch_proxy_ok(query, cached_q)):
+                return cached_block
         try:
             return self._compute_prefetch(query, sid)
         except Exception as e:
@@ -78,6 +79,21 @@ class RecallMixin:
 
         threading.Thread(target=_bg, daemon=True).start()
 
+
+    def _prefetch_proxy_ok(self, query: str, cached_query: str) -> bool:
+        """Reuse the previous turn's (proxy) recall only when the new query shares
+        enough vocabulary with the one it was computed from — a cheap topic-shift
+        guard so stale cross-topic memory isn't injected. Jaccard over word tokens
+        vs `_prefetch_proxy_min_overlap` (0 disables the gate = always reuse)."""
+        thr = getattr(self, "_prefetch_proxy_min_overlap", 0.3)
+        if thr <= 0:
+            return True
+        a = set(re.findall(r"\w+", (query or "").lower()))
+        b = set(re.findall(r"\w+", (cached_query or "").lower()))
+        if not a or not b:
+            return False
+        union = len(a | b)
+        return union > 0 and (len(a & b) / union) >= thr
 
     def _apply_recall_reinforcement(self, results: List[Dict]) -> None:
         """Bump resonance for recalled facts (once per fact per dream-cycle window).

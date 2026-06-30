@@ -154,14 +154,15 @@ class FactsMixin:
                     INSERT INTO semantic_facts
                     (content, category, tier, resonance_count, source_session, hrr_vector,
                      source_quote, source_ref, quote_status,
-                     learned_at_cycle, last_confirmed_cycle, max_resonance_seen)
-                    VALUES (?, ?, 'short', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     learned_at_cycle, last_confirmed_cycle, max_resonance_seen, batch_id)
+                    VALUES (?, ?, 'short', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (content, category, effective_initial, source_session,
                      hrr.phases_to_bytes(hrr_vector)
                      if (hrr_vector is not None and hrr is not None) else None,
                      source_quote, source_ref, quote_status,
-                     cur_cycle, cur_cycle, effective_initial),
+                     cur_cycle, cur_cycle, effective_initial,
+                     getattr(self, "_active_batch_id", None)),
                 )
                 fact_id = cur.lastrowid
                 # Store embedding (skipped in degraded mode — vec dim mismatch,

@@ -54,13 +54,14 @@ from store_identity import IdentityMixin
 from store_narrative import NarrativeMixin
 from store_blind import BlindMixin
 from store_canonical import CanonicalMixin
+from store_batches import BatchMixin
 
 logger = logging.getLogger(__name__)
 
 
 class LatticeStore(SchemaMixin, FactsMixin, DreamCycleMixin, AbstractionMixin,
                    EpisodesMixin, EntitiesMixin, RelationsMixin, IdentityMixin,
-                   NarrativeMixin, BlindMixin, CanonicalMixin):
+                   NarrativeMixin, BlindMixin, CanonicalMixin, BatchMixin):
  
     def __init__(
         self,

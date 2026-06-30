@@ -179,6 +179,7 @@ class SchemaMixin:
         self._migrate_add_abstraction_sources()
         self._migrate_add_tool_episodes()
         self._migrate_add_canonical_facts()
+        self._migrate_add_write_batches()
 
 
     def _migrate_add_columns(self) -> None:
@@ -956,6 +957,49 @@ class SchemaMixin:
                 self._conn.commit()
             except Exception as e:
                 logger.debug("Migration (canonical_facts) failed or already exists: %s", e)
+
+
+    def _migrate_add_write_batches(self) -> None:
+        """Create the write-batch provenance table + semantic_facts.batch_id (idempotent).
+
+        Semantic ROLLBACK: a consolidation epoch or dream cycle opens a 'batch' and every
+        fact it WRITES is stamped with batch_id, so a bad generative run (weak extraction
+        model, malformed transcript, model regression) can be reviewed and rolled back as a
+        unit instead of by manual row cleanup. write_batches records phase / model / session /
+        config_hash + the logical cycle and a status; rollback flips the status and deletes the
+        batch's non-pinned facts (pinned = a deliberate user lock, kept). batch_id is a plain
+        nullable INTEGER (NULL = a normal user/agent write, not part of a batch). Created
+        unconditionally like the sibling table-only migrations; cycle-stamped, never wall-clock."""
+        with self._lock:
+            try:
+                self._conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS write_batches (
+                        batch_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                        phase          TEXT NOT NULL,
+                        source_session TEXT,
+                        model          TEXT,
+                        config_hash    TEXT,
+                        created_cycle  INTEGER,
+                        n_writes       INTEGER NOT NULL DEFAULT 0,
+                        status         TEXT NOT NULL DEFAULT 'active',
+                        created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        closed_at      TIMESTAMP,
+                        rolled_back_at TIMESTAMP
+                    );
+                """)
+                cols = {
+                    r["name"]
+                    for r in self._conn.execute("PRAGMA table_info(semantic_facts)").fetchall()
+                }
+                if "batch_id" not in cols:
+                    self._conn.execute("ALTER TABLE semantic_facts ADD COLUMN batch_id INTEGER")
+                    logger.info("Migration: added semantic_facts.batch_id")
+                self._conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_semantic_facts_batch "
+                    "ON semantic_facts(batch_id) WHERE batch_id IS NOT NULL")
+                self._conn.commit()
+            except Exception as e:
+                logger.debug("Migration (write_batches) failed or already exists: %s", e)
 
 
     def _stamp_meta(self) -> None:

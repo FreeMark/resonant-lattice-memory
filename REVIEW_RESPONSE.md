@@ -93,3 +93,53 @@ delete, pinned protection, ACID durability, and recall@1 = recall@10 = 1.0 to ~4
 live rows. The work above strengthens the *last mile* (acting on memory), which is a
 responsibility shared between the store and the downstream model — the store now does
 more of its share.
+
+---
+
+# Response to the second review ("Build Plan Breaker")
+
+A follow-up red-team review graded the revision against *production operational memory
+for money agents*. Its recurring lens — *"the safe controls exist but aren't
+fail-closed"* — was right and drove another round of changes.
+
+## Shipped (this revision)
+
+- **Fail-closed conflict quarantine** (their Critical 1). `quarantine_high_stakes_conflicts`
+  now defaults **ON**; disabling it is an explicit opt-out ("unsafe mode"). Blast radius is
+  small — it only affects high-stakes + unresolved + unpinned facts; pinned authority is
+  never withheld.
+- **Explicit search is contained too** (Critical 2). Quarantine previously applied only to
+  the autonomous prefetch block; it now also gates the `search` tool action — the contested
+  value is withheld and replaced with conflict metadata, closing the "agent searches and
+  acts on the disputed value" hole. `get_fact` by exact ID is never gated.
+- **Semantic batch rollback** (Critical 3). Every consolidation epoch and dream cycle opens
+  a write batch; the facts it writes are stamped with a `batch_id`. New tools `list_batches`
+  (and `list_batches` + `batch_id` = the diff) and `rollback_batch` let an operator undo a
+  bad generative run as a unit (pinned facts are kept). Validated end-to-end: a real
+  extraction epoch wrote 3 facts → rolled back cleanly.
+- **Action-correctness benchmark** — turns containment into a *measured* guarantee
+  (`tests/test_action_correctness.py`): the contested value is provably absent from the real
+  recall block (HARD), with the downstream unsafe-action rate reported (SOFT).
+- **Prefetch staleness guard** (Workflow 2) — the previous-turn recall proxy is reused only
+  when the new query shares enough vocabulary, so a topic shift can't inject stale memory.
+- **Encryption readiness matrix** (Operational 1) — an explicit plaintext / at-rest / blind /
+  unsupported-composition table with fail-closed semantics, in the README.
+
+Substrate test suite is now **107 passing**.
+
+## Boundary (where I disagree)
+
+Several asks — *deterministic pre-action enforcement gates*, *pinned-as-hard-policy* — ask
+the **memory layer** to enforce what the agent does at the spend/credential boundary. That
+is the **host runtime's** job. A memory plugin's share is strong, deterministic *signals*
+(withhold, `[WITHHELD]`, pinned, canonical), which the host composes into hard gates;
+search containment (above) is the store's share, and it's done. Conflating the two
+overstates what a memory plugin should own.
+
+## Tracked as roadmap (real, larger, different product)
+
+Operator review *queue* UX (the read-only `rl_monitor` TUI is step one), typed extraction
+schemas + deterministic validators, full entity-identity resolution (aliases/merge/split),
+machine-readable health thresholds + external alerting, and 250k–1M-row + backup/restore
+benchmarks. These move the project from *validated substrate with operational controls*
+toward a production data platform; they are tracked, not pretended-done.

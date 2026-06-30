@@ -151,6 +151,20 @@ SQLCipher + a homomorphic "blind" recall tier). It needs extra dependencies
 (`sqlcipher3`, `argon2-cffi`, a real OpenFHE build) and is **not required** for the
 core memory system. Treat it as a preview.
 
+**Readiness matrix** — be explicit about what each mode does and does not guarantee:
+
+| Mode | At-rest on disk | Recall | Extra deps | Status |
+|---|---|---|---|---|
+| **plaintext** (default) | plaintext SQLite | full hybrid | none beyond core | stable, fully tested |
+| **at-rest** | SQLCipher-encrypted (opaque without the key) | full (decrypted in memory) | `sqlcipher3`, `argon2-cffi` | experimental; at-rest byte-opacity is unit-checked |
+| **blind (HE)** | **plaintext-at-rest in this build** unless composed with at-rest | homomorphic blind recall | a real OpenFHE build | preview; node-validated only, not a turnkey install |
+| **blind + at-rest** | encrypted | blind | all of the above | **not a turnkey composition yet** |
+
+Failure mode is **fail-closed**: if a requested encrypted binding is unavailable the
+provider declines rather than silently falling back to plaintext (no false sense of
+encryption). Recovery is your own key custody (`*.db.keys`) — lose the key, lose the DB.
+Do **not** rely on the blind tier alone for at-rest confidentiality in this build.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

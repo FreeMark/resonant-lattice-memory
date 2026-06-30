@@ -371,7 +371,8 @@ CONFIG_SCHEMA = [
                     "nudges, never destroys. Set False to disable the heuristic.",
      "default": True},
     {"key": "quarantine_high_stakes_conflicts",
-     "description": "Conflict CONTAINMENT (default OFF; recommended ON for money/compliance agents). When a "
+     "description": "Conflict CONTAINMENT (default ON, fail-closed; set False for an explicit 'unsafe mode'). "
+                    "When a "
                     "fact is in an UNRESOLVED conflict (conflict_group_id set) AND its category is "
                     "high-stakes (see importance_categories) AND it is NOT pinned, withhold it from the "
                     "autonomous recall block and surface a [WITHHELD] notice instead of ranking it. Turns "
@@ -379,8 +380,17 @@ CONFIG_SCHEMA = [
                     "contested high-stakes value before it is resolved'. A PINNED member is the user-declared "
                     "authority and is never withheld; non-high-stakes conflicts are untouched (still ranked + "
                     "[CONFLICT LOCK]-tagged). Recall-path only (the explicit search action is unaffected); "
-                    "the facts stay in the store and are still flagged for resolve_conflict.",
-     "default": False},
+                    "the facts stay in the store and are still flagged for resolve_conflict. Applies to the "
+                    "autonomous recall block AND the explicit `search` action (the contained agent surfaces); "
+                    "get_fact by exact ID is never gated.",
+     "default": True},
+    {"key": "prefetch_proxy_min_overlap",
+     "description": "Topic-shift guard for the latency-hiding prefetch proxy. The background recall computed "
+                    "from the PREVIOUS message is reused for the current turn only when their queries share "
+                    "at least this Jaccard word overlap (0.0-1.0); below the bar (a topic shift) recall is "
+                    "recomputed synchronously so stale cross-topic memory isn't injected as high-confidence "
+                    "candidates. 0 disables the gate (always reuse the proxy).",
+     "default": 0.3},
 ]
 
 # Central source of truth for all runtime defaults.

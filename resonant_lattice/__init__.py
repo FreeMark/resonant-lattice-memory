@@ -216,6 +216,11 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         self._quarantine_high_stakes_conflicts = bool(
             self._config.get("quarantine_high_stakes_conflicts",
                              DEFAULTS["quarantine_high_stakes_conflicts"]))
+        # Topic-shift guard for the latency-hiding prefetch proxy: only reuse the
+        # previous turn's recall when the current query shares this much vocabulary.
+        self._prefetch_proxy_min_overlap = float(
+            self._config.get("prefetch_proxy_min_overlap",
+                             DEFAULTS["prefetch_proxy_min_overlap"]))
         # Phase 1b supersedion (default ON): a conflict loser bled to 0 is retired
         # as tier='superseded' history (superseded_by=winner) BEFORE prune instead
         # of being deleted — a memory is the history of what you believed. Set

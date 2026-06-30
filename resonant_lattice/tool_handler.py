@@ -85,7 +85,7 @@ LATTICE_STORE_SCHEMA = {
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["add", "search", "get_fact", "fact_history", "feedback", "pin", "unpin", "request_abstraction", "force_consolidation", "force_dream_cycle", "stats", "memory_audit", "pending_conflicts", "resolve_conflict", "facts_about_entity", "entities_for_fact", "related_entities", "explain_abstraction", "tool_history", "relational", "infer", "get_self_model", "set_self_model", "narrative", "set_canonical", "get_canonical"],
+                "enum": ["add", "search", "get_fact", "fact_history", "feedback", "pin", "unpin", "request_abstraction", "force_consolidation", "force_dream_cycle", "stats", "memory_audit", "pending_conflicts", "resolve_conflict", "facts_about_entity", "entities_for_fact", "related_entities", "explain_abstraction", "tool_history", "relational", "infer", "get_self_model", "set_self_model", "narrative", "set_canonical", "get_canonical", "list_batches", "rollback_batch"],
             },
             "content": {"type": "string", "description": "Fact content (for add/feedback)"},
             "query": {"type": "string", "description": "Search query, entity/tool name for entity-graph actions, or a natural-language relational question (relational)"},
@@ -102,6 +102,7 @@ LATTICE_STORE_SCHEMA = {
             "entity": {"type": "string", "description": "Entity name (facts_about_entity/related_entities)"},
             "tool_name": {"type": "string", "description": "Tool name to query history for (tool_history)"},
             "abstract_id": {"type": "integer", "description": "Abstraction fact id (explain_abstraction)"},
+            "batch_id": {"type": "integer", "description": "Write-batch id (list_batches with batch_id = its facts; rollback_batch)"},
             "tier": {"type": "string", "enum": ["short", "mid", "long"], "description": "Optional tier filter"},
             "limit": {"type": "integer", "description": "Max results to return"},
             "min_shared": {"type": "integer", "description": "Min shared facts for related_entities co-occurrence"},
@@ -127,7 +128,7 @@ class ToolHandlerMixin:
             )
 
         action = args.get("action")
-        if action in ("add", "feedback", "pin", "unpin", "request_abstraction", "remove", "resolve_conflict", "force_consolidation", "force_dream_cycle", "set_self_model", "set_canonical") \
+        if action in ("add", "feedback", "pin", "unpin", "request_abstraction", "remove", "resolve_conflict", "force_consolidation", "force_dream_cycle", "set_self_model", "set_canonical", "rollback_batch") \
                 and not self._write_enabled:
             return tool_error("Memory is read-only in this agent context (non-primary).")
         try:
@@ -154,8 +155,22 @@ class ToolHandlerMixin:
                 if not query:
                     return tool_error("Missing required parameter: query")
                 results = self._retriever.search(query, limit=10)
+                # Conflict CONTAINMENT (the explicit search surface is contained too,
+                # not just autonomous prefetch): withhold high-stakes unresolved-conflict
+                # unpinned values and return only the conflict metadata, so an agent that
+                # searches when prefetch is insufficient still cannot read a disputed
+                # high-stakes value before resolution. No-op when quarantine is off.
+                results, withheld = self._quarantine_conflicts(results)
                 self._apply_recall_reinforcement(results)
-                return json.dumps({"results": results, "count": len(results)})
+                resp = {"results": results, "count": len(results)}
+                if withheld:
+                    resp["withheld_conflicts"] = [
+                        {"conflict_group_id": g, "withheld": n}
+                        for g, n in sorted(withheld.items())]
+                    resp["notice"] = ("High-stakes facts in unresolved conflict(s) were "
+                                      "WITHHELD; call pending_conflicts / resolve_conflict "
+                                      "before acting on the disputed value.")
+                return json.dumps(resp)
 
             elif action == "get_fact":
                 # Exact-ID lookup. The return shape is DELIBERATELY distinct from
@@ -439,6 +454,23 @@ class ToolHandlerMixin:
                     return json.dumps({"canonical": rec, "found": rec is not None})
                 recs = self._store.list_canonical(category=args.get("category"))
                 return json.dumps({"canonical": recs, "count": len(recs)})
+
+            elif action == "list_batches":
+                # Semantic-rollback provenance: list recent consolidation/dream write
+                # batches, or (with batch_id) the facts a batch wrote (the diff surface).
+                bid = args.get("batch_id")
+                if bid is not None:
+                    return json.dumps({"batch_id": int(bid),
+                                       "facts": self._store.get_batch_facts(int(bid))})
+                return json.dumps({"batches": self._store.list_write_batches(
+                    limit=int(args.get("limit", 50)))})
+
+            elif action == "rollback_batch":
+                # Undo a bad consolidation/dream batch's NEW facts (pinned kept). Write-gated.
+                bid = args.get("batch_id")
+                if bid is None:
+                    return tool_error("rollback_batch requires batch_id")
+                return json.dumps(self._store.rollback_write_batch(int(bid)))
 
             else:
                 return tool_error(f"Unknown action: {action}")

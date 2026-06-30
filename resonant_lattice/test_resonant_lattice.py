@@ -2969,6 +2969,17 @@ def test_quarantine_prefetch_withholds_and_signals():
     assert "auto-approval enabled" in block_off      # OFF -> contested fact returns
 
 
+def test_prefetch_proxy_topic_shift_gate():
+    app = _bare_recall(_prefetch_proxy_min_overlap=0.3)
+    # same topic -> reuse the previous-turn proxy
+    assert app._prefetch_proxy_ok("can I auto approve this spend", "auto approve a spend now")
+    # topic shift -> recompute (don't inject stale cross-topic memory)
+    assert not app._prefetch_proxy_ok("what is the weather in Paris today", "auto approve a spend")
+    # threshold 0 disables the gate (always reuse)
+    app._prefetch_proxy_min_overlap = 0.0
+    assert app._prefetch_proxy_ok("completely unrelated text", "auto approve a spend")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Canonical-state projection (current_value layer over the lattice)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3049,6 +3060,86 @@ def test_store_canonical_missing_list_and_review():
         assert s.review_canonical("missing", "reviewed") is False
     finally:
         s.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Semantic write-batch provenance + rollback
+# ─────────────────────────────────────────────────────────────────────────────
+def test_store_write_batch_stamp_and_rollback():
+    s = _fresh_store()
+    try:
+        # a write OUTSIDE any batch is unstamped (batch_id NULL)
+        _, a = s.add_or_reinforce_fact("alpha one", _emb(s, "alpha one"), "general", "u")
+        assert s._conn.execute(
+            "SELECT batch_id FROM semantic_facts WHERE id=?", (a,)).fetchone()[0] is None
+        # open a batch -> writes are stamped
+        bid = s.begin_write_batch("dream", model="m1", cycle=5)
+        _, b = s.add_or_reinforce_fact("beta two", _emb(s, "beta two"), "general", "u")
+        _, c = s.add_or_reinforce_fact("gamma three", _emb(s, "gamma three"), "general", "u")
+        s.set_pinned(c, True)        # a pinned fact in the batch must survive rollback
+        s.end_write_batch()
+        assert {f["id"] for f in s.get_batch_facts(bid)} == {b, c}
+        this = [x for x in s.list_write_batches() if x["batch_id"] == bid][0]
+        assert this["phase"] == "dream" and this["n_writes"] == 2 and this["status"] == "closed"
+        # rollback: deletes non-pinned batch facts; keeps pinned + the pre-batch fact
+        res = s.rollback_write_batch(bid)
+        assert res["deleted"] == 1 and res["kept_pinned"] == 1, res
+        assert s.get_fact(a) is not None      # pre-batch fact untouched
+        assert s.get_fact(b) is None          # rolled back
+        assert s.get_fact(c) is not None      # pinned -> kept
+        after = [x for x in s.list_write_batches() if x["batch_id"] == bid][0]
+        assert after["status"] == "rolled_back"
+        assert "error" in s.rollback_write_batch(999999)   # unknown batch
+    finally:
+        s.close()
+
+
+def test_store_write_batch_empty_autocleanup():
+    s = _fresh_store()
+    try:
+        bid = s.begin_write_batch("consolidation", cycle=1)
+        s.end_write_batch()           # wrote nothing -> the batch row auto-cleans
+        gone = s._conn.execute(
+            "SELECT COUNT(*) FROM write_batches WHERE batch_id=?", (bid,)).fetchone()[0]
+        assert gone == 0, "empty batch should leave no provenance noise"
+    finally:
+        s.close()
+
+
+def test_store_write_batch_tool_dispatch():
+    import json
+    import types as _types
+    if "tools.registry" not in sys.modules:
+        _pkg = _types.ModuleType("tools")
+        _reg = _types.ModuleType("tools.registry")
+        _reg.tool_error = lambda m: json.dumps({"error": m})
+        _pkg.registry = _reg
+        sys.modules["tools"] = _pkg
+        sys.modules["tools.registry"] = _reg
+    th = _load("tool_handler")
+    h = th.ToolHandlerMixin.__new__(th.ToolHandlerMixin)
+    h._store = _fresh_store()
+    h._retriever = object()
+    h._write_enabled = True
+    h._memory_cycle = 3
+    try:
+        bid = h._store.begin_write_batch("dream", cycle=3)
+        h._store.add_or_reinforce_fact("xfact one", _emb(h._store, "xfact one"), "general", "u")
+        h._store.add_or_reinforce_fact("yfact two", _emb(h._store, "yfact two"), "general", "u")
+        h._store.end_write_batch()
+        listing = json.loads(h.handle_tool_call("lattice_store", {"action": "list_batches"}))
+        assert any(b["batch_id"] == bid for b in listing["batches"]), listing
+        facts = json.loads(h.handle_tool_call(
+            "lattice_store", {"action": "list_batches", "batch_id": bid}))
+        assert len(facts["facts"]) == 2
+        res = json.loads(h.handle_tool_call(
+            "lattice_store", {"action": "rollback_batch", "batch_id": bid}))
+        assert res["deleted"] == 2 and res["status"] == "rolled_back", res
+        h._write_enabled = False
+        denied = h.handle_tool_call("lattice_store", {"action": "rollback_batch", "batch_id": bid})
+        assert "read-only" in denied.lower()
+    finally:
+        h._store.close()
 
 
 if __name__ == "__main__":

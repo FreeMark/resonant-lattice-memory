@@ -107,10 +107,11 @@ plugins:
     # tier cap, so it does not reintroduce unbounded growth.
     importance_decay_discount: 0.6
 
-    # Conflict CONTAINMENT — RECOMMENDED ON for money/compliance agents. When a
-    # high-stakes fact (policy/compliance/spend/financial/…) is in an UNRESOLVED
-    # conflict and is not pinned, it is withheld from the autonomous recall block
-    # and a [WITHHELD] notice is shown instead — so the agent cannot silently act
-    # on a contested value before resolve_conflict. Pinned authority is never
-    # withheld; non-high-stakes conflicts are unaffected.
+    # Conflict CONTAINMENT — now ON by DEFAULT (fail-closed); shown explicitly for
+    # clarity. When a high-stakes fact (policy/compliance/spend/financial/…) is in
+    # an UNRESOLVED conflict and is not pinned, it is withheld from the autonomous
+    # recall block AND the explicit search action, with a [WITHHELD] notice instead
+    # — so the agent cannot silently act on a contested value before resolve_conflict.
+    # Pinned authority is never withheld; non-high-stakes conflicts are unaffected.
+    # Set to false only for an explicit, acknowledged "unsafe mode".
     quarantine_high_stakes_conflicts: true

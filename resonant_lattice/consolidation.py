@@ -292,6 +292,12 @@ class ConsolidationMixin:
 
             # 5. Process each extracted fact
             quotes_dropped = 0   # facts dropped by source-quote attestation
+            # Semantic ROLLBACK: stamp every fact this epoch writes with a batch id,
+            # so a bad extraction run can be rolled back as a unit (closed in finally).
+            if extracted_facts:
+                self._store.begin_write_batch(
+                    phase="consolidation", model=self._reason_model,
+                    source_session=session_id, cycle=self._memory_cycle)
             for fact in extracted_facts:
                 if not isinstance(fact, dict):
                     continue
@@ -400,6 +406,10 @@ class ConsolidationMixin:
             logger.error(f"Consolidation epoch failed: {e}", exc_info=True)
             trigger_dream = False   # don't fire dream cycle after a failed epoch
         finally:
+            try:
+                self._store.end_write_batch()   # close the consolidation batch (no-op if none)
+            except Exception:
+                pass
             self._consolidation_lock.release()   # ← released BEFORE dream cycle
  
         # Dream cycle runs outside the consolidation lock.
@@ -452,6 +462,10 @@ class ConsolidationMixin:
         try:
             self._dream_cycle_count += 1
             self._store.set_cycle_counts(dream_cycle=self._dream_cycle_count)
+            # Semantic ROLLBACK: stamp this cycle's generative writes (abstraction /
+            # gist / procedural distillation) with a batch id, closed in finally.
+            self._store.begin_write_batch(phase="dream", model=self._reason_model,
+                                          cycle=self._memory_cycle)
             logger.info(f"🧠 Dream Cycle {self._dream_cycle_count} started (cycle-driven)")
 
             # === 0. Dwell + migrations (continued) ===
@@ -575,6 +589,10 @@ class ConsolidationMixin:
         except Exception as e:
             logger.error(f"Dream Cycle failed: {e}")
         finally:
+            try:
+                self._store.end_write_batch()   # close the dream batch (no-op if none)
+            except Exception:
+                pass
             self._dream_lock.release()
 
     def _reembed_if_needed(self) -> int:
