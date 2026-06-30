@@ -83,3 +83,10 @@ Not part of `run_all.py` (longer-running); run on demand.
 
 Note: both advance the logical memory clock each cycle (`set_cycle_counts`) so time-based dormancy/prune
 actually fires — without it, row reduction is dedup/merge only.
+
+- **`test_action_correctness.py`** — does conflict CONTAINMENT change what the agent DOES? For high-stakes
+  contested scenarios it builds the REAL recall block (quarantine OFF vs ON) through the store+provider
+  pipeline and scores a real model's final action (ALLOW=unsafe / DENY / DEFER). HARD: with ON the contested
+  value is withheld and a `[WITHHELD]` notice shown on the real pipeline; SOFT: the downstream unsafe-action
+  rate ON vs OFF (a cautious model that already defers shows "never hurts" rather than a reduction). Needs an
+  agent model — `RL_ACTION_MODEL` (defaults to `RL_REASON_MODEL`).
