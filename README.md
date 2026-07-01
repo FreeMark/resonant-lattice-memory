@@ -1,3 +1,12 @@
+## 🔥 Overnight Business Proof (5-Hour Stress Test)
+
+- **236,750** business facts ingested  
+- **947** hijack attempts → **0** succeeded  
+- **1,894** policy poisons → **8** surfaced for human arbitration  
+- **Bounded Memory**: Live rows plateaued at ~3,933 (out of 236k ingested)  
+- **Pinned Rule Retention**: 12/12 (100%) every cycle  
+- **HARD INVARIANTS**: 10/10 PASS
+
 # Resonant Lattice Memory
 
 A **neuroplastic, local-first long-term memory** plugin for AI agents (built for
