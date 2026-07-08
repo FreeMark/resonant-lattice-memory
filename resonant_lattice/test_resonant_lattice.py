@@ -2441,7 +2441,6 @@ def test_conflict_adjudicator_response_parsing():
     tolerated, garbage and transport errors FAIL OPEN to None (store then flags)."""
     try:
         prov = _load("__init__")
-        cons = _load("consolidation")
         p = prov.LatticeMemoryProvider({})
     except Exception as e:
         print(f"  SKIP adjudicator parsing: {e}"); return
@@ -2454,7 +2453,11 @@ def test_conflict_adjudicator_response_parsing():
     p._reason_model = "test-model"
     p._ollama_endpoint_reason = "http://localhost:0"
 
-    orig = cons._ollama_post_with_retry
+    # Patch the EXACT namespace the method resolves _ollama_post_with_retry in
+    # (its own __globals__) — patching a separately-loaded consolidation module
+    # object is load-order/platform dependent and misses on some environments.
+    g = p._conflict_adjudicator.__func__.__globals__
+    orig = g["_ollama_post_with_retry"]
     try:
         cases = [
             ('{"contradict": true}', True),
@@ -2465,16 +2468,16 @@ def test_conflict_adjudicator_response_parsing():
             ('true or false, hard to say', None),   # ambiguous → None
         ]
         for raw, expected in cases:
-            cons._ollama_post_with_retry = lambda url, payload, timeout, _r=raw, **kw: {"response": _r}
+            g["_ollama_post_with_retry"] = lambda url, payload, timeout, _r=raw, **kw: {"response": _r}
             got = p._conflict_adjudicator("A", "B")
             assert got is expected, (raw, got, expected)
         # Transport failure → None (fail-open handled by the store).
         def _die(url, payload, timeout, **kw):
             raise RuntimeError("connection refused")
-        cons._ollama_post_with_retry = _die
+        g["_ollama_post_with_retry"] = _die
         assert p._conflict_adjudicator("A", "B") is None
     finally:
-        cons._ollama_post_with_retry = orig
+        g["_ollama_post_with_retry"] = orig
     print("  adjudicator parsing OK: JSON + bare verdicts parse, garbage/errors -> None")
 
 
