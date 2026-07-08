@@ -6,7 +6,7 @@ the cycle/threshold config attributes."""
 
 import logging
 import re
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional
 
 from store_common import hrr, _HRR_AVAILABLE, serialize_vector
 
@@ -612,6 +612,65 @@ class DreamCycleMixin:
             return {"winner_id": winner_id, "conflict_group_id": gid, "superseded": losers}
 
 
+    def dismiss_conflict(self, group_id: Optional[str] = None,
+                         fact_id: Optional[int] = None,
+                         current_cycle: Optional[int] = None,
+                         confirm_bump: float = 0.5) -> Optional[Dict]:
+        """Phase 6: dismiss a conflict group as a FALSE POSITIVE (members compatible).
+
+        The second resolution verb. resolve_conflict picks a winner and retires
+        every other member as superseded — which is WRONG when arbitration finds
+        the facts COMPATIBLE (both true), e.g. the template-parallel detection
+        false-positive class ("gl_FragCoord is available in GLSL ES 1.00/3.00"
+        vs "gl_FrontFacing is available in GLSL ES 1.00/3.00"). Before this verb
+        existed, an agent that correctly verified both sides had NO in-band way
+        to unlock them (observed in production 2026-07-07; the operator had to
+        clear conflict_group_id via SQL).
+
+        Unlocks ALL live members of the group: clears the conflict lock, stamps
+        last_confirmed_cycle (arbitration just verified them), and applies a
+        small SATURATING confirm bump — symmetric across members, unlike the
+        winner boost. Nothing is superseded, nothing is destroyed. Accepts the
+        group id or any member's fact_id. Returns {conflict_group_id,
+        dismissed:[ids]} or None when nothing matches an ACTIVE group."""
+        with self._lock:
+            if current_cycle is None:
+                current_cycle = self._current_memory_cycle()
+            gid = group_id
+            if gid is None and fact_id is not None:
+                row = self._conn.execute(
+                    "SELECT conflict_group_id FROM semantic_facts WHERE id = ?",
+                    (fact_id,),
+                ).fetchone()
+                gid = row["conflict_group_id"] if row else None
+            if not gid:
+                return None
+            members = [r["id"] for r in self._conn.execute(
+                "SELECT id FROM semantic_facts "
+                "WHERE conflict_group_id = ? AND tier != 'superseded' ORDER BY id",
+                (gid,),
+            ).fetchall()]
+            if not members:
+                return None
+            ph = ",".join("?" * len(members))
+            self._conn.execute(
+                f"""
+                UPDATE semantic_facts
+                SET conflict_group_id = NULL,
+                    conflict_since_cycle = NULL,
+                    resonance_count = MIN(resonance_count + ?, 50.0),
+                    max_resonance_seen = MAX(COALESCE(max_resonance_seen, 0),
+                                             MIN(resonance_count + ?, 50.0)),
+                    last_confirmed_cycle = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id IN ({ph})
+                """,
+                (confirm_bump, confirm_bump, current_cycle, *members),
+            )
+            self._conn.commit()
+            return {"conflict_group_id": gid, "dismissed": members}
+
+
     def supersede_conflict_losers(self, current_cycle: int,
                                   max_history: int = 2000) -> int:
         """Phase 1b: retire conflict losers as superseded HISTORY, not deletion.
@@ -812,7 +871,63 @@ class DreamCycleMixin:
                 return 0
 
 
-    def resolve_hrr_conflicts(self) -> None:
+    def _relation_subjects(self, fact_id: int) -> set:
+        """Normalized subject strings from the fact's stored relation triples."""
+        rows = self._conn.execute(
+            "SELECT DISTINCT subject FROM fact_relations WHERE fact_id = ?",
+            (fact_id,),
+        ).fetchall()
+        return {str(r["subject"]).strip().lower() for r in rows
+                if r["subject"] and str(r["subject"]).strip()}
+
+
+    def _parallel_subject_veto(self, fid1: int, ents1: set,
+                               fid2: int, ents2: set) -> bool:
+        """True when a band-matched pair is PARALLEL facts about different
+        subjects — not a contradiction.
+
+        The false-positive class this kills: "gl_FragCoord is available in GLSL
+        ES 1.00/3.00" vs "gl_FrontFacing is available in GLSL ES 1.00/3.00".
+        Shared context entities (the version numbers) push overlap past 0.5 and
+        the shared sentence template lands similarity mid-band — the exact
+        contradiction signature — yet both facts are TRUE. What separates them
+        from a real attribute contradiction ("user lives in Seattle" vs "user
+        lives in Portland") is the SUBJECT role: parallel facts have disjoint
+        subjects, contradictions share one. Entity sets are role-blind, so this
+        reads the (subject, relation, object) triples relation extraction
+        already stores.
+
+        CONSERVATIVE by construction: vetoes only when BOTH facts carry relation
+        subjects AND no subject on either side matches the other side (equality,
+        containment, or membership in the other fact's entity set). Missing role
+        info or any cross-mention → no veto, and the pair proceeds to the
+        adjudicator/limbo path, which never destroys. A wrong match therefore
+        only restores the old behavior, never suppresses a real duel."""
+        subj1 = self._relation_subjects(fid1)
+        subj2 = self._relation_subjects(fid2)
+        if not subj1 or not subj2:
+            return False                      # no role information — cannot veto
+        e1 = {str(e).strip().lower() for e in ents1}
+        e2 = {str(e).strip().lower() for e in ents2}
+
+        def _matches(a: str, b: str) -> bool:
+            return a == b or a in b or b in a
+
+        for s1 in subj1:
+            if any(_matches(s1, s2) for s2 in subj2):
+                return False                  # shared subject → possible contradiction
+            if any(_matches(s1, e) for e in e2):
+                return False                  # other fact mentions this subject
+        for s2 in subj2:
+            if any(_matches(s2, e) for e in e1):
+                return False
+        return True
+
+
+    def resolve_hrr_conflicts(
+        self,
+        adjudicator: Optional[Callable[[str, str], Optional[bool]]] = None,
+    ) -> None:
         """HRR-powered conflict detection for established (mid + long tier) facts.
 
         Scans the 300 most-recently-updated mid/long facts (was long-only, which
@@ -823,7 +938,19 @@ class DreamCycleMixin:
         then by the content-similarity band [conflict_sim_low, conflict_sim_high]
         — the band, unchanged, remains the real discriminator. Detected pairs are
         marked CONTESTED, not bled (conflict_limbo default ON), so a false positive
-        surfaces for user arbitration rather than destroying a fact."""
+        surfaces for user arbitration rather than destroying a fact.
+
+        Two false-positive guards run AFTER the band, BEFORE the lock:
+        - the parallel-subject veto (_parallel_subject_veto, deterministic,
+          gated by self.conflict_subject_veto): template-parallel facts about
+          different subjects are skipped;
+        - an optional ``adjudicator`` callback (content_a, content_b) ->
+          True (contradict) / False (compatible: skip) / None (unknown: flag).
+          Injected by the consolidation layer (typically an LLM second opinion)
+          so the store itself stays model-free. FAIL-OPEN: errors and None keep
+          the pre-existing conservative behavior — flag the pair; conflict_limbo
+          protects it and arbitration (resolve_conflict / dismiss_conflict)
+          decides."""
         if not _HRR_AVAILABLE:
             return
  
@@ -939,6 +1066,26 @@ class DreamCycleMixin:
                     sim = hrr.similarity(v1, v2)
  
                     if CONFLICT_SIM_LOW <= sim <= CONFLICT_SIM_HIGH:
+                        # Parallel-fact veto (deterministic, relation-role-aware):
+                        # template-parallel facts about DIFFERENT subjects are not
+                        # contradictions — skip before spending an adjudication call.
+                        if getattr(self, "conflict_subject_veto", True) and \
+                                self._parallel_subject_veto(f1["id"], ents1,
+                                                            f2["id"], ents2):
+                            continue
+                        # Optional second opinion (injected by the consolidation
+                        # layer; the store stays model-free). FAIL-OPEN: None or an
+                        # exception keeps the pre-existing conservative behavior —
+                        # flag; limbo protects, arbitration decides.
+                        if adjudicator is not None:
+                            verdict = None
+                            try:
+                                verdict = adjudicator(f1["content"], f2["content"])
+                            except Exception as e:
+                                logger.debug(
+                                    "Conflict adjudicator failed (fail-open): %s", e)
+                            if verdict is False:
+                                continue
                         conflict_id = str(uuid.uuid4())[:8]
                         self._conn.execute(
                             "UPDATE semantic_facts SET conflict_group_id = ?, "

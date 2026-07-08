@@ -2239,6 +2239,245 @@ def test_store_pending_conflicts_and_resolve():
     s.close()
 
 
+# The four PRODUCTION false-positive pairs (nemo webdev training run, 2026-07-07):
+# template-parallel facts about DIFFERENT subjects that passed the entity-overlap
+# gate (shared version/context entities) AND landed inside the similarity band
+# (calibrated 0.72-0.87 under encode_text_rich), quarantining 8 TRUE facts.
+# Each tuple: (content_a, subject_a, content_b, subject_b, shared_entities).
+_PARALLEL_FP_PAIRS = [
+    ("gl_FragCoord is available in GLSL ES versions 1.00, 3.00, 3.10, and 3.20",
+     "gl_fragcoord",
+     "gl_FrontFacing is available in GLSL ES versions 1.00, 3.00, 3.10, and 3.20",
+     "gl_frontfacing",
+     ["glsl es", "1.00", "3.00", "3.10", "3.20"]),
+    ("smoothstep is available in GLSL ES versions 1.00, 3.00, 3.10 and 3.20.",
+     "smoothstep",
+     "fract is supported in GLSL ES versions 1.00, 3.00, 3.10 and 3.20.",
+     "fract",
+     ["glsl es", "1.00", "3.00", "3.10", "3.20"]),
+    ("The count parameter of drawArrays is a GLsizei specifying the number of indices to be rendered.",
+     "drawarrays",
+     "The count parameter of drawElements is a GLsizei specifying the number of elements to be rendered.",
+     "drawelements",
+     ["count", "glsizei"]),
+    ("normalize is supported in GLSL ES versions 1.00, 3.00, 3.10 and 3.20.",
+     "normalize",
+     "dot is supported in GLSL ES versions 1.00, 3.00, 3.10 and 3.20.",
+     "dot",
+     ["glsl es", "1.00", "3.00", "3.10", "3.20"]),
+]
+
+
+def _add_conflict_candidate(s, content, subject, shared, relation_object="glsl es"):
+    """Add a mid-tier fact with entities + a relation triple, detection-ready."""
+    hg = _load("holographic")
+    _, fid = s.add_or_reinforce_fact(content, _emb(s, content), "spec", "sess1",
+                                     entities=[subject] + list(shared))
+    blob = hg.phases_to_bytes(hg.encode_text_rich(content, s.hrr_dim))
+    s._conn.execute("UPDATE semantic_facts SET tier='mid', hrr_vector=? WHERE id=?",
+                    (blob, fid))
+    s._conn.execute(
+        "INSERT INTO fact_relations (fact_id, subject, relation, object, confidence) "
+        "VALUES (?, ?, ?, ?, 0.9)", (fid, subject, "available_in", relation_object))
+    s._conn.commit()
+    return fid
+
+
+def _conflict_gid(s, fid):
+    return s._conn.execute(
+        "SELECT conflict_group_id FROM semantic_facts WHERE id=?", (fid,)
+    ).fetchone()["conflict_group_id"]
+
+
+def test_store_conflict_parallel_subject_veto():
+    """Regression (2026-07-07 false-positive class): template-parallel facts about
+    DIFFERENT subjects must NOT be locked as conflicts. Self-validating: the test
+    first proves each pair passes the heuristic gates (overlap >= 0.5, sim in band)
+    and IS flagged with the veto disabled — then proves the veto spares all four."""
+    if not _STORE_OK:
+        print("  SKIP"); return
+    hg = _load("holographic")
+
+    # (a) Counterfactual: veto OFF reproduces the production bug on pair 1.
+    s0 = _fresh_store(conflict_subject_veto=False)
+    a0 = _add_conflict_candidate(s0, *_PARALLEL_FP_PAIRS[0][0:2], _PARALLEL_FP_PAIRS[0][4])
+    b0 = _add_conflict_candidate(s0, *_PARALLEL_FP_PAIRS[0][2:4], _PARALLEL_FP_PAIRS[0][4])
+    # Gate self-check: the pair really is inside the trap (veto is what matters).
+    sim = hg.similarity(hg.encode_text_rich(_PARALLEL_FP_PAIRS[0][0], s0.hrr_dim),
+                        hg.encode_text_rich(_PARALLEL_FP_PAIRS[0][2], s0.hrr_dim))
+    assert s0.conflict_sim_low <= sim <= s0.conflict_sim_high, sim
+    s0.resolve_hrr_conflicts()
+    g_a, g_b = _conflict_gid(s0, a0), _conflict_gid(s0, b0)
+    assert g_a is not None and g_a == g_b, (g_a, g_b)   # bug reproduced
+    s0.close()
+
+    # (b) Veto ON (default): all four real pairs pass detection unflagged.
+    s = _fresh_store()
+    assert s.conflict_subject_veto is True               # central default
+    fids = []
+    for ca, sa, cb, sb, shared in _PARALLEL_FP_PAIRS:
+        fids.append(_add_conflict_candidate(s, ca, sa, shared))
+        fids.append(_add_conflict_candidate(s, cb, sb, shared))
+    s.resolve_hrr_conflicts()
+    locked = [f for f in fids if _conflict_gid(s, f) is not None]
+    assert locked == [], locked
+    s.close()
+    print("  parallel-subject veto OK: 4 production pairs spared; veto-off reproduces the bug")
+
+
+def test_store_conflict_true_contradiction_still_flagged():
+    """The veto must not weaken real detection: an attribute contradiction about
+    the SAME subject (shared relation subject) still forms a conflict group."""
+    if not _STORE_OK:
+        print("  SKIP"); return
+    s = _fresh_store()
+    a = _add_conflict_candidate(s, "user lives in Seattle", "user",
+                                ["seattle"], relation_object="seattle")
+    b = _add_conflict_candidate(s, "user lives in Portland", "user",
+                                ["portland"], relation_object="portland")
+    s.resolve_hrr_conflicts()
+    g_a, g_b = _conflict_gid(s, a), _conflict_gid(s, b)
+    assert g_a is not None and g_a == g_b, (g_a, g_b)
+    since = s._conn.execute(
+        "SELECT conflict_since_cycle FROM semantic_facts WHERE id=?", (a,)
+    ).fetchone()["conflict_since_cycle"]
+    assert since is not None
+    s.close()
+    print("  true contradiction OK: shared-subject pair still duels")
+
+
+def test_store_conflict_adjudicator_gate():
+    """The adjudicator callback is honored: False skips the lock, True locks,
+    and errors/None FAIL OPEN to the pre-existing behavior (lock)."""
+    if not _STORE_OK:
+        print("  SKIP"); return
+
+    def _seattle_portland(s):
+        a = _add_conflict_candidate(s, "user lives in Seattle", "user",
+                                    ["seattle"], relation_object="seattle")
+        b = _add_conflict_candidate(s, "user lives in Portland", "user",
+                                    ["portland"], relation_object="portland")
+        return a, b
+
+    # False → compatible → skipped.
+    s = _fresh_store(); a, b = _seattle_portland(s)
+    s.resolve_hrr_conflicts(adjudicator=lambda x, y: False)
+    assert _conflict_gid(s, a) is None and _conflict_gid(s, b) is None
+    s.close()
+    # True → contradiction confirmed → locked.
+    s = _fresh_store(); a, b = _seattle_portland(s)
+    s.resolve_hrr_conflicts(adjudicator=lambda x, y: True)
+    assert _conflict_gid(s, a) is not None
+    s.close()
+    # Exception → fail-open → locked (conservative old behavior).
+    def _boom(x, y):
+        raise RuntimeError("model down")
+    s = _fresh_store(); a, b = _seattle_portland(s)
+    s.resolve_hrr_conflicts(adjudicator=_boom)
+    assert _conflict_gid(s, a) is not None
+    s.close()
+    # None (ambiguous) → fail-open → locked.
+    s = _fresh_store(); a, b = _seattle_portland(s)
+    s.resolve_hrr_conflicts(adjudicator=lambda x, y: None)
+    assert _conflict_gid(s, a) is not None
+    s.close()
+    print("  adjudicator gate OK: False skips; True/None/error lock (fail-open)")
+
+
+def test_store_dismiss_conflict():
+    """Phase 6 second verb: dismiss_conflict unlocks ALL members of a false-positive
+    group symmetrically — no supersession, no winner, confirm stamp + small
+    saturating bump. Substrate-checked."""
+    if not _STORE_OK:
+        print("  SKIP"); return
+    s = _fresh_store()
+    _, a = s.add_or_reinforce_fact("gl_FragCoord availability", _emb(s, "a"), "spec", "s")
+    _, b = s.add_or_reinforce_fact("gl_FrontFacing availability", _emb(s, "b"), "spec", "s")
+    s._conn.execute("UPDATE semantic_facts SET conflict_group_id='gfp', tier='mid', "
+                    "resonance_count=7.0, conflict_since_cycle=5 WHERE id IN (?,?)", (a, b))
+    s.set_cycle_counts(memory_cycle=6)
+    s._conn.commit()
+
+    # Dismiss by group_id: both unlocked, stamped, bumped, NOT superseded.
+    res = s.dismiss_conflict(group_id="gfp", current_cycle=6)
+    assert res == {"conflict_group_id": "gfp", "dismissed": [a, b]} or \
+           res == {"conflict_group_id": "gfp", "dismissed": [b, a]}, res
+    for fid in (a, b):
+        r = s._conn.execute(
+            "SELECT tier, conflict_group_id, conflict_since_cycle, resonance_count, "
+            "last_confirmed_cycle, superseded_by FROM semantic_facts WHERE id=?",
+            (fid,)).fetchone()
+        assert r["conflict_group_id"] is None and r["conflict_since_cycle"] is None, dict(r)
+        assert r["tier"] == "mid" and r["superseded_by"] is None, dict(r)
+        assert r["resonance_count"] == 7.5, dict(r)          # symmetric +0.5, no winner
+        assert r["last_confirmed_cycle"] == 6, dict(r)
+    assert s.get_pending_conflicts(min_age_cycles=0) == []
+    # Idempotence: the group no longer exists.
+    assert s.dismiss_conflict(group_id="gfp", current_cycle=7) is None
+
+    # Dismiss by member fact_id; bump saturates at 50.
+    _, c = s.add_or_reinforce_fact("saturated member", _emb(s, "c"), "spec", "s")
+    _, d = s.add_or_reinforce_fact("partner member", _emb(s, "d"), "spec", "s")
+    s._conn.execute("UPDATE semantic_facts SET conflict_group_id='g2', "
+                    "resonance_count=49.8, conflict_since_cycle=6 WHERE id=?", (c,))
+    s._conn.execute("UPDATE semantic_facts SET conflict_group_id='g2', "
+                    "resonance_count=3.0, conflict_since_cycle=6 WHERE id=?", (d,))
+    s._conn.commit()
+    res = s.dismiss_conflict(fact_id=d, current_cycle=7)
+    assert res is not None and set(res["dismissed"]) == {c, d}, res
+    rc = s._conn.execute("SELECT resonance_count FROM semantic_facts WHERE id=?",
+                         (c,)).fetchone()["resonance_count"]
+    assert rc == 50.0, rc                                     # saturating cap
+    # Unknown group / unconflicted fact / no args → None.
+    assert s.dismiss_conflict(group_id="nope") is None
+    assert s.dismiss_conflict(fact_id=a) is None
+    assert s.dismiss_conflict() is None
+    s.close()
+    print("  dismiss_conflict OK: symmetric unlock, confirm stamp, saturating bump, no supersession")
+
+
+def test_conflict_adjudicator_response_parsing():
+    """Provider-side adjudicator: strict-JSON verdicts parse, bare true/false is
+    tolerated, garbage and transport errors FAIL OPEN to None (store then flags)."""
+    try:
+        prov = _load("__init__")
+        cons = _load("consolidation")
+        p = prov.LatticeMemoryProvider({})
+    except Exception as e:
+        print(f"  SKIP adjudicator parsing: {e}"); return
+
+    class _StubStore:                       # only _clean_llm_json is touched
+        @staticmethod
+        def _clean_llm_json(t):
+            return t
+    p._store = _StubStore()
+    p._reason_model = "test-model"
+    p._ollama_endpoint_reason = "http://localhost:0"
+
+    orig = cons._ollama_post_with_retry
+    try:
+        cases = [
+            ('{"contradict": true}', True),
+            ('{"contradict": false}', False),
+            ('Sure! {"contradict": FALSE} — they are compatible.', False),
+            ('true', True),
+            ('nonsense with no verdict at all', None),
+            ('true or false, hard to say', None),   # ambiguous → None
+        ]
+        for raw, expected in cases:
+            cons._ollama_post_with_retry = lambda url, payload, timeout, _r=raw, **kw: {"response": _r}
+            got = p._conflict_adjudicator("A", "B")
+            assert got is expected, (raw, got, expected)
+        # Transport failure → None (fail-open handled by the store).
+        def _die(url, payload, timeout, **kw):
+            raise RuntimeError("connection refused")
+        cons._ollama_post_with_retry = _die
+        assert p._conflict_adjudicator("A", "B") is None
+    finally:
+        cons._ollama_post_with_retry = orig
+    print("  adjudicator parsing OK: JSON + bare verdicts parse, garbage/errors -> None")
+
+
 def test_freshness_penalty_curve():
     """Phase 2: the recall freshness nudge is gentle, bounded, monotonic, and
     fully off when disabled (pure math — no Ollama)."""

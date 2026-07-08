@@ -370,6 +370,27 @@ CONFIG_SCHEMA = [
                     "contradiction for resolution; with conflict_limbo ON a false flag only protects + "
                     "nudges, never destroys. Set False to disable the heuristic.",
      "default": True},
+    {"key": "conflict_subject_veto",
+     "description": "Deterministic false-positive guard for HRR conflict detection. Template-parallel "
+                    "facts about DIFFERENT subjects ('gl_FragCoord is available in GLSL ES 1.00/3.00' vs "
+                    "'gl_FrontFacing is available in GLSL ES 1.00/3.00') share context entities and "
+                    "sentence shape — enough to pass the overlap gate and land mid-band — yet both are "
+                    "true. When BOTH facts carry relation-triple subjects and neither side's subject "
+                    "matches the other side (equality/containment/entity-mention), the pair is skipped "
+                    "as parallel rather than locked as a conflict. Conservative: missing role info or "
+                    "any cross-mention falls through to normal detection. Set False to disable.",
+     "default": True},
+    {"key": "conflict_llm_adjudication",
+     "description": "Second-opinion gate for HRR conflict detection: a pair that passes the entity-"
+                    "overlap + similarity-band heuristics (and the subject veto) is shown to the reason "
+                    "model ('do these actually contradict?') before being locked into a conflict group. "
+                    "Catches the remainder of the template-parallel false-positive class when relation "
+                    "subjects are missing. FAIL-OPEN: an LLM error/timeout/ambiguous answer flags the "
+                    "pair anyway (the pre-existing conservative behavior — conflict_limbo protects, "
+                    "arbitration resolves), so this can only REDUCE false positives, never hide a real "
+                    "contradiction behind a model failure. Costs at most a few short reason-model calls "
+                    "per dream cycle. Set False for pure-heuristic detection.",
+     "default": True},
     {"key": "quarantine_high_stakes_conflicts",
      "description": "Conflict CONTAINMENT (default ON, fail-closed; set False for an explicit 'unsafe mode'). "
                     "When a "

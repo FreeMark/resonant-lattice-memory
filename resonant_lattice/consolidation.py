@@ -769,11 +769,65 @@ class ConsolidationMixin:
 
     def _resolve_long_term_conflicts(self) -> None:
         """Delegate HRR conflict detection to LatticeStore.
- 
+
         Scans long-tier facts with high entity overlap and low HRR content
         similarity — those are likely contradictions. Pairs are grouped under
         a conflict_group_id and enter the Duel-to-the-Death decay loop on
         the next dream cycle.
+
+        When conflict_llm_adjudication is on, candidate pairs that survive the
+        store's heuristic gates get a reason-model second opinion before being
+        locked (the adjudicator lives HERE so the store stays model-free).
         """
         if self._store and _HRR_AVAILABLE:
-            self._store.resolve_hrr_conflicts()
+            adjudicator = (self._conflict_adjudicator
+                           if getattr(self, "_conflict_llm_adjudication", True)
+                           else None)
+            self._store.resolve_hrr_conflicts(adjudicator=adjudicator)
+
+
+    def _conflict_adjudicator(self, content_a: str, content_b: str) -> "bool | None":
+        """Reason-model second opinion for one conflict candidate pair.
+
+        Returns True (contradict — lock the group), False (compatible — skip),
+        or None (unknown — the store fails open and flags, preserving the old
+        conservative behavior). Kept deliberately cheap: one short generate call
+        at temperature 0, capped at 60s so a slow model cannot stall the dream
+        cycle; any failure is a debug-level non-event."""
+        prompt = (
+            "Do these two statements CONTRADICT each other — that is, can they "
+            "NOT both be true at the same time?\n"
+            "Statements about DIFFERENT subjects are NOT contradictions (two "
+            "different functions can both exist). Statements about the same "
+            "subject under different versions/conditions are NOT contradictions "
+            "when each names its own scope.\n\n"
+            f"A: {content_a}\n"
+            f"B: {content_b}\n\n"
+            'Answer ONLY with JSON: {"contradict": true} or {"contradict": false}'
+        )
+        payload = {
+            "model": self._reason_model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {"temperature": 0.0},
+        }
+        try:
+            result = _ollama_post_with_retry(
+                f"{self._ollama_endpoint_reason}/api/generate",
+                payload,
+                timeout=min(float(getattr(self, "_reason_timeout", 300.0)), 60.0),
+            )
+            text = self._store._clean_llm_json(
+                (result.get("response") or "").strip())
+            m = re.search(r'"contradict"\s*:\s*(true|false)', text, re.IGNORECASE)
+            if m:
+                return m.group(1).lower() == "true"
+            low = text.lower()
+            if "true" in low and "false" not in low:
+                return True
+            if "false" in low and "true" not in low:
+                return False
+            return None
+        except Exception as e:
+            logger.debug("Conflict adjudication call failed (fail-open): %s", e)
+            return None

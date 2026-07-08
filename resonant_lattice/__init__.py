@@ -1,4 +1,4 @@
-"""
+﻿"""
 Resonant Lattice Memory — Neuroplastic Hebbian System
 MemoryProvider implementation for hermes-agent.
 
@@ -19,7 +19,7 @@ and the `LatticeStore` mixins (see MODULE_MAP.md / README.md):
 
 from __future__ import annotations
 
-__version__ = "1.2.1"  # fail-closed containment + search gating + semantic batch rollback
+__version__ = "1.3.0"  # conflict false-positive guards (subject veto + LLM adjudication) + dismiss_conflict verb
 
 import json
 import logging
@@ -264,6 +264,11 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         self._surface_conflicts = bool(self._config.get("surface_conflicts", DEFAULTS["surface_conflicts"]))
         self._conflict_surface_min_group_age_cycles = int(
             self._config.get("conflict_surface_min_group_age_cycles", DEFAULTS["conflict_surface_min_group_age_cycles"]))
+        # Conflict-detection false-positive guards: LLM second opinion on candidate
+        # pairs (consolidation layer builds the adjudicator; fail-open to flagging).
+        # The deterministic subject veto is a STORE knob (conflict_subject_veto).
+        self._conflict_llm_adjudication = bool(
+            self._config.get("conflict_llm_adjudication", DEFAULTS["conflict_llm_adjudication"]))
         # Per-conflict "asked once" guard (reset each dream cycle, like the recall gate).
         self._conflicts_surfaced: set = set()
         # Phase 5a — HRR relational reasoning (extraction stage; default OFF). When
@@ -570,6 +575,8 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
                 hrr_dim=self._hrr_dim,
                 conflict_sim_low=self._conflict_sim_low,
                 conflict_sim_high=self._conflict_sim_high,
+                conflict_subject_veto=bool(self._config.get(
+                    "conflict_subject_veto", DEFAULTS["conflict_subject_veto"])),
                 novelty_enabled=self._novelty_enabled,     # Phase 3 salience
                 novelty_boost=self._novelty_boost,
                 importance_categories=self._importance_categories,  # importance-weighted retention

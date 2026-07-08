@@ -81,6 +81,7 @@ class LatticeStore(SchemaMixin, FactsMixin, DreamCycleMixin, AbstractionMixin,
         novelty_enabled: bool = _STORE_DEFAULTS.get("novelty_enabled", True),
         novelty_boost: float = _STORE_DEFAULTS.get("novelty_boost", 2.0),
         detect_policy_conflicts: bool = _STORE_DEFAULTS.get("detect_policy_conflicts", True),
+        conflict_subject_veto: bool = _STORE_DEFAULTS.get("conflict_subject_veto", True),
         importance_categories=None,
         db_key: "bytes | bytearray | None" = None,
     ) -> None:
@@ -100,6 +101,10 @@ class LatticeStore(SchemaMixin, FactsMixin, DreamCycleMixin, AbstractionMixin,
         self.novelty_enabled = bool(novelty_enabled)
         self.novelty_boost = float(novelty_boost)
         self.detect_policy_conflicts = bool(detect_policy_conflicts)
+        # Parallel-subject veto for HRR conflict detection (see
+        # DreamCycleMixin._parallel_subject_veto): skip template-parallel facts
+        # about DIFFERENT subjects instead of flagging them as contradictions.
+        self.conflict_subject_veto = bool(conflict_subject_veto)
         # Importance-weighted retention: facts in these categories decay slower
         # (apply_cycle_decay importance_discount). Default from central config.
         _imp = importance_categories if importance_categories is not None \

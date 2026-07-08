@@ -27,7 +27,7 @@ LATTICE_STORE_SCHEMA = {
         "Resonant Lattice Memory tool — full neuroplastic control.\n"
         "Actions: add, search, get_fact, fact_history, feedback, pin, unpin, "
         "request_abstraction, force_consolidation, force_dream_cycle, stats, "
-        "memory_audit (includes feature_status), pending_conflicts, resolve_conflict, facts_about_entity, "
+        "memory_audit (includes feature_status), pending_conflicts, resolve_conflict, dismiss_conflict, facts_about_entity, "
         "entities_for_fact, related_entities, explain_abstraction, tool_history, "
         "relational, infer, get_self_model, set_self_model, narrative, "
         "set_canonical, get_canonical.\n"
@@ -72,8 +72,13 @@ LATTICE_STORE_SCHEMA = {
         "them as leads to confirm, not as attested memory.\n"
         "Use pending_conflicts to see unresolved contradictory memories (the system "
         "duels them automatically, but you can disambiguate): each group lists the "
-        "competing facts; call resolve_conflict with fact_id = the correct one to "
-        "boost it and retire the rest as superseded history.\n"
+        "competing facts. If ONE side is correct, call resolve_conflict with "
+        "fact_id = the correct one to boost it and retire the rest as superseded "
+        "history. If the facts turn out to be COMPATIBLE — both true, e.g. parallel "
+        "statements about different subjects flagged in error — call dismiss_conflict "
+        "with group_id (or fact_id = any member) to unlock all of them; nothing is "
+        "retired or boosted asymmetrically. Choose by evidence: winner -> "
+        "resolve_conflict, false alarm -> dismiss_conflict.\n"
         "Use get_fact (exact ID lookup) — NOT search — when you need to confirm "
         "the verbatim content of a specific stored fact; search returns similar "
         "neighbours, not the exact row. get_fact also returns quote_status: only "
@@ -85,7 +90,7 @@ LATTICE_STORE_SCHEMA = {
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["add", "search", "get_fact", "fact_history", "feedback", "pin", "unpin", "request_abstraction", "force_consolidation", "force_dream_cycle", "stats", "memory_audit", "pending_conflicts", "resolve_conflict", "facts_about_entity", "entities_for_fact", "related_entities", "explain_abstraction", "tool_history", "relational", "infer", "get_self_model", "set_self_model", "narrative", "set_canonical", "get_canonical", "list_batches", "rollback_batch"],
+                "enum": ["add", "search", "get_fact", "fact_history", "feedback", "pin", "unpin", "request_abstraction", "force_consolidation", "force_dream_cycle", "stats", "memory_audit", "pending_conflicts", "resolve_conflict", "dismiss_conflict", "facts_about_entity", "entities_for_fact", "related_entities", "explain_abstraction", "tool_history", "relational", "infer", "get_self_model", "set_self_model", "narrative", "set_canonical", "get_canonical", "list_batches", "rollback_batch"],
             },
             "content": {"type": "string", "description": "Fact content (for add/feedback)"},
             "query": {"type": "string", "description": "Search query, entity/tool name for entity-graph actions, or a natural-language relational question (relational)"},
@@ -95,7 +100,8 @@ LATTICE_STORE_SCHEMA = {
             "hops": {"type": "integer", "description": "infer: max chain length (defaults to max_inference_hops)"},
             "key": {"type": "string", "description": "set_self_model/get_self_model: identity key, e.g. name/role/relationship_with_user (get with no key returns the whole self-model)"},
             "value": {"type": "string", "description": "set_self_model: the identity value to record for key"},
-            "fact_id": {"type": "integer", "description": "Fact ID (get_fact/fact_history/feedback/pin/unpin/entities_for_fact/explain_abstraction; for resolve_conflict it is the WINNING fact's id)"},
+            "fact_id": {"type": "integer", "description": "Fact ID (get_fact/fact_history/feedback/pin/unpin/entities_for_fact/explain_abstraction; for resolve_conflict it is the WINNING fact's id; for dismiss_conflict any member of the group)"},
+            "group_id": {"type": "string", "description": "dismiss_conflict: the conflict group id to unlock as a false positive (alternative to fact_id)"},
             "min_age": {"type": "integer", "description": "pending_conflicts: only list conflict groups at least this many cycles old (0 = all)"},
             "feedback": {"type": "string", "enum": ["helpful", "unhelpful"], "description": "User feedback for Hebbian adjustment"},
             "category": {"type": "string", "description": "Category for new facts or filtering (e.g., procedural)"},
@@ -128,7 +134,7 @@ class ToolHandlerMixin:
             )
 
         action = args.get("action")
-        if action in ("add", "feedback", "pin", "unpin", "request_abstraction", "remove", "resolve_conflict", "force_consolidation", "force_dream_cycle", "set_self_model", "set_canonical", "rollback_batch") \
+        if action in ("add", "feedback", "pin", "unpin", "request_abstraction", "remove", "resolve_conflict", "dismiss_conflict", "force_consolidation", "force_dream_cycle", "set_self_model", "set_canonical", "rollback_batch") \
                 and not self._write_enabled:
             return tool_error("Memory is read-only in this agent context (non-primary).")
         try:
@@ -322,6 +328,20 @@ class ToolHandlerMixin:
                 if result is None:
                     return tool_error(f"Fact {winner_id} is not in an active conflict group.")
                 return json.dumps({"status": "conflict resolved", **result})
+
+            elif action == "dismiss_conflict":
+                # False-positive escape hatch: the facts turned out COMPATIBLE
+                # (both true) — unlock every member instead of picking a winner.
+                gid = args.get("group_id")
+                fid = args.get("fact_id")
+                if not gid and fid is None:
+                    return tool_error(
+                        "dismiss_conflict requires group_id or fact_id (any member of the group)")
+                result = self._store.dismiss_conflict(
+                    group_id=gid, fact_id=fid, current_cycle=self._memory_cycle)
+                if result is None:
+                    return tool_error("No active conflict group matches that group_id/fact_id.")
+                return json.dumps({"status": "conflict dismissed as compatible", **result})
 
             elif action == "facts_about_entity":
                 entity = args.get("entity") or args.get("query")
