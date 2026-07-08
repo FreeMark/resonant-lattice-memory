@@ -1,3 +1,27 @@
+﻿## 🆕 What's new: v1.3.0 (2026-07-08)
+
+Conflict detection learned to stop arresting innocent facts. Found in a live
+training deployment, fixed and shipped the same day:
+
+- **Parallel-subject veto** (`conflict_subject_veto`, default on). Template-parallel
+  facts about *different* subjects ("gl_FragCoord is available in GLSL ES 1.00/3.00"
+  vs "gl_FrontFacing is available in GLSL ES 1.00/3.00") share context entities and
+  sentence shape, which used to read as the contradiction signature and quarantine
+  both facts from recall. The detector now consults the stored (subject, relation,
+  object) triples: disjoint subjects means parallel facts, not a conflict.
+- **LLM adjudication** (`conflict_llm_adjudication`, default on). Candidate pairs that
+  pass the heuristic gates get a reasoning-model second opinion ("do these actually
+  contradict?") before a conflict group is locked. Fail-open by design: any model
+  error or ambiguous answer keeps the old conservative behavior (flag, protect,
+  arbitrate), so this can only reduce false positives, never hide a real conflict.
+- **New `dismiss_conflict` tool action**: the missing second resolution verb. When
+  arbitration finds both facts TRUE (a false-positive flag), the agent can now unlock
+  the whole group symmetrically; nothing is retired and no winner is picked.
+  `resolve_conflict` remains the winner-picking path for real contradictions.
+- Unit suite grew to **112 tests**, including the four real-world pairs from the
+  incident as must-NOT-flag regression cases, with a veto-off counterfactual that
+  reproduces the original bug.
+
 ## 🔥 Overnight Business Proof (5-Hour Stress Test)
 
 - **236,750** business facts ingested  
@@ -32,7 +56,7 @@ build and harden it.
 
 | Path | What it is |
 |---|---|
-| `resonant_lattice/` | The plugin (runtime code, `plugin.yaml`, `recommended_config.yaml`, architecture docs, the 97-test unit suite, the eval harness). |
+| `resonant_lattice/` | The plugin (runtime code, `plugin.yaml`, `recommended_config.yaml`, architecture docs, the 112-test unit suite, the eval harness). |
 | `tests/` | The test suite (substrate → behaviour → scale → durability), plus the live end-to-end exercise `live_e2e.py`. |
 | `results/` | All test evidence in one place: per-test outputs, metrics (`.jsonl`), model-comparison summaries, and the single-file [`CONSOLIDATED_RESULTS.md`](results/CONSOLIDATED_RESULTS.md). |
 | `tools/` | [`rl_monitor`](tools/README.md) — a live, read-only `nvtop`-style TUI to watch the memory work (tiers, cycle-by-cycle activity feed, conflicts, health). `python tools/rl_monitor.py --demo`. |
@@ -60,7 +84,7 @@ pip install numpy sqlite-vec
 
 **Unit suite (no LLM needed — pure SQLite/HRR substrate, ~seconds):**
 ```bash
-python resonant_lattice/test_resonant_lattice.py     # expect: 97 passed, 0 failed
+python resonant_lattice/test_resonant_lattice.py     # expect: 112 passed, 0 failed
 ```
 
 **Behaviour / trust / scale suite (needs Ollama for embeddings; a few also need a
