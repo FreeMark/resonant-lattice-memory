@@ -81,6 +81,7 @@ class LatticeStore(SchemaMixin, FactsMixin, DreamCycleMixin, AbstractionMixin,
         novelty_enabled: bool = _STORE_DEFAULTS.get("novelty_enabled", True),
         novelty_boost: float = _STORE_DEFAULTS.get("novelty_boost", 2.0),
         detect_policy_conflicts: bool = _STORE_DEFAULTS.get("detect_policy_conflicts", True),
+        detect_procedural_conflicts: bool = _STORE_DEFAULTS.get("detect_procedural_conflicts", True),
         conflict_subject_veto: bool = _STORE_DEFAULTS.get("conflict_subject_veto", True),
         importance_categories=None,
         db_key: "bytes | bytearray | None" = None,
@@ -101,6 +102,11 @@ class LatticeStore(SchemaMixin, FactsMixin, DreamCycleMixin, AbstractionMixin,
         self.novelty_enabled = bool(novelty_enabled)
         self.novelty_boost = float(novelty_boost)
         self.detect_policy_conflicts = bool(detect_policy_conflicts)
+        # Procedural tool-superstition sweep (see DreamCycleMixin, the
+        # procedural-contradiction pass in resolve_hrr_conflicts): pair
+        # same-tool '[web_extract] ...' heuristics that contradict by
+        # paraphrase — invisible to the general pass, which excludes them.
+        self.detect_procedural_conflicts = bool(detect_procedural_conflicts)
         # Parallel-subject veto for HRR conflict detection (see
         # DreamCycleMixin._parallel_subject_veto): skip template-parallel facts
         # about DIFFERENT subjects instead of flagging them as contradictions.

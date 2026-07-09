@@ -402,6 +402,22 @@ CONFIG_SCHEMA = [
                     "contradiction for resolution; with conflict_limbo ON a false flag only protects + "
                     "nudges, never destroys. Set False to disable the heuristic.",
      "default": True},
+    {"key": "detect_procedural_conflicts",
+     "description": "Also sweep PROCEDURAL tool-usage heuristics ('[web_extract] avoid X' style facts) "
+                    "for contradictions during conflict detection. Field finding (overnight curriculum "
+                    "runs): the dream cycle distills these from tool episodes and the layer accumulates "
+                    "contradictory superstition ('bundle many URLs per call' vs 'prefer a single URL per "
+                    "invocation') that contradicts by PARAPHRASE — the general similarity-band pass "
+                    "excludes category='procedural', so such pairs were never flagged and the agent "
+                    "flip-flopped between strategies. This pass pairs facts about the SAME tool that "
+                    "share a specific topic stem (tool-name and generic outcome words excluded), flags "
+                    "opposite-stance pairs (avoid vs prefer) deterministically, and sends stance-"
+                    "ambiguous pairs to the reason-model adjudicator (capped per cycle, locks only on "
+                    "an explicit yes). Precision-first: unlike poison-policy detection this lane is NOT "
+                    "fail-open, because superstition is self-inflicted rather than adversarial — a "
+                    "missed pair waits for the next cycle instead of risking a false duel. Set False "
+                    "to disable.",
+     "default": True},
     {"key": "conflict_subject_veto",
      "description": "Deterministic false-positive guard for HRR conflict detection. Template-parallel "
                     "facts about DIFFERENT subjects ('gl_FragCoord is available in GLSL ES 1.00/3.00' vs "

@@ -65,6 +65,71 @@ def _policy_stems(content: str) -> set:
             out.add(w[:6])
     return out
 
+
+# ── Procedural-contradiction detection (tool-superstition sweep) ─────────────
+# The dream cycle distills per-tool usage heuristics ("[web_extract] avoid X",
+# "[web_search] prefer Y") as category='procedural' facts. Field finding from
+# overnight curriculum runs: this layer accumulates CONTRADICTORY guidance
+# ("bundle many URLs per call" vs "prefer a single URL per invocation") that
+# contradicts by PARAPHRASE — and the general HRR pass excludes the category
+# (template-parallel, entity-thin), so the pairs were never flagged. An agent
+# recalling both flip-flops between strategies, or worse, recalls loop
+# promoters ("retry the exact same failed request"). The sweep pairs facts
+# about the SAME tool that share a SPECIFIC topic stem, then flags via two
+# precision-first lanes (see the pass in resolve_hrr_conflicts):
+#   lane 1, deterministic: opposite stance (avoid vs prefer);
+#   lane 2, adjudicated:   stance-ambiguous pairs go to the injected
+#                          reason-model adjudicator (capped per pass) and lock
+#                          ONLY on an explicit True. Unlike the poison-policy
+#                          pass this is NOT fail-open: superstition is
+#                          self-inflicted, not adversarial — a missed pair
+#                          waits for the next cycle; a false duel would lock a
+#                          useful heuristic for nothing.
+_PROC_TOOL_RE = re.compile(r"^\s*\[([a-z0-9_\-]+)\]", re.IGNORECASE)
+# Stance markers. Deliberately narrow: procedural facts often carry mixed
+# polarity in one sentence ("X often fails; prefer Y"), so bare "fail"/"use"
+# would misclassify — ambiguity returns "" and defers to the adjudicator lane.
+_PROC_AVOID = ("avoid", "do not", "don't", "never", "must not",
+               "consistently fail", "consistently result", "unreliable")
+_PROC_PREFER = ("prefer", "always set", "always use", "always enable",
+                "recommended", "reliably succeed", "increases success",
+                "has been successful", "works well", "improves")
+# Stems too generic to establish that two same-tool directives concern the
+# same TOPIC: tool mechanics and outcome words appear in nearly every
+# heuristic, so sharing only these must not pair facts (post-stemming form,
+# i.e. already suffix-stripped + truncated to 6 chars like _policy_stems).
+_PROC_GENERIC_STEMS = frozenset({
+    "avoid", "prefer", "recomm", "fail", "failur", "succes", "succee",
+    "error", "result", "attemp", "consis", "reliab", "often", "tend",
+    "work", "call", "request", "reques", "extrac", "search", "termin",
+    "tool", "url", "urls", "when",
+})
+_PROC_ADJUDICATION_CAP = 12   # reason-model calls per sweep (cycles-not-seconds)
+
+
+def _proc_tool(content: str) -> str:
+    m = _PROC_TOOL_RE.match(content or "")
+    return m.group(1).lower() if m else ""
+
+
+def _proc_stance(content: str) -> str:
+    t = " " + (content or "").lower() + " "
+    avoid = any(w in t for w in _PROC_AVOID)
+    prefer = any(w in t for w in _PROC_PREFER)
+    if avoid == prefer:          # neither, or both -> ambiguous
+        return ""
+    return "avoid" if avoid else "prefer"
+
+
+def _proc_topic_stems(content: str, tool: str) -> set:
+    """Specific topic stems of a procedural directive: the '[tool]' prefix is
+    stripped, and the tool's own name stems plus generic mechanics/outcome
+    stems are removed, so only genuinely topical words (a domain, a flag, a
+    strategy) can count as shared topic between two heuristics."""
+    body = _PROC_TOOL_RE.sub("", content or "", count=1)
+    stems = _policy_stems(body) - _policy_stems(tool.replace("_", " "))
+    return stems - _PROC_GENERIC_STEMS
+
 logger = logging.getLogger(__name__)
 
 
@@ -994,7 +1059,14 @@ class DreamCycleMixin:
           so the store itself stays model-free. FAIL-OPEN: errors and None keep
           the pre-existing conservative behavior — flag the pair; conflict_limbo
           protects it and arbitration (resolve_conflict / dismiss_conflict)
-          decides."""
+          decides.
+
+        Two SPECIALIZED passes follow the general one, each catching a class the
+        content+entity gates cannot pair: the policy pass (opposite-polarity
+        rules, gated by detect_policy_conflicts) and the procedural pass
+        (same-tool usage heuristics that contradict by paraphrase, gated by
+        detect_procedural_conflicts — the adjudicator is reused there but locks
+        only on an explicit True)."""
         if not _HRR_AVAILABLE:
             return
  
@@ -1174,6 +1246,68 @@ class DreamCycleMixin:
                         if st1 == st2:                     # same stance -> consistent
                             continue
                         if len(stem1 & stem2) < 1:         # must concern the same action
+                            continue
+                        conflict_id = str(uuid.uuid4())[:8]
+                        self._conn.execute(
+                            "UPDATE semantic_facts SET conflict_group_id = ?, "
+                            "conflict_since_cycle = ? WHERE id IN (?, ?)",
+                            (conflict_id, cur_cycle, id1, id2))
+                        assigned_this_pass.add(id1)
+                        assigned_this_pass.add(id2)
+                        conflicts_found += 1
+                        break
+
+            # ── Procedural-contradiction pass (same-tool superstition sweep) ──
+            # See the module comment above _PROC_TOOL_RE for the field finding
+            # and the two-lane design. Scans ALL live tiers: superstition does
+            # its damage from the moment it lands (recall does not tier-gate),
+            # and procedural facts sit in importance_categories so decay will
+            # not remove a fresh contradiction either.
+            if getattr(self, "detect_procedural_conflicts", True):
+                proc_rows = self._conn.execute(
+                    "SELECT id, content FROM semantic_facts "
+                    "WHERE category = 'procedural' "
+                    "  AND tier IN ('short', 'mid', 'long') "
+                    "  AND conflict_group_id IS NULL "
+                    "ORDER BY updated_at DESC LIMIT 200"
+                ).fetchall()
+                pmeta = []
+                for r in proc_rows:
+                    if r["id"] in assigned_this_pass:
+                        continue
+                    tool = _proc_tool(r["content"])
+                    if not tool:      # precision-first: unprefixed facts skipped
+                        continue
+                    pmeta.append((r["id"], r["content"], tool,
+                                  _proc_stance(r["content"]),
+                                  _proc_topic_stems(r["content"], tool)))
+                adjudications = 0
+                for i in range(len(pmeta)):
+                    id1, c1, tool1, st1, stems1 = pmeta[i]
+                    if id1 in assigned_this_pass:
+                        continue
+                    for j in range(i + 1, len(pmeta)):
+                        id2, c2, tool2, st2, stems2 = pmeta[j]
+                        if id2 in assigned_this_pass or tool2 != tool1:
+                            continue
+                        shared_topic = stems1 & stems2
+                        contradict = False
+                        if st1 and st2 and st1 != st2 and len(shared_topic) >= 1:
+                            # Lane 1: plain do-vs-don't about the same topic.
+                            contradict = True
+                        elif (adjudicator is not None
+                              and len(shared_topic) >= 2
+                              and adjudications < _PROC_ADJUDICATION_CAP):
+                            # Lane 2: paraphrase contradictions ("bundle URLs"
+                            # vs "one URL per call") need semantics. Lock only
+                            # on an explicit True — None/error/False skip.
+                            adjudications += 1
+                            try:
+                                contradict = adjudicator(c1, c2) is True
+                            except Exception as e:
+                                logger.debug(
+                                    "Procedural adjudicator failed (skip): %s", e)
+                        if not contradict:
                             continue
                         conflict_id = str(uuid.uuid4())[:8]
                         self._conn.execute(

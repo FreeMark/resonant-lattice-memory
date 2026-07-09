@@ -2384,6 +2384,116 @@ def test_store_conflict_adjudicator_gate():
     print("  adjudicator gate OK: False skips; True/None/error lock (fail-open)")
 
 
+def _add_procedural_fact(s, content, tier="short"):
+    """Add a category='procedural' tool heuristic, detection-ready (no entities
+    or relations needed — the procedural pass is lexical)."""
+    _, fid = s.add_or_reinforce_fact(content, _emb(s, content), "procedural",
+                                     "sess1", entities=[])
+    s._conn.execute("UPDATE semantic_facts SET tier=? WHERE id=?", (tier, fid))
+    s._conn.commit()
+    return fid
+
+
+def test_store_procedural_conflict_deterministic_lane():
+    """Procedural tool-superstition sweep (2026-07-09 nemo field finding): the
+    dream-cycle's '[tool]' heuristics contradict by paraphrase and were invisible
+    to the general pass (category-excluded). Lane 1: same tool + OPPOSITE stance
+    (avoid vs prefer) + a shared specific topic stem locks a conflict group —
+    while same-stance and different-tool pairs are spared."""
+    if not _STORE_OK:
+        print("  SKIP"); return
+    s = _fresh_store()
+    assert s.detect_procedural_conflicts is True         # central default
+    a = _add_procedural_fact(s, "[web_extract] Avoid using web_extract on "
+        "raw.githubusercontent.com URLs pointing to three.js source files.")
+    b = _add_procedural_fact(s, "[web_extract] For raw.githubusercontent.com "
+        "JavaScript files, always set use_llm_processing: true.", tier="mid")
+    # Opposite stance but DIFFERENT tool — must NOT pair across tools.
+    d = _add_procedural_fact(s, "[web_search] Avoid raw.githubusercontent.com "
+        "site restrictions when searching for three.js source files.")
+    s.resolve_hrr_conflicts()
+    g_a, g_b = _conflict_gid(s, a), _conflict_gid(s, b)
+    assert g_a is not None and g_a == g_b, (g_a, g_b)
+    assert _conflict_gid(s, d) is None
+    since = s._conn.execute(
+        "SELECT conflict_since_cycle FROM semantic_facts WHERE id=?", (a,)
+    ).fetchone()["conflict_since_cycle"]
+    assert since is not None
+    s.close()
+    # Same stance, same tool, same topic — consistent advice, must NOT duel
+    # (fresh store so no opposite-stance partner exists to absorb either).
+    s1 = _fresh_store()
+    c1 = _add_procedural_fact(s1, "[web_extract] Avoid using web_extract on "
+        "raw.githubusercontent.com URLs pointing to three.js source files.")
+    c2 = _add_procedural_fact(s1, "[web_extract] Never fetch three.js source "
+        "files from raw.githubusercontent.com directly.")
+    s1.resolve_hrr_conflicts()
+    assert _conflict_gid(s1, c1) is None and _conflict_gid(s1, c2) is None
+    s1.close()
+    # Config gate: detect_procedural_conflicts=False disables the sweep.
+    s2 = _fresh_store(detect_procedural_conflicts=False)
+    a2 = _add_procedural_fact(s2, "[web_extract] Avoid using web_extract on "
+        "raw.githubusercontent.com URLs pointing to three.js source files.")
+    b2 = _add_procedural_fact(s2, "[web_extract] For raw.githubusercontent.com "
+        "JavaScript files, always set use_llm_processing: true.")
+    s2.resolve_hrr_conflicts()
+    assert _conflict_gid(s2, a2) is None and _conflict_gid(s2, b2) is None
+    s2.close()
+    print("  procedural lane 1 OK: avoid-vs-prefer duels; same-stance/cross-tool/gated-off spared")
+
+
+def test_store_procedural_conflict_adjudicator_lane():
+    """Lane 2: same-stance paraphrase contradictions (the real 'bundle many URLs
+    per call' vs 'prefer a single URL per invocation' pair from the nemo DB)
+    carry no opposite polarity, so only the reason-model adjudicator can pair
+    them — and ONLY an explicit True locks (None/False/error skip: precision-
+    first, NOT fail-open like the general pass, because superstition is
+    self-inflicted rather than adversarial)."""
+    if not _STORE_OK:
+        print("  SKIP"); return
+    BUNDLE = ("[web_extract] When extracting JavaScript files, bundling "
+              "multiple files in a single web_extract call increases success "
+              "likelihood; single-file requests often fail.")
+    SINGLE = ("[web_extract] When supplying multiple URLs in a single "
+              "web_extract call, extraction often fails; prefer supplying a "
+              "single URL per invocation.")
+
+    def _pair(s):
+        return _add_procedural_fact(s, BUNDLE), _add_procedural_fact(s, SINGLE)
+
+    # True → locked.
+    s = _fresh_store(); a, b = _pair(s)
+    calls = []
+    s.resolve_hrr_conflicts(adjudicator=lambda x, y: calls.append(1) or True)
+    assert _conflict_gid(s, a) is not None
+    assert _conflict_gid(s, a) == _conflict_gid(s, b)
+    assert len(calls) >= 1
+    s.close()
+    # False → spared.
+    s = _fresh_store(); a, b = _pair(s)
+    s.resolve_hrr_conflicts(adjudicator=lambda x, y: False)
+    assert _conflict_gid(s, a) is None and _conflict_gid(s, b) is None
+    s.close()
+    # None (ambiguous) → spared — the procedural lane is NOT fail-open.
+    s = _fresh_store(); a, b = _pair(s)
+    s.resolve_hrr_conflicts(adjudicator=lambda x, y: None)
+    assert _conflict_gid(s, a) is None and _conflict_gid(s, b) is None
+    s.close()
+    # Error → spared (skip, logged at debug).
+    def _boom(x, y):
+        raise RuntimeError("model down")
+    s = _fresh_store(); a, b = _pair(s)
+    s.resolve_hrr_conflicts(adjudicator=_boom)
+    assert _conflict_gid(s, a) is None and _conflict_gid(s, b) is None
+    s.close()
+    # No adjudicator at all → lane 2 never fires → spared.
+    s = _fresh_store(); a, b = _pair(s)
+    s.resolve_hrr_conflicts()
+    assert _conflict_gid(s, a) is None and _conflict_gid(s, b) is None
+    s.close()
+    print("  procedural lane 2 OK: adjudicator True locks; False/None/error/absent spare")
+
+
 def test_store_dismiss_conflict():
     """Phase 6 second verb: dismiss_conflict unlocks ALL members of a false-positive
     group symmetrically — no supersession, no winner, confirm stamp + small
