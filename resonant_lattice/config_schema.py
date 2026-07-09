@@ -444,6 +444,22 @@ CONFIG_SCHEMA = [
                     "recomputed synchronously so stale cross-topic memory isn't injected as high-confidence "
                     "candidates. 0 disables the gate (always reuse the proxy).",
      "default": 0.3},
+    {"key": "inject_current_datetime",
+     "description": "Prepend the LIVE local date/time to every autonomous recall injection (a "
+                    "<current_datetime> tag ahead of the <resonant_memory> block, present even when "
+                    "recall is empty) so a cycle-driven agent is instantly time-coherent without "
+                    "spending a tool call to check the clock. Presentation-layer only, stamped at "
+                    "CONSUMPTION time: a cached background prefetch gets the real 'now', not the "
+                    "time it was computed. Memory mechanics (decay/promotion/freshness) stay "
+                    "strictly cycle-driven and never see wall-clock. False = legacy (no time line).",
+     "default": True},
+    {"key": "datetime_timezone",
+     "description": "IANA timezone for the injected <current_datetime> tag (e.g. "
+                    "'America/New_York'). Empty = the host's system-local time. Set this when "
+                    "the agent host runs on UTC (typical for a headless server) but the USER "
+                    "lives in a real timezone; 'now' should mean the user's wall clock, not the "
+                    "server's. Unknown names fall back to system-local rather than failing.",
+     "default": ""},
 ]
 
 # Central source of truth for all runtime defaults.

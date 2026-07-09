@@ -8,6 +8,7 @@ self._retriever/_store, the prefetch cache, recall gate, and config attrs."""
 import logging
 import re
 import threading
+from datetime import datetime
 from typing import List, Dict
 
 logger = logging.getLogger(__name__)
@@ -39,9 +40,14 @@ class RecallMixin:
         background after the previous turn (cache hit), so the per-turn
         embedding + hybrid-search latency stays off the model's critical path.
         Cache miss (e.g. the first turn) falls back to a synchronous recall.
+
+        Every return path passes through _time_context_block(), which stamps
+        the LIVE local clock at consumption time (a cached block computed
+        minutes ago still carries the real "now") so the agent stays
+        time-coherent even when recall comes back empty.
         """
         if not self._retriever or not query:
-            return ""
+            return self._time_context_block("")
         sid = session_id or self._session_id
         cached = self._prefetch_cache.pop(sid, None)
         # The background recall is a latency-hiding proxy computed from the PREVIOUS
@@ -52,12 +58,12 @@ class RecallMixin:
         if cached is not None:
             cached_q, cached_block = cached
             if cached_q == query or (cached_block and self._prefetch_proxy_ok(query, cached_q)):
-                return cached_block
+                return self._time_context_block(cached_block)
         try:
-            return self._compute_prefetch(query, sid)
+            return self._time_context_block(self._compute_prefetch(query, sid))
         except Exception as e:
             logger.debug("Prefetch failed: %s", e)
-            return ""
+            return self._time_context_block("")
 
 
     def queue_prefetch(self, query: str, *, session_id: str = "") -> None:
@@ -79,6 +85,48 @@ class RecallMixin:
 
         threading.Thread(target=_bg, daemon=True).start()
 
+
+    def _time_context_block(self, block: str) -> str:
+        """Prepend the live local date/time so the agent is instantly time-coherent.
+
+        The lattice ages on MEMORY CYCLES, never wall-clock; this is a
+        presentation-layer annotation for the PRIMARY agent, not a memory
+        mechanic. Stamped at CONSUMPTION time, because the cached background
+        prefetch may be minutes (or, in an idle desktop session, hours) old by
+        the time the next message arrives. The tag sits OUTSIDE
+        <resonant_memory>: the clock is authoritative context, not a fallible
+        retrieved candidate, and it must never read as a stored fact. Injected
+        even when recall is empty so time coherence never depends on a hit.
+        """
+        if not getattr(self, "_inject_current_datetime", True):
+            return block
+        try:
+            now = None
+            tzname = getattr(self, "_datetime_timezone", "") or ""
+            if tzname:
+                # The USER's zone, not the host's: a headless server typically runs
+                # UTC, and "now" must mean the user's wall clock. Unknown/missing
+                # zone data falls back to host-local rather than losing the stamp.
+                try:
+                    from zoneinfo import ZoneInfo
+                    now = datetime.now(ZoneInfo(tzname))
+                except Exception:
+                    now = None
+            if now is None:
+                now = datetime.now().astimezone()
+            h12 = now.strftime("%I:%M %p").lstrip("0")
+            tz = now.strftime("%Z") or "local"
+            line = (
+                "<current_datetime>"
+                f"{now.strftime('%A %Y-%m-%d %H:%M')} ({h12} {tz}). "
+                "Live system clock at message time; authoritative for 'now', dates, "
+                "and recency. No tool call needed to check the time. Ephemeral "
+                "context, not a stored memory."
+                "</current_datetime>"
+            )
+        except Exception:
+            return block
+        return f"{line}\n{block}" if block else line
 
     def _prefetch_proxy_ok(self, query: str, cached_query: str) -> bool:
         """Reuse the previous turn's (proxy) recall only when the new query shares

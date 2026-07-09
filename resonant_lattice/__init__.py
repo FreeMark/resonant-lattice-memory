@@ -240,6 +240,17 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         self._prefetch_proxy_min_overlap = float(
             self._config.get("prefetch_proxy_min_overlap",
                              DEFAULTS["prefetch_proxy_min_overlap"]))
+        # Live-clock annotation on the recall injection: the agent thinks in memory
+        # CYCLES, so hand it wall-clock "now" as presentation-layer context each turn
+        # (stamped at consumption time in prefetch(); cycle mechanics never see it).
+        self._inject_current_datetime = bool(
+            self._config.get("inject_current_datetime",
+                             DEFAULTS["inject_current_datetime"]))
+        # "Now" should mean the USER's wall clock; on a UTC server, set the IANA
+        # zone here. Empty = host system-local.
+        self._datetime_timezone = str(
+            self._config.get("datetime_timezone",
+                             DEFAULTS["datetime_timezone"]) or "")
         # Phase 1b supersedion (default ON): a conflict loser bled to 0 is retired
         # as tier='superseded' history (superseded_by=winner) BEFORE prune instead
         # of being deleted — a memory is the history of what you believed. Set

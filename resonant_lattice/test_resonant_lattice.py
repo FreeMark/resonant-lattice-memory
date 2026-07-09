@@ -3222,6 +3222,54 @@ def test_prefetch_proxy_topic_shift_gate():
     assert app._prefetch_proxy_ok("completely unrelated text", "auto approve a spend")
 
 
+def _time_app(rows, on=True):
+    """Bare recall mixin wired for full prefetch() calls (not just _compute_prefetch)."""
+    app = _prefetch_app(rows, quarantine=False)
+    app._inject_current_datetime = on
+    app._session_id = "sid"
+    app._prefetch_cache = {}
+    app._prefetch_proxy_min_overlap = 0.3
+    return app
+
+
+def test_prefetch_time_context_injected():
+    import datetime as _dt
+    rows = [{"id": 1, "content": "Acme is in Boston", "category": "general",
+             "tier": "mid", "resonance_count": 4, "conflict_group_id": None, "pinned": 0}]
+    d_before = _dt.datetime.now().astimezone().strftime("%Y-%m-%d")
+    block = _time_app(rows).prefetch("where is acme")
+    d_after = _dt.datetime.now().astimezone().strftime("%Y-%m-%d")
+    # Live clock tag stamped today, OUTSIDE (preceding) the memory block: the
+    # clock is authoritative context, never a fallible retrieved candidate.
+    assert block.startswith("<current_datetime>"), block[:80]
+    head = block.split("</current_datetime>")[0]
+    assert d_before in head or d_after in head, head
+    assert "<resonant_memory>" in block and "Acme is in Boston" in block
+    assert block.index("</current_datetime>") < block.index("<resonant_memory>")
+    # Empty recall still yields the clock: time coherence never depends on a hit.
+    empty = _time_app([]).prefetch("anything")
+    assert empty.startswith("<current_datetime>") and "<resonant_memory>" not in empty
+    # A CACHED background block is stamped at CONSUMPTION time too (an idle
+    # session's hours-old proxy must still carry the real "now").
+    app = _time_app(rows)
+    app._prefetch_cache["sid"] = ("where is acme",
+                                  "<resonant_memory>\ncached\n</resonant_memory>")
+    cached = app.prefetch("where is acme")
+    assert cached.startswith("<current_datetime>") and "cached" in cached
+    # An unknown datetime_timezone falls back to host-local; the stamp survives.
+    bad = _time_app([])
+    bad._datetime_timezone = "Not/AZone"
+    assert bad.prefetch("anything").startswith("<current_datetime>")
+
+
+def test_prefetch_time_context_off_is_legacy():
+    rows = [{"id": 1, "content": "Acme is in Boston", "category": "general",
+             "tier": "mid", "resonance_count": 4, "conflict_group_id": None, "pinned": 0}]
+    block = _time_app(rows, on=False).prefetch("where is acme")
+    assert "<current_datetime>" not in block and "Acme is in Boston" in block
+    assert _time_app([], on=False).prefetch("anything") == ""
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Canonical-state projection (current_value layer over the lattice)
 # ─────────────────────────────────────────────────────────────────────────────
