@@ -3384,6 +3384,59 @@ def test_store_write_batch_tool_dispatch():
         h._store.close()
 
 
+def test_store_procedural_staleness_decay():
+    """Procedural facts fade if unconfirmed; used / pinned / conflicted / domain spared."""
+    s = _fresh_store(vector_dim=8)
+    try:
+        cyc = 20
+
+        def add(content, category="procedural", res=10.0, last_conf=0, pinned=0, cgid=None):
+            s._conn.execute(
+                "INSERT INTO semantic_facts (content, category, tier, resonance_count, "
+                "last_confirmed_cycle, learned_at_cycle, pinned, conflict_group_id) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (content, category, "long", res, last_conf, last_conf, pinned, cgid),
+            )
+            return s._conn.execute(
+                "SELECT id FROM semantic_facts WHERE content=?", (content,)
+            ).fetchone()[0]
+
+        stale = add("[web_search] use a site: operator", last_conf=0)         # old -> bleeds
+        fresh = add("[web_search] use plain keywords + source", last_conf=19)  # recent -> spared
+        pinned = add("[web_search] pinned authority rule", last_conf=0, pinned=1)
+        conflicted = add("[web_search] contested tip", last_conf=0, cgid="ab12cd34")
+        domain = add("The capital of France is Paris.", category="general", last_conf=0)
+        s._conn.commit()
+
+        def res(fid):
+            return s._conn.execute(
+                "SELECT resonance_count FROM semantic_facts WHERE id=?", (fid,)
+            ).fetchone()[0]
+
+        before = {f: res(f) for f in (stale, fresh, pinned, conflicted, domain)}
+        n = s.apply_procedural_staleness_decay(cyc, bleed=0.5, grace_cycles=5)
+        after = {f: res(f) for f in (stale, fresh, pinned, conflicted, domain)}
+
+        assert abs(after[stale] - (before[stale] - 0.5)) < 1e-9, \
+            f"stale procedural should bleed 0.5, {before[stale]}->{after[stale]}"
+        assert after[fresh] == before[fresh], "recently-confirmed procedural must not bleed"
+        assert after[pinned] == before[pinned], "pinned must not bleed"
+        assert after[conflicted] == before[conflicted], "in-conflict must not bleed"
+        assert after[domain] == before[domain], "non-procedural (domain) must not bleed"
+        assert n == 1, f"only the one stale procedural fact should be touched, got {n}"
+
+        # Off when disabled.
+        assert s.apply_procedural_staleness_decay(cyc, bleed=0.0) == 0
+        # Floors at 0, never negative.
+        s._conn.execute("UPDATE semantic_facts SET resonance_count=0.3 WHERE id=?", (stale,))
+        s._conn.commit()
+        s.apply_procedural_staleness_decay(cyc, bleed=0.5, grace_cycles=5)
+        assert res(stale) == 0.0, "resonance must floor at 0"
+        print("  procedural staleness OK: stale bleeds; used/pinned/conflict/domain spared; floors at 0")
+    finally:
+        s.close()
+
+
 def test_reason_gate_serializes():
     """The memory-reason gate admits at most `capacity` concurrent holders.
 

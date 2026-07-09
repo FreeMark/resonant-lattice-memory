@@ -512,6 +512,19 @@ class ConsolidationMixin:
                     self._freshness_halflife_cycles,
                 )
 
+            # 1.6 Procedural staleness — perishable tool-use knowledge fades if it
+            #     stops being re-confirmed (conflict-excluded + long-tier-exempt, so
+            #     otherwise immortal). Lets a superseded search/URL rule fade once a
+            #     better/pinned rule wins recall. Gated (bleed <= 0 -> no-op).
+            if getattr(self, "_procedural_staleness_bleed", 0.0) > 0:
+                faded = self._store.apply_procedural_staleness_decay(
+                    self._memory_cycle,
+                    self._procedural_staleness_bleed,
+                    getattr(self, "_procedural_staleness_grace_cycles", 5),
+                )
+                if faded:
+                    logger.debug("Procedural staleness: bled %d unconfirmed procedural fact(s)", faded)
+
             # 2. Conflict resolution. Limbo (default): DON'T auto-bleed — hold contested facts in
             #    sustained resonance, flagged on recall, until the USER arbitrates (resolve_conflict).
             #    Limbo off: the original auto-bleed-to-resolution duel (floor>0 ⇒ non-lethal).

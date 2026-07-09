@@ -375,6 +375,50 @@ class DreamCycleMixin:
             return cur.rowcount or 0
 
 
+    def apply_procedural_staleness_decay(self, current_cycle: int, bleed: float,
+                                         grace_cycles: int = 0,
+                                         categories: tuple = ('procedural',)) -> int:
+        """Perishable-knowledge decay for PROCEDURAL (tool-use) facts.
+
+        Domain facts are largely permanent, but procedural knowledge — which
+        search operator works, which URL pattern to fetch — ages as tools and
+        backends change. Two design facts make stale procedural advice sticky: it
+        is EXCLUDED from conflict detection (so a corrected rule can't duel it
+        out), and once it reaches the long tier it is decay-EXEMPT. That
+        combination let a batch of superseded ``site:``-operator rules keep
+        dominating recall after the backend stopped supporting them.
+
+        This gives procedural facts a use-it-or-lose-it half-life the domain tiers
+        don't need: a procedural fact not confirmed within ``grace_cycles`` bleeds
+        ``bleed`` resonance each dream cycle, in ANY tier (unlike apply_cycle_decay,
+        which exempts long). ``last_confirmed_cycle`` is refreshed by every
+        reinforcement (add_or_reinforce_fact) — and an in-use pattern is re-distilled
+        and reinforced each dream cycle — so a pattern that stays useful never
+        bleeds; once a better/pinned rule wins and the stale one stops being
+        re-confirmed, it fades and prunes on its own. Pinned facts and facts in an
+        active conflict group are exempt. Off when ``bleed`` <= 0. Returns rows hit.
+        """
+        if bleed <= 0:
+            return 0
+        cats = [c for c in (categories or ('procedural',))] or ['procedural']
+        ph = ",".join("?" * len(cats))
+        with self._lock:
+            cur = self._conn.execute(
+                f"""
+                UPDATE semantic_facts
+                SET resonance_count = MAX(0.0, resonance_count - ?),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE category IN ({ph})
+                  AND COALESCE(pinned, 0) = 0
+                  AND conflict_group_id IS NULL
+                  AND (? - COALESCE(last_confirmed_cycle, learned_at_cycle, ?)) > ?
+                """,
+                [bleed] + cats + [current_cycle, current_cycle, grace_cycles],
+            )
+            self._conn.commit()
+            return cur.rowcount or 0
+
+
     def increment_tier_cycles(self) -> None:
         """Advance the tier-dwell counter by one dream cycle.
 

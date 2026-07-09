@@ -48,6 +48,23 @@ CONFIG_SCHEMA = [
     {"key": "reflection_frequency", "description": "Consolidate every N turns", "default": 5},
     {"key": "dream_every_n_consolidations", "description": "Dream cycle every N consolidations",
      "default": 2},
+    {"key": "procedural_staleness_bleed",
+     "description": "Use-it-or-lose-it decay (resonance per dream cycle) for PROCEDURAL (tool-use) "
+                    "facts not confirmed within procedural_staleness_grace_cycles. Procedural "
+                    "knowledge (which search operator / URL pattern works) is perishable, yet it is "
+                    "excluded from conflict detection AND decay-exempt in the long tier, so stale "
+                    "tool advice otherwise stays immortal and keeps dominating recall (the "
+                    "site:-operator incident). A small positive value lets a superseded procedural "
+                    "rule fade once a better/pinned rule wins recall; an in-use pattern is "
+                    "re-confirmed each dream cycle and never bleeds. Pinned facts and facts in an "
+                    "active conflict group are exempt. 0 = off (legacy immortal-procedural).",
+     "default": 0.5},
+    {"key": "procedural_staleness_grace_cycles",
+     "description": "Dream cycles a procedural fact may go unconfirmed (not reinforced/re-distilled) "
+                    "before procedural_staleness_bleed applies. Reinforcement stamps "
+                    "last_confirmed_cycle, so an actively-used pattern never bleeds; only genuinely "
+                    "unused procedural advice fades.",
+     "default": 5},
     {"key": "short_tier_cycles", "description": "Dream-cycle dwell before short→mid promotion",
      "default": 3},
     {"key": "mid_tier_cycles", "description": "Dream-cycle dwell before mid→long promotion",

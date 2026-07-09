@@ -172,6 +172,13 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
 
         # === Hebbian Neuroplastic Parameters (all cycle-driven) ===
         self._reflection_frequency = int(self._config.get("reflection_frequency", DEFAULTS["reflection_frequency"]))
+        # Perishable-knowledge decay for procedural (tool-use) facts, so stale tool
+        # advice (e.g. a search operator the backend stopped supporting) fades once a
+        # better/pinned rule wins recall instead of staying immortal in the long tier.
+        self._procedural_staleness_bleed = float(self._config.get(
+            "procedural_staleness_bleed", DEFAULTS.get("procedural_staleness_bleed", 0.5)))
+        self._procedural_staleness_grace_cycles = int(self._config.get(
+            "procedural_staleness_grace_cycles", DEFAULTS.get("procedural_staleness_grace_cycles", 5)))
         self._initial_resonance = int(self._config.get("initial_resonance", DEFAULTS["initial_resonance"]))
         self._decay_per_cycle = float(self._config.get("decay_per_cycle", DEFAULTS["decay_per_cycle"]))
         self._similarity_threshold = float(self._config.get("similarity_threshold", DEFAULTS["similarity_threshold"]))
