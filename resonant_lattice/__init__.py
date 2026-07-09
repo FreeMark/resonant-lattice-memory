@@ -160,6 +160,9 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         # ceiling silently times the whole epoch out and stores 0 facts. Raise further for very
         # slow/cloud reasoners; a one-off timeout is non-fatal (the next cycle retries).
         self._reason_timeout = float(self._config.get("reason_timeout", DEFAULTS["reason_timeout"]))
+        # Retry consolidation extraction when a reasoning model flakily returns 0 facts.
+        self._extraction_max_attempts = int(self._config.get(
+            "extraction_max_attempts", DEFAULTS.get("extraction_max_attempts", 3)))
 
         # Serialize the memory layer's reasoning-model calls to at most N in flight
         # (default 1 = strictly serial). Guarantees the memory layer holds one endpoint

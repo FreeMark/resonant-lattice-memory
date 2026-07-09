@@ -220,7 +220,7 @@ class ConsolidationMixin:
         try:
             # 1. Get recent conversation turns
             episodes = self._store.get_recent_episodes(
-                limit=self._reflection_frequency * 2, 
+                limit=self._reflection_frequency * 2,
                 session_id=session_id
             )
             if not episodes:
@@ -244,7 +244,7 @@ class ConsolidationMixin:
             # 2. Build prompt for the reasoning model
             prompt = f"{self._extraction_prompt}\n\nLOG:\n{transcript}\n\nJSON OUTPUT:"
 
-            # 3. Call the reasoning model (with retry)
+            # 3. Call the reasoning model + parse (one attempt).
             payload = {
                 "model": self._reason_model,
                 "prompt": prompt,
@@ -252,53 +252,56 @@ class ConsolidationMixin:
                 "options": {"temperature": 0.1}
             }
 
-            try:
+            def _extract_once() -> list:
+                """One reason-model call + robust JSON parse → list of fact dicts."""
                 result = _ollama_post_with_retry(
                     f"{self._ollama_endpoint_reason}/api/generate",
                     payload,
-                    timeout=getattr(self, "_reason_timeout", 300.0)
+                    timeout=getattr(self, "_reason_timeout", 300.0),
                 )
-                response_text = result.get("response", "[]").strip()
-            except Exception as e:
-                logger.error("Reason model call failed after retries: %s", e)
-                return  # skip this epoch on hard failure (non-fatal for agent)
+                rt = self._store._clean_llm_json(result.get("response", "[]").strip())
+                facts: object = []
+                try:
+                    s_i, e_i = rt.find('['), rt.rfind(']')
+                    facts = json.loads(rt[s_i:e_i + 1] if (s_i != -1 and e_i != -1) else rt)
+                except json.JSONDecodeError:
+                    logger.debug("Strict JSON parsing failed — using regex fallback")
+                    cp = r'"content"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"'
+                    kp = r'"category"\s*:\s*"([^"]+)"'
+                    facts = []
+                    for m in re.finditer(cp, rt, re.IGNORECASE):
+                        c = m.group(1).replace('\\"', '"')
+                        km = re.search(kp, rt[m.end():m.end() + 120])
+                        facts.append({"content": c, "category": km.group(1) if km else "general"})
+                # Tolerate a single object or a {"facts": [...]} wrapper.
+                if isinstance(facts, dict):
+                    if isinstance(facts.get("facts"), list):
+                        facts = facts["facts"]
+                    elif "content" in facts:
+                        facts = [facts]
+                    else:
+                        facts = []
+                return facts if isinstance(facts, list) else []
 
-            # 4. Robust JSON parsing with multiple fallback layers
+            # Reasoning models non-deterministically return an empty array for a
+            # transcript that plainly contains extractable facts (observed ~half the
+            # time on the reason endpoint), which would silently drop a whole turn's
+            # knowledge. Re-attempt a few times when the transcript is substantial.
             extracted_facts = []
-
-            # Use the shared cleaner from store.py (respects the _LatticeStore alias)
-            response_text = self._store._clean_llm_json(response_text)
-
-            try:
-                start_idx = response_text.find('[')
-                end_idx = response_text.rfind(']')
-                if start_idx != -1 and end_idx != -1:
-                    clean_json = response_text[start_idx:end_idx + 1]
-                    extracted_facts = json.loads(clean_json)
-                else:
-                    extracted_facts = json.loads(response_text)
-            except json.JSONDecodeError:
-                logger.debug("Strict JSON parsing failed — using regex fallback")
-                content_pattern = r'"content"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"'
-                cat_pattern = r'"category"\s*:\s*"([^"]+)"'
-
-                for match in re.finditer(content_pattern, response_text, re.IGNORECASE):
-                    content = match.group(1).replace('\\"', '"')
-                    cat_match = re.search(cat_pattern, response_text[match.end():match.end() + 120])
-                    category = cat_match.group(1) if cat_match else "general"
-                    extracted_facts.append({"content": content, "category": category})
-
-            # 4b. Normalize: tolerate a single object or a {"facts": [...]} wrapper,
-            #     so a non-array LLM response doesn't crash and drop the whole epoch.
-            if isinstance(extracted_facts, dict):
-                if isinstance(extracted_facts.get("facts"), list):
-                    extracted_facts = extracted_facts["facts"]
-                elif "content" in extracted_facts:
-                    extracted_facts = [extracted_facts]
-                else:
-                    extracted_facts = []
-            if not isinstance(extracted_facts, list):
-                extracted_facts = []
+            _max_attempts = max(1, int(getattr(self, "_extraction_max_attempts", 3)))
+            for _ea in range(_max_attempts):
+                try:
+                    extracted_facts = _extract_once()
+                except Exception as e:
+                    logger.error("Reason model call failed after retries: %s", e)
+                    return  # skip this epoch on hard failure (non-fatal for agent)
+                if extracted_facts or len(transcript) < 200:
+                    break
+                logger.info(
+                    "Consolidation extraction returned 0 facts (attempt %d/%d) from a "
+                    "%d-char transcript; retrying (reasoning-model flakiness guard)",
+                    _ea + 1, _max_attempts, len(transcript),
+                )
 
             # 5. Process each extracted fact
             quotes_dropped = 0   # facts dropped by source-quote attestation

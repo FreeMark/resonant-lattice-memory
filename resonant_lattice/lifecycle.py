@@ -6,6 +6,7 @@ _retriever, locks/threads, config attrs, and sibling methods via self."""
 
 import logging
 import threading
+import time
 from typing import Any, Dict, List, Optional
 
 from store_common import hrr, _HRR_AVAILABLE
@@ -70,6 +71,22 @@ class LifecycleMixin:
                     "final turn's episodes may be missing from consolidation."
                 )
  
+        # Step 1b: The ingest that writes THIS turn's episodes runs on a
+        # background thread and can still be in-flight when finalize is called
+        # right after the turn (one-shot / scripted paths: the tracked thread
+        # joined above may not be the one writing this turn, or sync landed after
+        # the join). If the session still shows no episodes, poll briefly so the
+        # forced consolidation below reads the real transcript instead of an
+        # empty window — the root cause of a research report distilling 0 facts.
+        if self._session_id:
+            for _ in range(50):  # up to ~5s
+                try:
+                    if self._store.get_recent_episodes(limit=1, session_id=self._session_id):
+                        break
+                except Exception:
+                    break
+                time.sleep(0.1)
+
         # Step 2: Forced blocking consolidation (waits up to 50s for the lock
         # — long enough to outlast an in-flight 45s Ollama call).
         # Suppress its inline dream cycle — we run exactly one in Step 3.

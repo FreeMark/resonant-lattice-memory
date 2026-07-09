@@ -44,6 +44,13 @@ CONFIG_SCHEMA = [
                     "rate-limited endpoint and never starves the primary agent's own "
                     "generation. Raise only if the reason endpoint has spare concurrent capacity.",
      "default": 1},
+    {"key": "extraction_max_attempts",
+     "description": "How many times the consolidation may re-call the reasoning model when it "
+                    "returns ZERO facts from a substantial transcript. Reasoning models "
+                    "non-deterministically emit an empty array for a log that plainly contains "
+                    "extractable knowledge; retrying recovers the turn's facts instead of silently "
+                    "dropping them. 1 = no retry (legacy).",
+     "default": 3},
     {"key": "hrr_dim", "description": "HRR phase-vector dimension", "default": 1024},
     {"key": "reflection_frequency", "description": "Consolidate every N turns", "default": 5},
     {"key": "dream_every_n_consolidations", "description": "Dream cycle every N consolidations",
