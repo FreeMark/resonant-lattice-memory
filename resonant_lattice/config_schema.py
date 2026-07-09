@@ -36,6 +36,14 @@ CONFIG_SCHEMA = [
                     "flagship reasoner (e.g. nemotron-3-ultra) that thinks past 180s won't time out "
                     "the epoch and store 0 facts. A one-off timeout is non-fatal — the next cycle retries.",
      "default": 300.0},
+    {"key": "memory_reason_max_concurrency",
+     "description": "Max concurrent reasoning-model calls the memory layer may have in "
+                    "flight at once (consolidation, relation extraction, abstraction, "
+                    "distillation, conflict adjudication, narrative). Default 1 = strictly "
+                    "serial, so the memory layer consumes exactly one slot on a shared/"
+                    "rate-limited endpoint and never starves the primary agent's own "
+                    "generation. Raise only if the reason endpoint has spare concurrent capacity.",
+     "default": 1},
     {"key": "hrr_dim", "description": "HRR phase-vector dimension", "default": 1024},
     {"key": "reflection_frequency", "description": "Consolidate every N turns", "default": 5},
     {"key": "dream_every_n_consolidations", "description": "Dream cycle every N consolidations",

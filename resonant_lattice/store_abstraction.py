@@ -7,6 +7,7 @@ import logging
 import json
 import re
 import urllib.request
+from reason_gate import reason_slot
 from typing import List, Dict, Optional, Tuple
 
 from store_common import serialize_vector, hrr, _HRR_AVAILABLE, sqlite3
@@ -145,7 +146,7 @@ class AbstractionMixin:
                     data=json.dumps(payload).encode("utf-8"),
                     headers={"Content-Type": "application/json"}
                 )
-                with urllib.request.urlopen(req, timeout=300.0) as response:
+                with reason_slot(), urllib.request.urlopen(req, timeout=300.0) as response:
                     result = json.loads(response.read().decode("utf-8"))
                     response_text = result.get("response", "[]").strip()
 
@@ -425,7 +426,7 @@ class AbstractionMixin:
                 # Generous timeout: this runs off the hot path (dream cycle) and a
                 # cold-start model load can exceed 60s. A failed gist here lets the
                 # originals prune unpreserved, so it's worth waiting for the model.
-                with urllib.request.urlopen(req, timeout=300.0) as response:
+                with reason_slot(), urllib.request.urlopen(req, timeout=300.0) as response:
                     result = json.loads(response.read().decode("utf-8"))
                     response_text = result.get("response", "[]").strip()
 
@@ -705,7 +706,7 @@ class AbstractionMixin:
                     data=json.dumps(payload).encode("utf-8"),
                     headers={"Content-Type": "application/json"},
                 )
-                with urllib.request.urlopen(req, timeout=300.0) as resp:
+                with reason_slot(), urllib.request.urlopen(req, timeout=300.0) as resp:
                     result = json.loads(resp.read().decode("utf-8"))
                     response_text = result.get("response", "[]").strip()
             except Exception as e:

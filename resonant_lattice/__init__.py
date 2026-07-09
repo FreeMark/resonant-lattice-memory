@@ -161,6 +161,15 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         # slow/cloud reasoners; a one-off timeout is non-fatal (the next cycle retries).
         self._reason_timeout = float(self._config.get("reason_timeout", DEFAULTS["reason_timeout"]))
 
+        # Serialize the memory layer's reasoning-model calls to at most N in flight
+        # (default 1 = strictly serial). Guarantees the memory layer holds one endpoint
+        # slot at a time, so on a shared/rate-limited reason endpoint it never starves
+        # the primary agent's own generation (primary + compression + memory = 3 slots).
+        import reason_gate
+        reason_gate.set_capacity(self._config.get(
+            "memory_reason_max_concurrency",
+            DEFAULTS.get("memory_reason_max_concurrency", 1)))
+
         # === Hebbian Neuroplastic Parameters (all cycle-driven) ===
         self._reflection_frequency = int(self._config.get("reflection_frequency", DEFAULTS["reflection_frequency"]))
         self._initial_resonance = int(self._config.get("initial_resonance", DEFAULTS["initial_resonance"]))

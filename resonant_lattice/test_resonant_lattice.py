@@ -3384,6 +3384,56 @@ def test_store_write_batch_tool_dispatch():
         h._store.close()
 
 
+def test_reason_gate_serializes():
+    """The memory-reason gate admits at most `capacity` concurrent holders.
+
+    This is the invariant that keeps the memory layer to one reasoning-model call
+    at a time (default) so it consumes a single slot on a shared/rate-limited
+    endpoint and never starves the primary agent. Pure threading — no LLM/DB.
+    """
+    import reason_gate
+    import threading, time
+
+    def measure_peak(n_threads):
+        state = {"now": 0, "max": 0}
+        lock = threading.Lock()
+
+        def worker():
+            with reason_gate.reason_slot():
+                with lock:
+                    state["now"] += 1
+                    state["max"] = max(state["max"], state["now"])
+                time.sleep(0.02)
+                with lock:
+                    state["now"] -= 1
+
+        threads = [threading.Thread(target=worker) for _ in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        return state["max"]
+
+    try:
+        reason_gate.set_capacity(1)
+        peak1 = measure_peak(8)
+        assert peak1 == 1, f"capacity=1 should serialize, but saw {peak1} concurrent"
+
+        reason_gate.set_capacity(3)
+        peak3 = measure_peak(8)
+        assert 1 <= peak3 <= 3, f"capacity=3 must cap at 3, saw {peak3}"
+
+        # Guard against garbage config: clamps to >=1, never 0 (which would deadlock).
+        reason_gate.set_capacity(0)
+        assert reason_gate.capacity() == 1
+        peak0 = measure_peak(4)
+        assert peak0 == 1
+    finally:
+        reason_gate.set_capacity(1)  # restore default for any later test
+
+    print("  reason gate OK: serial@1, caps@3, clamps 0->1")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = skipped = failed = 0

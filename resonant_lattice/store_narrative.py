@@ -15,6 +15,7 @@ gisting discipline from Phase 4.
 import json
 import logging
 import urllib.request
+from reason_gate import reason_slot
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -134,7 +135,7 @@ class NarrativeMixin:
                 data=json.dumps(payload).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
             )
-            with urllib.request.urlopen(req, timeout=300.0) as response:
+            with reason_slot(), urllib.request.urlopen(req, timeout=300.0) as response:
                 raw = json.loads(response.read().decode("utf-8")).get("response", "")
         except Exception as e:
             logger.debug("Session summarisation LLM call failed (non-fatal): %s", e)

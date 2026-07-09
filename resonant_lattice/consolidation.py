@@ -10,6 +10,7 @@ import logging
 import re
 import time
 import urllib.request
+from reason_gate import reason_slot
 
 from attestation import _attest_source_quote
 from store_common import hrr, _HRR_AVAILABLE
@@ -30,7 +31,7 @@ def _ollama_post_with_retry(url: str, payload: dict, timeout: float, max_attempt
                 data=json.dumps(payload).encode("utf-8"),
                 headers={"Content-Type": "application/json"}
             )
-            with urllib.request.urlopen(req, timeout=timeout) as response:
+            with reason_slot(), urllib.request.urlopen(req, timeout=timeout) as response:
                 return json.loads(response.read().decode("utf-8"))
         except Exception as e:
             last_err = e

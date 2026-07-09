@@ -17,6 +17,7 @@ import json
 import logging
 import re
 import urllib.request
+from reason_gate import reason_slot
 from typing import Dict, List, Optional, Tuple
 
 from store_common import hrr, _HRR_AVAILABLE
@@ -281,7 +282,7 @@ class RelationsMixin:
                 data=json.dumps(payload).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
             )
-            with urllib.request.urlopen(req, timeout=300.0) as response:
+            with reason_slot(), urllib.request.urlopen(req, timeout=300.0) as response:
                 raw = json.loads(response.read().decode("utf-8")).get("response", "[]")
             cleaned = self._clean_llm_json(raw)
             start_idx, end_idx = cleaned.find("["), cleaned.rfind("]")
