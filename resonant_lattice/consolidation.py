@@ -232,6 +232,11 @@ class ConsolidationMixin:
                 for ep in episodes
             ])
 
+            # Re-sync the logical clock from the DB before announcing/stamping:
+            # in a long-lived process the cached counter lags behind one-shot
+            # runs that advanced the shared profile DB while we sat idle.
+            self._memory_cycle = self._store.get_cycle_counts()[0]
+
             # Announce the cycle BEFORE the (potentially slow) reason-model call,
             # so a long cloud round-trip reads as "consolidating" rather than a
             # silent hang. The completion line alone can look like a stall while
@@ -401,9 +406,10 @@ class ConsolidationMixin:
             # the just-written plaintext back, no Ollama). One mechanism for every write path.
             self._blind_reconcile()
 
-            # 6. Update cycle counter
-            self._memory_cycle += 1
-            self._store.set_cycle_counts(memory_cycle=self._memory_cycle)
+            # 6. Update cycle counter — atomic in-DB increment. Never write
+            # back the process-cached value: other processes share this DB
+            # and may have advanced the clock since we loaded it.
+            self._memory_cycle = self._store.increment_cycle("memory_cycle")
             logger.info(
                 f"✅ Memory Cycle {self._memory_cycle} completed — "
                 f"{len(extracted_facts)} facts processed"
@@ -473,8 +479,12 @@ class ConsolidationMixin:
 
         # === 0. Dwell + migrations ===
         try:
-            self._dream_cycle_count += 1
-            self._store.set_cycle_counts(dream_cycle=self._dream_cycle_count)
+            # Atomic in-DB increment (multi-process safe; see increment_cycle).
+            self._dream_cycle_count = self._store.increment_cycle("dream_cycle")
+            # The dream's decay/pruning math and batch stamps run on the
+            # memory_cycle clock — refresh it from the DB too, so a stale
+            # cached value can't under-age facts in a long-lived process.
+            self._memory_cycle = self._store.get_cycle_counts()[0]
             # Semantic ROLLBACK: stamp this cycle's generative writes (abstraction /
             # gist / procedural distillation) with a batch id, closed in finally.
             self._store.begin_write_batch(phase="dream", model=self._reason_model,

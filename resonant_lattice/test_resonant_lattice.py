@@ -3535,6 +3535,57 @@ def test_reason_gate_serializes():
     print("  reason gate OK: serial@1, caps@3, clamps 0->1")
 
 
+def test_store_cycle_counter_multiprocess_atomicity():
+    """Two store instances on ONE DB file (the gateway and one-shot hermes runs
+    share a profile DB) must not clobber each other's cycle counters.
+
+    Regression: nemo 2026-07-09 — dream_cycle went 38 -> 22 when a long-lived
+    gateway (started when the counter was ~21) wrote back its process-cached
+    counter over the value that overnight one-shot runs had advanced.
+    increment_cycle() is an atomic in-DB read-modify-write, so a stale cache
+    can never roll the shared clock backwards. Validated at the SQLite layer."""
+    if not _STORE_OK:
+        print(f"  SKIP cycle counter atomicity: {_SKIP_REASON}"); return
+    tmp = tempfile.mkdtemp()
+    db = os.path.join(tmp, "race.db")
+    s1 = store_mod.LatticeStore(db_path=db, vector_dim=16)   # "gateway": long-lived
+    s2 = store_mod.LatticeStore(db_path=db, vector_dim=16)   # "one-shot" runs
+
+    # one-shots advance the clock while the gateway sits idle with a stale cache
+    for i in range(1, 6):
+        assert s2.increment_cycle("dream_cycle") == i
+    # the gateway increments later: must build on 5, not its startup snapshot
+    assert s1.increment_cycle("dream_cycle") == 6, "stale cache clobbered the clock"
+    assert s1.get_cycle_counts()[1] == 6
+    assert s2.get_cycle_counts()[1] == 6
+
+    # interleaved writers: strictly monotonic, no duplicates, no rollback
+    vals = []
+    for i in range(8):
+        w = s1 if i % 2 else s2
+        vals.append(w.increment_cycle("memory_cycle"))
+    assert vals == list(range(1, 9)), f"non-monotonic/duplicated: {vals}"
+    # substrate check: the meta row itself holds the final value
+    row = s1._conn.execute(
+        "SELECT CAST(value AS INTEGER) AS v FROM meta WHERE key='memory_cycle'"
+    ).fetchone()
+    assert row["v"] == 8
+
+    # guard: unknown keys rejected (meta holds non-counter rows too)
+    try:
+        s1.increment_cycle("hrr_dim")
+        assert False, "increment_cycle accepted a non-counter key"
+    except ValueError:
+        pass
+
+    # absolute setter still works for tests/replay, and increments build on it
+    s1.set_cycle_counts(memory_cycle=100)
+    assert s2.increment_cycle("memory_cycle") == 101
+
+    s1.close(); s2.close()
+    print("  ✓ cycle counters atomic across store instances (multi-process safe)")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = skipped = failed = 0

@@ -364,6 +364,35 @@ class LatticeStore(SchemaMixin, FactsMixin, DreamCycleMixin, AbstractionMixin,
                 )
             self._conn.commit()
 
+    def increment_cycle(self, key: str) -> int:
+        """Atomically advance a cycle counter IN THE DATABASE and return the
+        new value.
+
+        Production increments must use this, never set_cycle_counts(cached+1):
+        multiple processes share one profile DB (long-running gateway plus
+        one-shot hermes runs), and a long-lived process writing back its
+        process-cached counter rolls the shared clock backwards (observed on
+        nemo 2026-07-09: dream_cycle 38 -> 22). The read-modify-write below
+        runs inside a single transaction on the meta row, so concurrent
+        writers serialize instead of clobbering each other.
+        set_cycle_counts() remains for ABSOLUTE clock control (tests, replay).
+        """
+        if key not in ("memory_cycle", "dream_cycle"):
+            raise ValueError(f"unknown cycle counter: {key!r}")
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO meta(key, value) VALUES (?, '0')", (key,)
+            )
+            self._conn.execute(
+                "UPDATE meta SET value = CAST(value AS INTEGER) + 1 WHERE key = ?",
+                (key,)
+            )
+            row = self._conn.execute(
+                "SELECT CAST(value AS INTEGER) AS v FROM meta WHERE key = ?", (key,)
+            ).fetchone()
+            self._conn.commit()
+            return int(row["v"])
+
     def close(self) -> None:
         """Close the DB connection. Lock-guarded so in-flight locked operations
         (background ingest/dream threads) drain before the handle dies.
