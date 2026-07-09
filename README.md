@@ -140,6 +140,11 @@ For a multi-profile install, repeat into `~/.hermes/profiles/<name>/plugins/`.
   self-model, narrative, importance-weighted retention) copy **`resonant_lattice/recommended_config.yaml`**.
 - **Every tunable lives in one place:** `resonant_lattice/config_schema.py` (the
   `DEFAULTS` dict). It's also the `hermes memory setup` field list.
+- **Time-coherent recall** (`inject_current_datetime`, on by default): a live
+  `<current_datetime>` stamp is prepended to every recall injection at
+  consumption time, so a cycle-driven agent always knows the real "now" without
+  spending a tool call, even when recall returns no facts. Set `datetime_timezone`
+  (an IANA zone name) when the host runs UTC but the user lives elsewhere.
 - For a **money/compliance agent**: pin policies (they hold as authoritative
   `[PRIORITY RULE]`s), and turn on `importance_decay_discount` so high-stakes facts
   resist fading even when rarely recalled.
