@@ -231,6 +231,15 @@ class ConsolidationMixin:
                 for ep in episodes
             ])
 
+            # Announce the cycle BEFORE the (potentially slow) reason-model call,
+            # so a long cloud round-trip reads as "consolidating" rather than a
+            # silent hang. The completion line alone can look like a stall while
+            # the reason model is mid-flight (esp. on a rate-limited endpoint).
+            logger.info(
+                f"🧠 Memory Cycle {self._memory_cycle + 1} started "
+                f"({len(episodes)} recent episodes, reason model)"
+            )
+
             # 2. Build prompt for the reasoning model
             prompt = f"{self._extraction_prompt}\n\nLOG:\n{transcript}\n\nJSON OUTPUT:"
 
