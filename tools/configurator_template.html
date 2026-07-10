@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Resonant Lattice Memory Configurator</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --panel2: #1c2330; --border: #2d333b;
+    --text: #e6edf3; --muted: #8b949e; --accent: #2dd4bf; --accent2: #818cf8;
+    --changed: #f59e0b; --danger: #ef4444; --ok: #10b981;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text); margin: 0;
+    display: flex; height: 100vh; gap: 14px; padding: 14px;
+  }
+  .left { flex: 1.15; overflow-y: auto; padding-right: 6px; min-width: 380px; }
+  .right { flex: 1; display: flex; flex-direction: column; background: var(--panel);
+           border: 1px solid var(--border); border-radius: 10px; overflow: hidden; min-width: 340px; }
+  h1 { font-size: 19px; margin: 0 0 2px; }
+  h1 .dot { color: var(--accent); }
+  .sub { color: var(--muted); font-size: 12.5px; margin-bottom: 12px; }
+  .sub a { color: var(--accent2); text-decoration: none; }
+  .card { background: var(--panel); border: 1px solid var(--border);
+          border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  select, input[type="text"], input[type="number"], textarea {
+    background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 7px 9px; font-family: ui-monospace, Consolas, monospace;
+    font-size: 12.5px; width: 100%;
+  }
+  select { width: auto; flex: 1; min-width: 180px; }
+  textarea { resize: vertical; }
+  button {
+    background: var(--accent); color: #06251f; border: none; border-radius: 6px;
+    padding: 7px 13px; font-weight: 700; cursor: pointer; font-size: 12.5px;
+  }
+  button:hover { filter: brightness(1.12); }
+  button.sec { background: var(--panel2); color: var(--text); border: 1px solid var(--border); }
+  button.danger { background: var(--danger); color: #fff; }
+  .search { width: 100%; margin-bottom: 12px; }
+  details { background: var(--panel); border: 1px solid var(--border);
+            border-radius: 10px; margin-bottom: 10px; }
+  summary { cursor: pointer; padding: 11px 14px; font-weight: 700; font-size: 13.5px;
+            user-select: none; list-style: none; display: flex; justify-content: space-between; }
+  summary::-webkit-details-marker { display: none; }
+  summary .count { color: var(--muted); font-weight: 400; font-size: 12px; }
+  .grp-body { padding: 4px 14px 12px; }
+  .ctl { padding: 9px 0; border-top: 1px solid var(--border); }
+  .ctl:first-child { border-top: none; }
+  .ctl label { display: flex; justify-content: space-between; align-items: baseline;
+               font-family: ui-monospace, Consolas, monospace; font-size: 12.5px;
+               font-weight: 600; margin-bottom: 3px; gap: 8px; }
+  .ctl label .val { color: var(--accent); font-weight: 400; }
+  .ctl.changed label .key::after { content: " \25CF"; color: var(--changed); }
+  .help { color: var(--muted); font-size: 11.5px; line-height: 1.45; margin-bottom: 6px;
+          display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+          overflow: hidden; cursor: pointer; }
+  .help.open { -webkit-line-clamp: unset; }
+  .numrow { display: flex; gap: 10px; align-items: center; }
+  .numrow input[type="range"] { flex: 1; accent-color: var(--accent); }
+  .numrow input[type="number"] { width: 92px; }
+  .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+            font-size: 12px; color: var(--muted); }
+  .switch input { accent-color: var(--accent); width: 16px; height: 16px; }
+  .hdr { display: flex; justify-content: space-between; align-items: center;
+         padding: 11px 14px; background: #10151c; border-bottom: 1px solid var(--border); }
+  .hdr h2 { font-size: 14px; margin: 0; }
+  pre { margin: 0; padding: 16px; overflow: auto; flex: 1;
+        font-family: ui-monospace, Consolas, monospace; font-size: 12.5px;
+        line-height: 1.5; color: #9fb3c8; white-space: pre; }
+  .foot { padding: 8px 14px; border-top: 1px solid var(--border); color: var(--muted);
+          font-size: 11px; display: flex; justify-content: space-between; }
+  .pill { background: var(--panel2); border: 1px solid var(--border); border-radius: 99px;
+          padding: 2px 10px; font-size: 11.5px; color: var(--muted); }
+  .pill b { color: var(--changed); }
+  .blurb { color: var(--muted); font-size: 11.5px; margin-top: 6px; line-height: 1.4; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="left">
+  <h1>Resonant Lattice Memory <span class="dot">Configurator</span></h1>
+  <div class="sub">
+    Every knob of the
+    <a href="https://github.com/FreeMark/resonant-lattice-memory" target="_blank" rel="noopener">Resonant Lattice Memory</a>
+    provider. Pick a preset, turn dials, paste the YAML into your hermes profile config.
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <select id="presetSelect"></select>
+      <button onclick="applySelectedPreset()">Apply</button>
+      <button class="sec" onclick="saveProfile()">Save as...</button>
+      <button class="danger hidden" id="deleteBtn" onclick="deleteProfile()">Delete</button>
+    </div>
+    <div id="presetBlurb" class="blurb"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="sec" onclick="resetAll()">Reset to defaults</button>
+      <button class="sec" onclick="exportProfiles()">Export saved</button>
+      <button class="sec" onclick="document.getElementById('importFile').click()">Import</button>
+      <input type="file" id="importFile" accept=".json" class="hidden" onchange="importProfiles(event)">
+      <span class="pill">changed: <b id="changedCount">0</b></span>
+    </div>
+  </div>
+
+  <input type="text" class="search" id="searchBox" placeholder="Search keys and descriptions (e.g. decay, conflict, prompt)..." oninput="applySearch()">
+
+  <div id="groups"></div>
+</div>
+
+<div class="right">
+  <div class="hdr">
+    <h2>config.yaml</h2>
+    <div class="row">
+      <label class="switch"><input type="checkbox" id="fullMode" onchange="renderYAML()"> full config</label>
+      <button id="copyBtn" onclick="copyYAML()">Copy YAML</button>
+    </div>
+  </div>
+  <pre id="yamlOut"></pre>
+  <div class="foot">
+    <span>Paste under your profile's existing <code>plugins:</code> block (or as shown).</span>
+    <span>__KEY_COUNT__ keys | built __BUILD_DATE__ @ __BUILD_SHA__ from config_schema.py</span>
+  </div>
+</div>
+
+<script>
+const SCHEMA  = __SCHEMA_JSON__;
+const PRESETS = __PRESETS_JSON__;
+const GROUPS  = __GROUPS_JSON__;
+const LS_KEY  = "rlm_configurator_profiles";
+
+const byKey = {};
+SCHEMA.forEach(s => byKey[s.key] = s);
+const state = {};
+
+function defval(s) { return s.default; }
+function resetAll() {
+  SCHEMA.forEach(s => state[s.key] = defval(s));
+  syncAllInputs(); renderYAML();
+}
+
+// ---------------- rendering ----------------
+function ctlHtml(s) {
+  const id = "in_" + s.key;
+  if (s.type === "bool") {
+    return `<label class="switch"><input type="checkbox" id="${id}" onchange="onInput('${s.key}')"> enabled</label>`;
+  }
+  if (s.type === "int" || s.type === "float") {
+    return `<div class="numrow">
+      <input type="range" id="${id}_r" min="${s.min}" max="${s.max}" step="${s.step}"
+             oninput="document.getElementById('${id}').value=this.value; onInput('${s.key}')">
+      <input type="number" id="${id}" min="${s.min}" step="${s.step}"
+             oninput="document.getElementById('${id}_r').value=this.value; onInput('${s.key}')">
+    </div>`;
+  }
+  if (s.type === "select") {
+    const opts = s.options.map(o => `<option value="${o}">${o}</option>`).join("");
+    return `<select id="${id}" style="width:100%" onchange="onInput('${s.key}')">${opts}</select>`;
+  }
+  if (s.type === "json") {
+    return `<textarea id="${id}" rows="2" spellcheck="false" oninput="onInput('${s.key}')"></textarea>`;
+  }
+  if (s.type === "prompt") {
+    return `<textarea id="${id}" rows="7" spellcheck="false" oninput="onInput('${s.key}')"></textarea>`;
+  }
+  return `<input type="text" id="${id}" spellcheck="false" oninput="onInput('${s.key}')">`;
+}
+
+function build() {
+  const host = document.getElementById("groups");
+  GROUPS.forEach(([gid, gname]) => {
+    const items = SCHEMA.filter(s => s.group === gid);
+    if (!items.length) return;
+    const d = document.createElement("details");
+    d.open = true; d.id = "grp_" + gid;
+    d.innerHTML = `<summary><span>${gname}</span><span class="count">${items.length}</span></summary>
+                   <div class="grp-body">` +
+      items.map(s => `
+        <div class="ctl" id="ctl_${s.key}">
+          <label><span class="key">${s.key}</span><span class="val" id="val_${s.key}"></span></label>
+          <div class="help" onclick="this.classList.toggle('open')">${escapeHtml(s.help)}</div>
+          ${ctlHtml(s)}
+        </div>`).join("") + `</div>`;
+    host.appendChild(d);
+  });
+}
+
+function escapeHtml(t) {
+  return t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function syncAllInputs() {
+  SCHEMA.forEach(s => {
+    const el = document.getElementById("in_" + s.key);
+    if (!el) return;
+    const v = state[s.key];
+    if (s.type === "bool") el.checked = !!v;
+    else el.value = v;
+    if (s.type === "int" || s.type === "float") {
+      const r = document.getElementById("in_" + s.key + "_r");
+      if (r) r.value = v;
+    }
+    decorate(s.key);
+  });
+}
+
+function onInput(key) {
+  const s = byKey[key];
+  const el = document.getElementById("in_" + key);
+  if (s.type === "bool") state[key] = el.checked;
+  else if (s.type === "int") state[key] = (el.value === "" ? defval(s) : parseInt(el.value, 10));
+  else if (s.type === "float") state[key] = (el.value === "" ? defval(s) : parseFloat(el.value));
+  else state[key] = el.value;
+  decorate(key); renderYAML();
+}
+
+function isChanged(s) {
+  const v = state[s.key], d = defval(s);
+  if (s.type === "json") {
+    try { return JSON.stringify(JSON.parse(v)) !== JSON.stringify(JSON.parse(d)); }
+    catch (e) { return true; }
+  }
+  return v !== d;
+}
+
+function decorate(key) {
+  const s = byKey[key];
+  const ctl = document.getElementById("ctl_" + key);
+  const val = document.getElementById("val_" + key);
+  if (!ctl) return;
+  ctl.classList.toggle("changed", isChanged(s));
+  if (s.type === "int" || s.type === "float") val.textContent = state[key];
+  else if (s.type === "bool") val.textContent = state[key] ? "true" : "false";
+  else val.textContent = "";
+}
+
+// ---------------- YAML ----------------
+function yamlStr(v) {
+  if (v === "") return "''";
+  if (/^[A-Za-z0-9._\/:+-]+$/.test(v) && !/^[-+.\d]/.test(v)
+      && !/^(true|false|null|yes|no|on|off|~)$/i.test(v)) return v;
+  return "'" + String(v).split("'").join("''") + "'";
+}
+
+function yamlNum(v) {
+  return (typeof v === "number" && isFinite(v)) ? String(v) : "0";
+}
+
+function renderYAML() {
+  const full = document.getElementById("fullMode").checked;
+  const lines = [];
+  let changed = 0, invalid = [];
+  SCHEMA.forEach(s => {
+    const ch = isChanged(s);
+    if (ch) changed++;
+    if (!full && !ch) return;
+    const v = state[s.key];
+    if (s.type === "bool") lines.push(`    ${s.key}: ${v ? "true" : "false"}`);
+    else if (s.type === "int" || s.type === "float") lines.push(`    ${s.key}: ${yamlNum(v)}`);
+    else if (s.type === "json") {
+      try { lines.push(`    ${s.key}: ${JSON.stringify(JSON.parse(v))}`); }
+      catch (e) { invalid.push(s.key); }
+    }
+    else if (s.type === "prompt") {
+      lines.push(`    ${s.key}: |`);
+      String(v).split("\n").forEach(l => lines.push(`      ${l}`));
+    }
+    else lines.push(`    ${s.key}: ${yamlStr(v)}`);
+  });
+  document.getElementById("changedCount").textContent = changed;
+  let out;
+  if (!lines.length) {
+    out = "# All values are at their defaults.\n# Turn a dial, or toggle 'full config' to see everything.";
+  } else {
+    out = "plugins:\n  resonant_lattice:\n" + lines.join("\n");
+  }
+  if (invalid.length) out = "# WARNING invalid JSON in: " + invalid.join(", ") + "\n" + out;
+  document.getElementById("yamlOut").textContent = out;
+}
+
+function copyYAML() {
+  navigator.clipboard.writeText(document.getElementById("yamlOut").textContent).then(() => {
+    const b = document.getElementById("copyBtn");
+    b.textContent = "Copied!"; b.style.background = "var(--ok)";
+    setTimeout(() => { b.textContent = "Copy YAML"; b.style.background = ""; }, 1600);
+  });
+}
+
+// ---------------- presets & profiles ----------------
+function customProfiles() {
+  try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch (e) { return {}; }
+}
+
+function refreshPresetSelect(selected) {
+  const sel = document.getElementById("presetSelect");
+  sel.innerHTML = "";
+  const g1 = document.createElement("optgroup"); g1.label = "Presets";
+  PRESETS.forEach(p => g1.appendChild(new Option(p.name, "preset:" + p.id)));
+  sel.appendChild(g1);
+  const customs = customProfiles();
+  if (Object.keys(customs).length) {
+    const g2 = document.createElement("optgroup"); g2.label = "Your saved configs";
+    Object.keys(customs).forEach(id => g2.appendChild(new Option(customs[id].name, "custom:" + id)));
+    sel.appendChild(g2);
+  }
+  if (selected) sel.value = selected;
+  onPresetPick();
+}
+
+function onPresetPick() {
+  const v = document.getElementById("presetSelect").value;
+  document.getElementById("deleteBtn").classList.toggle("hidden", !v.startsWith("custom:"));
+  const p = PRESETS.find(x => "preset:" + x.id === v);
+  document.getElementById("presetBlurb").textContent = p ? p.blurb : "";
+}
+
+function applySelectedPreset() {
+  const v = document.getElementById("presetSelect").value;
+  let values = null;
+  if (v.startsWith("preset:")) {
+    const p = PRESETS.find(x => "preset:" + x.id === v);
+    if (p) values = p.values;
+  } else if (v.startsWith("custom:")) {
+    const c = customProfiles()[v.slice(7)];
+    if (c) values = c.values;
+  }
+  if (!values) return;
+  SCHEMA.forEach(s => state[s.key] = defval(s));
+  Object.keys(values).forEach(k => {
+    if (!(k in byKey)) return;
+    const s = byKey[k];
+    state[k] = (s.type === "json" && typeof values[k] !== "string")
+      ? JSON.stringify(values[k]) : values[k];
+  });
+  syncAllInputs(); renderYAML();
+}
+
+function saveProfile() {
+  const name = prompt("Name this configuration:");
+  if (!name || !name.trim()) return;
+  const overrides = {};
+  SCHEMA.forEach(s => { if (isChanged(s)) overrides[s.key] = state[s.key]; });
+  const customs = customProfiles();
+  const id = "c" + Date.now();
+  customs[id] = { name: name.trim(), values: overrides };
+  localStorage.setItem(LS_KEY, JSON.stringify(customs));
+  refreshPresetSelect("custom:" + id);
+}
+
+function deleteProfile() {
+  const v = document.getElementById("presetSelect").value;
+  if (!v.startsWith("custom:")) return;
+  if (!confirm("Delete this saved configuration?")) return;
+  const customs = customProfiles();
+  delete customs[v.slice(7)];
+  localStorage.setItem(LS_KEY, JSON.stringify(customs));
+  refreshPresetSelect("preset:" + PRESETS[0].id);
+}
+
+function exportProfiles() {
+  const customs = customProfiles();
+  if (!Object.keys(customs).length) { alert("No saved configurations to export."); return; }
+  const blob = new Blob([JSON.stringify(customs, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "rlm_configurator_profiles.json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function importProfiles(ev) {
+  const f = ev.target.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = e => {
+    try {
+      const merged = Object.assign(customProfiles(), JSON.parse(e.target.result));
+      localStorage.setItem(LS_KEY, JSON.stringify(merged));
+      refreshPresetSelect();
+      alert("Imported.");
+    } catch (err) { alert("Could not parse that file."); }
+    ev.target.value = "";
+  };
+  r.readAsText(f);
+}
+
+// ---------------- search ----------------
+function applySearch() {
+  const q = document.getElementById("searchBox").value.trim().toLowerCase();
+  GROUPS.forEach(([gid]) => {
+    const grp = document.getElementById("grp_" + gid);
+    if (!grp) return;
+    let visible = 0;
+    SCHEMA.filter(s => s.group === gid).forEach(s => {
+      const hit = !q || s.key.toLowerCase().includes(q) || s.help.toLowerCase().includes(q);
+      document.getElementById("ctl_" + s.key).classList.toggle("hidden", !hit);
+      if (hit) visible++;
+    });
+    grp.classList.toggle("hidden", visible === 0);
+    if (q && visible) grp.open = true;
+  });
+}
+
+// ---------------- init ----------------
+build();
+document.getElementById("presetSelect").addEventListener("change", onPresetPick);
+resetAll();
+refreshPresetSelect("preset:" + PRESETS[0].id);
+</script>
+</body>
+</html>

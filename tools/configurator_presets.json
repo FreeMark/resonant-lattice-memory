@@ -1,0 +1,97 @@
+[
+  {
+    "id": "general-agent",
+    "name": "General Agent",
+    "blurb": "A balanced daily driver: cross-session continuity and a curated identity on top of the stock Hebbian defaults.",
+    "values": {
+      "enable_narrative": true,
+      "enable_self_model": true,
+      "reflection_frequency": 4,
+      "gist_before_prune": true
+    }
+  },
+  {
+    "id": "research-scholar",
+    "name": "Research Scholar",
+    "blurb": "Deep-research memory: strict attestation, a live relation graph with a small local triple model, aggressive consolidation cadence, and a large long tier.",
+    "values": {
+      "reflection_frequency": 3,
+      "abstraction_frequency": 2,
+      "reason_timeout": 600.0,
+      "enable_relations": true,
+      "relation_extract_llm": true,
+      "relation_model": "ibm/granite4.1:8b",
+      "ollama_endpoint_relation": "http://localhost:11434",
+      "enable_narrative": true,
+      "enable_self_model": true,
+      "max_long_facts": 4000,
+      "cluster_hrr_similarity": 0.18,
+      "cluster_entity_overlap": 0.3,
+      "gist_before_prune": true
+    }
+  },
+  {
+    "id": "overnight-knowledge-engine",
+    "name": "Overnight Knowledge Engine",
+    "blurb": "The batch-trainer tuning that built a 2000-fact expert overnight: long reason timeouts for cloud flagships, unlimited long tier, relation triples offloaded to a small local model, procedural conflict sweeps on.",
+    "values": {
+      "reason_timeout": 900.0,
+      "max_long_facts": 0,
+      "enable_relations": true,
+      "relation_extract_llm": true,
+      "relation_model": "ibm/granite4.1:8b",
+      "ollama_endpoint_relation": "http://localhost:11434",
+      "enable_narrative": true,
+      "gist_before_prune": true,
+      "importance_decay_discount": 0.6
+    }
+  },
+  {
+    "id": "low-vram-homelab",
+    "name": "Low-VRAM Homelab",
+    "blurb": "Everything on one small card: a 3B reasoner kept warm, fewer and lighter LLM passes, trimmed recall context.",
+    "values": {
+      "reason_model": "ibm/granite4.1:3b",
+      "embed_keep_alive": "1h",
+      "abstraction_frequency": 5,
+      "recall_limit": 150,
+      "health_check_every_n_dream_cycles": 20,
+      "tool_distill_frequency": 4
+    }
+  },
+  {
+    "id": "conspiracy-theorist",
+    "name": "Conspiracy Theorist (fun)",
+    "blurb": "Everything connects, man. Clustering thresholds on the floor, four-hop inference chains, and conflict detection told to look the other way. Pedagogical: this is what the conflict and clustering dials are protecting you from.",
+    "values": {
+      "cluster_hrr_similarity": 0.1,
+      "cluster_entity_overlap": 0.1,
+      "abstraction_frequency": 1,
+      "abstraction_max_clusters": 12,
+      "enable_relations": true,
+      "relation_extract_llm": true,
+      "relation_min_confidence": 0.1,
+      "max_inference_hops": 4,
+      "novelty_boost": 4.0,
+      "conflict_llm_adjudication": false,
+      "detect_policy_conflicts": false,
+      "detect_procedural_conflicts": false,
+      "conflict_subject_veto": false
+    }
+  },
+  {
+    "id": "goldfish",
+    "name": "Goldfish (fun)",
+    "blurb": "Lives entirely in the moment. Brutal decay, one-cycle tiers, a 25-fact long-term memory, and instant deletion at zero resonance. Pedagogical: watch the retention dials matter.",
+    "values": {
+      "decay_per_cycle": 5.0,
+      "short_tier_cycles": 1,
+      "mid_tier_cycles": 1,
+      "forget_after_dormant_cycles": 0,
+      "max_long_facts": 25,
+      "freshness_halflife_cycles": 5,
+      "prune_keep_sessions": 2,
+      "stale_decay_boost": 1.0
+    }
+  }
+]
