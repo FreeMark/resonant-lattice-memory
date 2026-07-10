@@ -13,6 +13,7 @@ import urllib.request
 from reason_gate import reason_slot
 
 from attestation import _attest_source_quote
+from proc_lock import FinalizeLock, FINALIZE_LOCK_WAIT
 from store_common import hrr, _HRR_AVAILABLE
 from self_write_gate import is_task_process_meta
 
@@ -216,6 +217,22 @@ class ConsolidationMixin:
             if not self._consolidation_lock.acquire(blocking=False):
                 logger.debug("Consolidation epoch already running — skipping")
                 return
+
+        # Cross-PROCESS serialization (concurrent overnight workers + gateway on
+        # one profile DB): same skip/wait semantics as the in-process lock above.
+        # Fresh instance per finalize unit — see proc_lock module docstring.
+        _flock = FinalizeLock(self._store.db_path)
+        if not _flock.acquire(FINALIZE_LOCK_WAIT if force_blocking else 0.0):
+            if force_blocking:
+                logger.error(
+                    "Finalize lock still held by another process after %.0fs — "
+                    "skipping forced consolidation (episodes remain durable).",
+                    FINALIZE_LOCK_WAIT)
+            else:
+                logger.info(
+                    "Consolidation deferred — another process is finalizing this DB")
+            self._consolidation_lock.release()
+            return
 
         try:
             # 1. Get recent conversation turns
@@ -429,6 +446,7 @@ class ConsolidationMixin:
                 self._store.end_write_batch()   # close the consolidation batch (no-op if none)
             except Exception:
                 pass
+            _flock.release()
             self._consolidation_lock.release()   # ← released BEFORE dream cycle
  
         # Dream cycle runs outside the consolidation lock.
@@ -443,8 +461,13 @@ class ConsolidationMixin:
 
 
     # ====================== DREAM CYCLE (Hebbian Maintenance) ======================
-    def _run_dream_cycle(self) -> None:
+    def _run_dream_cycle(self, wait_lock: bool = False) -> None:
         """Full Hebbian Dream Cycle — decay, promotion, abstraction, conflict resolution.
+
+        ``wait_lock``: when another PROCESS is finalizing this DB, a scheduled
+        dream (mid-session trigger, manual tool call) defers — the next trigger
+        dreams. The session-end dream passes True and waits its turn so every
+        session still gets its maintenance pass under N-way concurrency.
  
         Step order matters:
           0. increment_tier_cycles  — advance tier-dwell counters (short/mid)
@@ -475,6 +498,12 @@ class ConsolidationMixin:
             )
             return
         if not self._dream_lock.acquire(blocking=False):
+            return
+        # Cross-process serialization (see _run_consolidation_epoch / proc_lock).
+        _flock = FinalizeLock(self._store.db_path)
+        if not _flock.acquire(FINALIZE_LOCK_WAIT if wait_lock else 0.0):
+            logger.info("Dream cycle deferred — another process is finalizing this DB")
+            self._dream_lock.release()
             return
 
         # === 0. Dwell + migrations ===
@@ -629,6 +658,7 @@ class ConsolidationMixin:
                 self._store.end_write_batch()   # close the dream batch (no-op if none)
             except Exception:
                 pass
+            _flock.release()
             self._dream_lock.release()
 
     def _reembed_if_needed(self) -> int:

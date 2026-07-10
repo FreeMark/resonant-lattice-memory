@@ -184,6 +184,16 @@ class LatticeStore(SchemaMixin, FactsMixin, DreamCycleMixin, AbstractionMixin,
             self._conn.execute("PRAGMA foreign_keys=ON")
         except Exception as e:
             logger.warning("Could not enable foreign_keys pragma: %s", e)
+        # Multi-process write grace: concurrent overnight workers + a gateway all
+        # write this DB (WAL serializes writers). 30s outlasts any single
+        # finalize write burst, so a colliding episode INSERT retries silently
+        # instead of throwing 'database is locked'. This is lock-retry plumbing
+        # at the SQLite layer — cognition stays cycle-driven, nothing here
+        # schedules or fires memory work.
+        try:
+            self._conn.execute("PRAGMA busy_timeout=30000")
+        except Exception as e:
+            logger.warning("Could not set busy_timeout pragma: %s", e)
  
         try:
             self._conn.enable_load_extension(True)

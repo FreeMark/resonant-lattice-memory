@@ -2494,6 +2494,56 @@ def test_store_procedural_conflict_adjudicator_lane():
     print("  procedural lane 2 OK: adjudicator True locks; False/None/error/absent spare")
 
 
+def test_store_busy_timeout_set():
+    """Multi-process write grace: every store connection carries a 30s SQLite
+    busy_timeout so a write colliding with another process's finalize burst
+    retries instead of throwing 'database is locked'."""
+    if not _STORE_OK:
+        print("  SKIP"); return
+    s = _fresh_store()
+    ms = s._conn.execute("PRAGMA busy_timeout").fetchone()[0]
+    assert ms == 30000, ms
+    s.close()
+    print("  busy_timeout OK: 30000 ms on a fresh store connection")
+
+
+def test_finalize_lock_contention():
+    """FinalizeLock (cross-process finalize mutex): a held lock rejects
+    non-blocking and timed attempts from a second holder, and release hands it
+    over. Uses two instances (two file descriptors) — flock/msvcrt locks are
+    per-open-file-description, so this is real contention. Also proves the
+    lock holds across REAL process boundaries via a subprocess."""
+    import subprocess
+    import tempfile as _tf
+    import time
+    pl = _load("proc_lock")
+    base = os.path.join(_tf.mkdtemp(), "dbfile")
+
+    a = pl.FinalizeLock(base)
+    b = pl.FinalizeLock(base)
+    assert a.acquire(0.0) is True
+    assert b.acquire(0.0) is False                    # non-blocking: busy
+    t0 = time.time()
+    assert b.acquire(1.2) is False                    # timed: still busy
+    assert time.time() - t0 >= 1.0                    # actually waited
+    a.release()
+    assert b.acquire(0.0) is True                     # handover after release
+    # Cross-process: while b holds, a child process must fail fast.
+    code = (
+        "import sys; sys.path.insert(0, %r); import proc_lock; "
+        "sys.exit(0 if proc_lock.FinalizeLock(%r).acquire(0.0) is False else 1)"
+        % (os.path.dirname(os.path.abspath(pl.__file__)), base)
+    )
+    r = subprocess.run([sys.executable, "-c", code], timeout=30)
+    assert r.returncode == 0, "child process acquired a lock the parent holds"
+    b.release()
+    # After release the child can take it.
+    code2 = code.replace("is False", "is True")
+    r2 = subprocess.run([sys.executable, "-c", code2], timeout=30)
+    assert r2.returncode == 0, "child process failed to acquire a free lock"
+    print("  finalize lock OK: contention in-process + cross-process; clean handover")
+
+
 def test_store_dismiss_conflict():
     """Phase 6 second verb: dismiss_conflict unlocks ALL members of a false-positive
     group symmetrically — no supersession, no winner, confirm stamp + small
@@ -3693,7 +3743,7 @@ def test_store_cycle_counter_multiprocess_atomicity():
     assert s2.increment_cycle("memory_cycle") == 101
 
     s1.close(); s2.close()
-    print("  ✓ cycle counters atomic across store instances (multi-process safe)")
+    print("  cycle counters atomic across store instances (multi-process safe)")
 
 
 if __name__ == "__main__":

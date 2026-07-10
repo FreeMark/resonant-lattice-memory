@@ -99,7 +99,11 @@ class LifecycleMixin:
             self._generate_session_narrative(self._session_id)
 
         # Step 3: Dream cycle on a non-daemon thread with generous timeout.
-        t = threading.Thread(target=self._run_dream_cycle, daemon=False)
+        # wait_lock: under N-way overnight concurrency another process may be
+        # mid-finalize — the session-end dream WAITS (non-daemon thread, the
+        # process stays alive for it) instead of skipping its maintenance pass.
+        t = threading.Thread(target=self._run_dream_cycle, daemon=False,
+                             kwargs={"wait_lock": True})
         self._last_dream_thread = t   # tracked so shutdown() drains it before close()
         t.start()
         t.join(timeout=60.0)
