@@ -2679,8 +2679,10 @@ def test_relation_model_routing_and_default():
 def test_mirror_path_relation_hook():
     """on_memory_write mirror facts get the same Phase 5a relation hook as
     consolidation-extracted facts: gated, non-fatal, and routed through the
-    dedicated relation model. Field finding: builtin_memory facts had zero
-    fact_relations rows because the mirror path skipped the hook."""
+    dedicated relation model, and carry self-authored provenance labels.
+    Field finding: mirror-path facts had zero fact_relations rows because
+    the path skipped the hook, and their old builtin_* category did not
+    communicate "the agent wrote this itself" to recall or audits."""
     try:
         prov = _load("__init__")
     except Exception as e:
@@ -2697,7 +2699,8 @@ def test_mirror_path_relation_hook():
             return ["A", "B"]
 
         def add_or_reinforce_fact(self, content, emb, category, session_id, **kw):
-            calls["added"] = (content, category)
+            calls["added"] = (content, category, kw.get("quote_status"),
+                              kw.get("source_ref"))
             return ("added", 42)
 
         def extract_and_store_relations(self, fact_id, content, **kw):
@@ -2734,10 +2737,14 @@ def test_mirror_path_relation_hook():
         g["threading"].Thread = orig_thread
 
     assert calls.get("added"), calls
-    assert calls["added"][1] == "builtin_memory", calls
+    # Self-authored provenance labeling: legibility (category), epistemics
+    # (quote_status), provenance (source_ref) — three separate signals.
+    assert calls["added"][1] == "mental_note", calls
+    assert calls["added"][2] == "self_authored", calls
+    assert calls["added"][3] == "agent:MEMORY.md", calls
     assert calls.get("relations") == (42, "tiny-triples:latest",
                                       "http://smallnode:11434"), calls
-    print("  mirror relation hook OK: builtin fact routed through relation extraction")
+    print("  mirror relation hook OK: mental_note labeled + routed through relation extraction")
 
 
 def test_freshness_penalty_curve():

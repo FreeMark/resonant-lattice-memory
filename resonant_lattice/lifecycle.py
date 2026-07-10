@@ -159,6 +159,16 @@ class LifecycleMixin:
             logger.debug("Self-write gate: skipped self/infra mirror: %s", content[:60])
             return
 
+        # Provenance labeling: these facts are the agent's OWN synthesis (it
+        # chose the words written to MEMORY.md/USER.md) — a different trust
+        # class from transcript-extracted, quote-attested facts. Three signals:
+        # category reads as a note in recall ("[mental_note] ..."), quote_status
+        # marks the epistemics for audits/viz, source_ref records provenance.
+        category = {"memory": "mental_note", "user": "user_note"}.get(
+            target, f"builtin_{target}")
+        src_ref = {"memory": "agent:MEMORY.md", "user": "agent:USER.md"}.get(
+            target, f"agent:{target}")
+
         def _ingest() -> None:
             try:
                 emb = self._retriever._get_embedding(content)
@@ -167,8 +177,9 @@ class LifecycleMixin:
                 entities = self._store._extract_entities(content)
                 hrr_vec = hrr.encode_fact(content, entities, dim=self._hrr_dim) if _HRR_AVAILABLE else None
                 action, fid = self._store.add_or_reinforce_fact(
-                    content, emb, f"builtin_{target}", self._session_id,
+                    content, emb, category, self._session_id,
                     hrr_vector=hrr_vec, entities=entities,
+                    source_ref=src_ref, quote_status="self_authored",
                 )
                 # Phase 5a parity: mirrored builtin-memory facts join the relation
                 # graph exactly like consolidation-extracted ones (same gate, same
