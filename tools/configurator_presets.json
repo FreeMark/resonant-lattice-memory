@@ -2,18 +2,22 @@
   {
     "id": "general-agent",
     "name": "General Agent",
-    "blurb": "A balanced daily driver: cross-session continuity and a curated identity on top of the stock Hebbian defaults.",
+    "blurb": "A balanced daily driver: cross-session narrative continuity, a curated identity, a live relation graph with a few-shot triple prompt sized for small local models, importance-weighted retention for rules and policies, and gist-before-prune so meaning outlives detail.",
     "values": {
+      "reflection_frequency": 4,
       "enable_narrative": true,
       "enable_self_model": true,
-      "reflection_frequency": 4,
-      "gist_before_prune": true
+      "gist_before_prune": true,
+      "enable_relations": true,
+      "relation_extract_llm": true,
+      "importance_decay_discount": 0.3,
+      "relation_prompt": "Extract the explicit (subject, relation, object) triples STATED in the text.\nRules:\n- relation is a short snake_case verb phrase taken from what the text says\n- subject and object must be terms that appear in the text\n- never add outside knowledge; [] only if the text states no relationship\n- Output ONLY a valid JSON array of objects with keys \"subject\", \"relation\", \"object\"\n\nExample 1\nTEXT: WebGLRenderer.setPixelRatio(value) sets the device pixel ratio used by setSize.\nJSON OUTPUT: [{\"subject\": \"WebGLRenderer.setPixelRatio\", \"relation\": \"sets\", \"object\": \"device pixel ratio\"}, {\"subject\": \"device pixel ratio\", \"relation\": \"used_by\", \"object\": \"setSize\"}]\n\nExample 2\nTEXT: The OES_texture_float extension is required for float textures in WebGL1.\nJSON OUTPUT: [{\"subject\": \"OES_texture_float\", \"relation\": \"required_for\", \"object\": \"float textures\"}, {\"subject\": \"float textures\", \"relation\": \"available_in\", \"object\": \"WebGL1\"}]\n\nNow the real task.\n"
     }
   },
   {
     "id": "research-scholar",
     "name": "Research Scholar",
-    "blurb": "Deep-research memory: strict attestation, a live relation graph with a small local triple model, aggressive consolidation cadence, and a large long tier.",
+    "blurb": "Deep-research memory tuned like a live scholar deployment: tight consolidation cadence, loose clustering so cross-topic abstractions actually form, a large long tier, relation triples offloaded to a small local model, and an extraction prompt that refuses to memorize task scaffolding.",
     "values": {
       "reflection_frequency": 3,
       "abstraction_frequency": 2,
@@ -23,75 +27,163 @@
       "relation_model": "ibm/granite4.1:8b",
       "ollama_endpoint_relation": "http://localhost:11434",
       "enable_narrative": true,
+      "narrative_keep": 50,
       "enable_self_model": true,
       "max_long_facts": 4000,
       "cluster_hrr_similarity": 0.18,
       "cluster_entity_overlap": 0.3,
-      "gist_before_prune": true
+      "gist_before_prune": true,
+      "extraction_prompt": "Analyze this dialogue log and extract only NEW, durable facts, user preferences, or goal states that are EXPLICITLY supported by the log.\nGROUNDING RULES (critical - violating them corrupts memory):\n- Do NOT invent or infer specifics (names, numbers, dates, IDs, paths, settings, versions) that are not literally present in the log. If a detail is not in the log, leave it out.\n- For EVERY fact, include \"source_quote\": the shortest snippet copied VERBATIM from the log (character-for-character, no paraphrase) that supports the fact.\n- If the supporting turn came from a tool or web fetch that carried a URL or identifier, also include \"source_ref\" with that URL/ref; otherwise omit source_ref or set it to null.\n- If a candidate fact has no exact supporting snippet in the log, DROP it rather than guessing.\n- EXCLUDE TASK SCAFFOLDING: do NOT extract instructions about how to perform THIS task - output format/length, a required closing phrase, tool-call or search/recall procedure, \"answer from memory\", \"cite IDs\", \"rate confidence\", \"say not in memory\", or the quiz/synthesis/research process itself. These are ephemeral scaffolding, not durable knowledge. Record a user preference ONLY if it concerns the SUBJECT MATTER or the user's persistent cross-task working style (e.g. \"prefers primary sources like MDN\") - NEVER the mechanics of the current request.\nOutput ONLY a valid JSON array of objects with keys: \"content\", \"category\", \"source_quote\", and optional \"source_ref\". If nothing new is learned, output an empty array [].\n",
+      "relation_prompt": "Extract the explicit (subject, relation, object) triples STATED in the text.\nRules:\n- relation is a short snake_case verb phrase taken from what the text says\n- subject and object must be terms that appear in the text\n- never add outside knowledge; [] only if the text states no relationship\n- Output ONLY a valid JSON array of objects with keys \"subject\", \"relation\", \"object\"\n\nExample 1\nTEXT: WebGLRenderer.setPixelRatio(value) sets the device pixel ratio used by setSize.\nJSON OUTPUT: [{\"subject\": \"WebGLRenderer.setPixelRatio\", \"relation\": \"sets\", \"object\": \"device pixel ratio\"}, {\"subject\": \"device pixel ratio\", \"relation\": \"used_by\", \"object\": \"setSize\"}]\n\nExample 2\nTEXT: The OES_texture_float extension is required for float textures in WebGL1.\nJSON OUTPUT: [{\"subject\": \"OES_texture_float\", \"relation\": \"required_for\", \"object\": \"float textures\"}, {\"subject\": \"float textures\", \"relation\": \"available_in\", \"object\": \"WebGL1\"}]\n\nNow the real task.\n"
     }
   },
   {
     "id": "overnight-knowledge-engine",
     "name": "Overnight Knowledge Engine",
-    "blurb": "The batch-trainer tuning that built a 2000-fact expert overnight: long reason timeouts for cloud flagships, unlimited long tier, relation triples offloaded to a small local model, procedural conflict sweeps on.",
+    "blurb": "The full tuning that built a 2400-fact domain expert in two nights, taken straight from the live overnight trainer profile: a flagship reasoner on long timeouts, an unlimited archive-grade long tier with slow importance-weighted decay, relation triples on a local granite, and all four battle-tested prompt overrides. Swap reason_model for the strongest model you can reach and point endpoints at your own hosts.",
     "values": {
+      "reason_model": "nemotron-3-super:cloud",
       "reason_timeout": 900.0,
+      "extraction_max_attempts": 5,
+      "reflection_frequency": 3,
+      "abstraction_frequency": 2,
+      "decay_per_cycle": 0.25,
+      "initial_resonance": 6,
       "max_long_facts": 0,
+      "forget_after_dormant_cycles": -1,
+      "importance_decay_discount": 0.6,
+      "importance_categories": ["api", "spec", "concept", "gotcha", "best_practice", "performance", "tooling", "version", "example", "procedural", "abstract", "gist"],
+      "cluster_hrr_similarity": 0.18,
+      "cluster_entity_overlap": 0.3,
+      "gist_before_prune": true,
+      "enable_narrative": true,
+      "narrative_keep": 100,
+      "enable_self_model": true,
       "enable_relations": true,
       "relation_extract_llm": true,
       "relation_model": "ibm/granite4.1:8b",
       "ollama_endpoint_relation": "http://localhost:11434",
-      "enable_narrative": true,
-      "gist_before_prune": true,
-      "importance_decay_discount": 0.6
+      "extraction_prompt": "Analyze this dialogue log and extract the NEW, durable technical knowledge that is EXPLICITLY supported by the log. This agent is building a long-term expert knowledge base through deep research sessions.\nGROUNDING RULES (critical - violating them corrupts memory):\n- Do NOT invent or infer specifics (API names, function signatures, parameter values, defaults, numbers, versions, URLs) that are not literally present in the log. If a detail is not in the log, leave it out.\n- For EVERY fact, include \"source_quote\": the shortest snippet copied VERBATIM from the log (character-for-character, no paraphrase) that supports the fact.\n- If the supporting turn came from a tool or web fetch that carried a URL or identifier, also include \"source_ref\" with that URL/ref; otherwise omit source_ref or set it to null.\n- If a candidate fact has no exact supporting snippet in the log, DROP it rather than guessing.\nWHAT TO CAPTURE (one atomic fact per object; prefer many small precise facts over one broad summary):\n- APIs and signatures: names, parameters, defaults, return values, units, conventions.\n- Version and support constraints: exact versions, platform support, deprecations and renames.\n- Numeric limits and performance facts: size limits, costs, budgets.\n- Gotchas and best practices WITH their conditions ('X by default; Y when <condition>').\n- \"category\": choose the SINGLE best fit from exactly this list: api, spec, concept, gotcha, best_practice, performance, tooling, version, example.\nEXCLUDE TASK SCAFFOLDING: do NOT extract instructions about how to perform THIS task - output format/length, a required closing phrase, tool-call or search/recall procedure, 'answer from memory', 'cite IDs', 'rate confidence', or the quiz/synthesis/research process itself. These are ephemeral scaffolding, not durable knowledge. Record a user preference ONLY if it concerns the SUBJECT MATTER or the user's persistent cross-task working style - NEVER the mechanics of the current request.\nOutput ONLY a valid JSON array of objects with keys: \"content\", \"category\", \"source_quote\", and optional \"source_ref\". If nothing new is learned, output an empty array [].\n",
+      "consolidation_prompt": "You are an expert memory abstraction engine for an AI agent building deep technical expertise through research.\n\nGiven the following group of related long-term facts, synthesize 1-2 higher-level abstractions that capture the general pattern WITHOUT erasing what makes each fact true in its OWN situation.\n\nRules:\n- Abstraction is CONTEXTUALIZATION, not erasure. When the facts give different answers in different conditions, state the DEFAULT and PRESERVE the exceptions as scoped conditions, e.g. 'X by default; Y when <condition>'. The conditions that make each fact correct are the POINT.\n- PRESERVE exact API names, function signatures, parameter values, numeric limits, and version constraints VERBATIM - for technical knowledge the specific value IS the meaning. Compress the surrounding prose, never the hard values.\n- Do NOT collapse facts that hold in distinct contexts (different versions, different platforms, different pipeline stages) into one detail-free claim, and NEVER invent a generalization the facts do not support.\n- Concise but meaningful; one principle per object\n- Output ONLY a valid JSON array (no extra text)\n- Each object must have keys: \"content\" and \"category\" (use \"abstract\")",
+      "procedural_prompt": "You are a procedural memory engine for an AI agent. Below are recent records\nof the agent calling one tool, each tagged SUCCESS or FAILURE with its\narguments and outcome.\nSynthesize reusable procedural rules to help the agent use this tool better\nnext time.\nRules:\n- Only state a rule when the SAME pattern appears in at least TWO separate\n  records. One occurrence is an anecdote, not a rule.\n- State every rule WITH its condition ('X when <condition>'), never as an\n  absolute. Use 'always' or 'never' only if every record agrees.\n- Distinguish tool behavior from site behavior: a single failing URL, one\n  404, or one rate-limit is site-specific noise; skip it rather than\n  generalize it into a rule.\n- Include a failure-avoidance rule ONLY when the same failure mode occurred\n  in two or more records.\n- Each rule must GENERALIZE across the records, never restate one call.\n- Output ONLY a valid JSON array; each object has keys \"content\" and\n  \"category\" (use \"procedural\"). 0-3 rules; [] is a good answer when the\n  evidence is thin.\n",
+      "relation_prompt": "Extract the explicit (subject, relation, object) triples STATED in the text.\nRules:\n- relation is a short snake_case verb phrase taken from what the text says\n- subject and object must be terms that appear in the text\n- never add outside knowledge; [] only if the text states no relationship\n- Output ONLY a valid JSON array of objects with keys \"subject\", \"relation\", \"object\"\n\nExample 1\nTEXT: WebGLRenderer.setPixelRatio(value) sets the device pixel ratio used by setSize.\nJSON OUTPUT: [{\"subject\": \"WebGLRenderer.setPixelRatio\", \"relation\": \"sets\", \"object\": \"device pixel ratio\"}, {\"subject\": \"device pixel ratio\", \"relation\": \"used_by\", \"object\": \"setSize\"}]\n\nExample 2\nTEXT: The OES_texture_float extension is required for float textures in WebGL1.\nJSON OUTPUT: [{\"subject\": \"OES_texture_float\", \"relation\": \"required_for\", \"object\": \"float textures\"}, {\"subject\": \"float textures\", \"relation\": \"available_in\", \"object\": \"WebGL1\"}]\n\nNow the real task.\n"
     }
   },
   {
     "id": "low-vram-homelab",
     "name": "Low-VRAM Homelab",
-    "blurb": "Everything on one small card: a 3B reasoner kept warm, fewer and lighter LLM passes, trimmed recall context.",
+    "blurb": "Everything on one small card: a 3B reasoner kept warm, consolidation and dreaming at half cadence, lighter distillation batches, heuristic-only conflict detection, and trimmed recall. Trades a little memory quality for a rig that never swaps.",
     "values": {
       "reason_model": "ibm/granite4.1:3b",
       "embed_keep_alive": "1h",
+      "reflection_frequency": 6,
+      "dream_every_n_consolidations": 3,
       "abstraction_frequency": 5,
+      "abstraction_max_clusters": 3,
+      "tool_distill_frequency": 4,
+      "tool_distill_sample_size": 8,
       "recall_limit": 150,
-      "health_check_every_n_dream_cycles": 20,
-      "tool_distill_frequency": 4
+      "conflict_llm_adjudication": false,
+      "health_check_every_n_dream_cycles": 20
+    }
+  },
+  {
+    "id": "sovereign-vault",
+    "name": "Sovereign Vault (encrypted)",
+    "blurb": "EXPERIMENTAL: whole-database SQLCipher encryption at rest with archive-grade retention, for a private personal companion whose memory never leaves the machine readable. Requires sqlcipher3 and argon2-cffi, plus RESONANT_LATTICE_DB_ENCRYPTED=1 and your passphrase in RESONANT_LATTICE_PASSPHRASE set before launch.",
+    "values": {
+      "encryption_mode": "at_rest",
+      "enable_narrative": true,
+      "enable_self_model": true,
+      "gist_before_prune": true,
+      "forget_after_dormant_cycles": -1,
+      "max_long_facts": 0
+    }
+  },
+  {
+    "id": "business-treasurer",
+    "name": "Business Treasurer",
+    "blurb": "Memory as the load-bearing wall of a money agent: importance-weighted retention for financial and compliance facts, stricter attestation, seeded approval guardrails, conflicts surfaced the moment they appear, and a deep superseded-history audit trail. Nothing about money is ever quietly forgotten.",
+    "values": {
+      "importance_decay_discount": 0.6,
+      "quote_match_threshold": 0.9,
+      "forget_after_dormant_cycles": -1,
+      "max_superseded_history": 5000,
+      "conflict_surface_min_group_age_cycles": 1,
+      "enable_narrative": true,
+      "narrative_keep": 100,
+      "enable_relations": true,
+      "relation_extract_llm": true,
+      "procedural_seed": ["Always require explicit human approval before creating, modifying, or refunding any payment, payment link, or subscription.", "Always verify the amount and currency against the user's written request before acting on any charge."],
+      "relation_prompt": "Extract the explicit (subject, relation, object) triples STATED in the text.\nRules:\n- relation is a short snake_case verb phrase taken from what the text says\n- subject and object must be terms that appear in the text\n- never add outside knowledge; [] only if the text states no relationship\n- Output ONLY a valid JSON array of objects with keys \"subject\", \"relation\", \"object\"\n\nExample 1\nTEXT: WebGLRenderer.setPixelRatio(value) sets the device pixel ratio used by setSize.\nJSON OUTPUT: [{\"subject\": \"WebGLRenderer.setPixelRatio\", \"relation\": \"sets\", \"object\": \"device pixel ratio\"}, {\"subject\": \"device pixel ratio\", \"relation\": \"used_by\", \"object\": \"setSize\"}]\n\nExample 2\nTEXT: The OES_texture_float extension is required for float textures in WebGL1.\nJSON OUTPUT: [{\"subject\": \"OES_texture_float\", \"relation\": \"required_for\", \"object\": \"float textures\"}, {\"subject\": \"float textures\", \"relation\": \"available_in\", \"object\": \"WebGL1\"}]\n\nNow the real task.\n"
+    }
+  },
+  {
+    "id": "fact-checker",
+    "name": "Fact Checker",
+    "blurb": "The Conspiracy Theorist's natural enemy. New claims start below the promotion bar and must be corroborated to stick, attestation is strict, low-confidence relations are dropped, contradictions are surfaced immediately, and superseded beliefs are kept as history instead of vanishing. Pedagogical: skepticism as a dial setting.",
+    "values": {
+      "initial_resonance": 3,
+      "novelty_boost": 1.0,
+      "quote_match_threshold": 0.92,
+      "relation_min_confidence": 0.7,
+      "enable_relations": true,
+      "relation_extract_llm": true,
+      "conflict_surface_min_group_age_cycles": 1,
+      "max_superseded_history": 5000,
+      "forget_after_dormant_cycles": -1,
+      "gist_before_prune": true,
+      "relation_prompt": "Extract the explicit (subject, relation, object) triples STATED in the text.\nRules:\n- relation is a short snake_case verb phrase taken from what the text says\n- subject and object must be terms that appear in the text\n- never add outside knowledge; [] only if the text states no relationship\n- Output ONLY a valid JSON array of objects with keys \"subject\", \"relation\", \"object\"\n\nExample 1\nTEXT: WebGLRenderer.setPixelRatio(value) sets the device pixel ratio used by setSize.\nJSON OUTPUT: [{\"subject\": \"WebGLRenderer.setPixelRatio\", \"relation\": \"sets\", \"object\": \"device pixel ratio\"}, {\"subject\": \"device pixel ratio\", \"relation\": \"used_by\", \"object\": \"setSize\"}]\n\nExample 2\nTEXT: The OES_texture_float extension is required for float textures in WebGL1.\nJSON OUTPUT: [{\"subject\": \"OES_texture_float\", \"relation\": \"required_for\", \"object\": \"float textures\"}, {\"subject\": \"float textures\", \"relation\": \"available_in\", \"object\": \"WebGL1\"}]\n\nNow the real task.\n"
     }
   },
   {
     "id": "conspiracy-theorist",
     "name": "Conspiracy Theorist (fun)",
-    "blurb": "Everything connects, man. Clustering thresholds on the floor, four-hop inference chains, and conflict detection told to look the other way. Pedagogical: this is what the conflict and clustering dials are protecting you from.",
+    "blurb": "Everything connects, man. Clustering thresholds on the floor, four-hop inference chains, source attestation switched OFF, conflict detection told to look the other way, fuzzy relational recall, and near-matches merged into one grand narrative. Pedagogical: this is exactly what the verification dials are protecting you from.",
     "values": {
       "cluster_hrr_similarity": 0.1,
       "cluster_entity_overlap": 0.1,
       "abstraction_frequency": 1,
       "abstraction_max_clusters": 12,
+      "abstraction_min_cluster_size": 2,
       "enable_relations": true,
       "relation_extract_llm": true,
       "relation_min_confidence": 0.1,
+      "relation_recall_hrr_floor": 0.2,
       "max_inference_hops": 4,
       "novelty_boost": 4.0,
+      "reinforce_threshold": 0.88,
+      "verify_source_quote": false,
       "conflict_llm_adjudication": false,
       "detect_policy_conflicts": false,
       "detect_procedural_conflicts": false,
-      "conflict_subject_veto": false
+      "conflict_subject_veto": false,
+      "conflict_limbo": false,
+      "surface_conflicts": false,
+      "quarantine_high_stakes_conflicts": false
     }
   },
   {
     "id": "goldfish",
     "name": "Goldfish (fun)",
-    "blurb": "Lives entirely in the moment. Brutal decay, one-cycle tiers, a 25-fact long-term memory, and instant deletion at zero resonance. Pedagogical: watch the retention dials matter.",
+    "blurb": "Lives entirely in the moment. Brutal decay on a fast cycle, one-cycle tiers, recall that does not reinforce, no novelty spark, no belief history, a 25-fact long-term memory, and instant deletion at zero resonance. Pedagogical: watch every retention dial matter at once.",
     "values": {
       "decay_per_cycle": 5.0,
+      "reflection_frequency": 2,
+      "dream_every_n_consolidations": 1,
       "short_tier_cycles": 1,
       "mid_tier_cycles": 1,
       "forget_after_dormant_cycles": 0,
       "max_long_facts": 25,
       "freshness_halflife_cycles": 5,
       "prune_keep_sessions": 2,
-      "stale_decay_boost": 1.0
+      "stale_decay_boost": 1.0,
+      "reinforce_on_recall": false,
+      "novelty_enabled": false,
+      "surprise_decay_discount": 0.0,
+      "keep_superseded": false,
+      "episode_max_rows": 200,
+      "tool_episode_keep": 50
     }
   }
 ]

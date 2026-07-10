@@ -109,6 +109,31 @@ SELECT_OPTIONS = {
     "encryption_mode": ["none", "at_rest", "blind"],
 }
 
+# Keys whose real-world range differs from the default*5 heuristic (resonance
+# units, archive-scale caps, long cloud timeouts). Without these the slider
+# clamps below values the shipped presets actually use (e.g. Goldfish
+# decay_per_cycle 5.0 against an inferred max of 1.0).
+RANGE_OVERRIDES = {
+    "decay_per_cycle": {"min": 0.0, "max": 10.0, "step": 0.05},
+    "recall_bump": {"min": 0.0, "max": 5.0, "step": 0.01},
+    "stale_decay_boost": {"min": 0.0, "max": 5.0, "step": 0.1},
+    "novelty_boost": {"min": 0.0, "max": 10.0, "step": 0.1},
+    "initial_resonance": {"min": 0, "max": 50, "step": 1},
+    "promotion_resonance_threshold": {"min": 0, "max": 50, "step": 1},
+    "health_near_cap": {"min": 0.0, "max": 50.0, "step": 0.5},
+    "max_long_facts": {"min": 0, "max": 50000, "step": 1},
+    "episode_max_rows": {"min": 0, "max": 100000, "step": 1},
+    "tool_episode_keep": {"min": 0, "max": 10000, "step": 1},
+    "max_superseded_history": {"min": 0, "max": 20000, "step": 1},
+    "narrative_keep": {"min": 0, "max": 500, "step": 1},
+    "freshness_halflife_cycles": {"min": 0, "max": 500, "step": 1},
+    "forget_after_dormant_cycles": {"min": -1, "max": 1000, "step": 1},
+    "reason_timeout": {"min": 0.0, "max": 1800.0, "step": 10},
+    "embed_timeout": {"min": 0.0, "max": 300.0, "step": 5},
+    "recall_limit": {"min": 0, "max": 2000, "step": 1},
+    "hrr_dim": {"min": 64, "max": 4096, "step": 64},
+}
+
 PROMPT_KEYS = [
     ("extraction_prompt", "Rules the reason model follows when mining facts from a transcript.",
      prompt_defaults.DEFAULT_EXTRACTION_PROMPT),
@@ -131,6 +156,10 @@ def infer_control(key, default):
         return {"type": "select", "options": SELECT_OPTIONS[key]}
     if isinstance(default, bool):
         return {"type": "bool"}
+    if key in RANGE_OVERRIDES:
+        spec = dict(RANGE_OVERRIDES[key])
+        spec["type"] = "int" if isinstance(default, int) else "float"
+        return spec
     if isinstance(default, int):
         lo = -1 if key == "forget_after_dormant_cycles" else 0
         hi = max(default * 5, 10)
