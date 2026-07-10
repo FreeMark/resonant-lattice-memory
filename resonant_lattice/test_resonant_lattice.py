@@ -2641,6 +2641,41 @@ def test_conflict_adjudicator_response_parsing():
     print("  adjudicator parsing OK: JSON + bare verdicts parse, garbage/errors -> None")
 
 
+def test_relation_model_routing_and_default():
+    """relation_model/ollama_endpoint_relation route the per-fact triple pass to a
+    dedicated (small local) model; empty config inherits the reason model/endpoint
+    (backward compatible), and the override actually reaches the store call."""
+    try:
+        prov = _load("__init__")
+    except Exception as e:
+        print(f"  SKIP relation routing: {e}"); return
+
+    p = prov.LatticeMemoryProvider({})
+    assert p._relation_model == p._reason_model
+    assert p._ollama_endpoint_relation == p._ollama_endpoint_reason
+
+    p2 = prov.LatticeMemoryProvider({
+        "relation_model": "tiny-triples:latest",
+        "ollama_endpoint_relation": "http://smallnode:11434",
+    })
+    assert p2._relation_model == "tiny-triples:latest"
+    assert p2._ollama_endpoint_relation == "http://smallnode:11434"
+
+    captured = {}
+
+    class _StubStore:
+        def extract_and_store_relations(self, fact_id, content, **kw):
+            captured.update(kw)
+            return 0
+
+    p2._store = _StubStore()
+    p2._enable_relations = True
+    p2._extract_relations_for_fact(1, "A relates to B", ["A", "B"])
+    assert captured.get("reason_model") == "tiny-triples:latest", captured
+    assert captured.get("ollama_endpoint") == "http://smallnode:11434", captured
+    print("  relation routing OK: default inherits reason; override reaches the store call")
+
+
 def test_freshness_penalty_curve():
     """Phase 2: the recall freshness nudge is gentle, bounded, monotonic, and
     fully off when disabled (pure math — no Ollama)."""

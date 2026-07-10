@@ -310,6 +310,16 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         self._relation_min_confidence = float(self._config.get("relation_min_confidence", DEFAULTS["relation_min_confidence"]))
         self._relation_extract_llm = bool(self._config.get("relation_extract_llm", DEFAULTS["relation_extract_llm"]))
         self._relation_prompt = self._config.get("relation_prompt", DEFAULT_RELATION_PROMPT)
+        # Optional dedicated routing for the per-fact triple pass: one-sentence IE
+        # that a small local model handles, freeing reason-endpoint slots during
+        # finalize tails. Empty config values inherit the reason model/endpoint.
+        self._relation_model = self._config.get("relation_model", "") or self._reason_model
+        self._ollama_endpoint_relation = (
+            self._config.get("ollama_endpoint_relation", "") or self._ollama_endpoint_reason)
+        if (self._relation_model != self._reason_model
+                or self._ollama_endpoint_relation != self._ollama_endpoint_reason):
+            logger.info("Relation extraction routed to %s @ %s",
+                        self._relation_model, self._ollama_endpoint_relation)
         # Phase 5b — relational recall. The HRR partial-binding probe surfaces a
         # triple as a fuzzy match at/above this similarity when it isn't an exact
         # graph match (graceful fallback). ~0.69 = all known slots, ~0.46 = 2 of 3,

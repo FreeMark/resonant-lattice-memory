@@ -777,8 +777,8 @@ class ConsolidationMixin:
             self._store.extract_and_store_relations(
                 fact_id, content, entities=entities,
                 min_confidence=self._relation_min_confidence,
-                reason_model=self._reason_model,
-                ollama_endpoint=self._ollama_endpoint_reason,
+                reason_model=self._relation_model,
+                ollama_endpoint=self._ollama_endpoint_relation,
                 use_llm=self._relation_extract_llm,
                 llm_prompt=self._relation_prompt,
             )

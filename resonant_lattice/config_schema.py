@@ -206,6 +206,18 @@ CONFIG_SCHEMA = [
                     "OFF; only when enable_relations is on). LLM triples run through the "
                     "same grounding + confidence gate. Adds an Ollama call per new fact.",
      "default": False},
+    {"key": "relation_model",
+     "description": "Optional dedicated model for the per-fact LLM relation (triple) pass. "
+                    "Triple extraction is single-sentence IE — a small LOCAL model handles "
+                    "it well (pair with a few-shot relation_prompt; small models return [] "
+                    "under the strict zero-shot default). Empty = use reason_model. "
+                    "Offloading frees reason-endpoint slots during finalize tails (field "
+                    "finding: the per-fact relation calls dominated the consolidation tail "
+                    "under N-way overnight concurrency on a cloud reason model).",
+     "default": ""},
+    {"key": "ollama_endpoint_relation",
+     "description": "Ollama endpoint for relation_model. Empty = ollama_endpoint_reason.",
+     "default": ""},
     {"key": "relation_recall_hrr_floor",
      "description": "Phase 5b: HRR partial-binding similarity at/above which the relational "
                     "tool action surfaces a triple as a FUZZY match when it isn't an exact "
