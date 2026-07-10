@@ -2676,6 +2676,70 @@ def test_relation_model_routing_and_default():
     print("  relation routing OK: default inherits reason; override reaches the store call")
 
 
+def test_mirror_path_relation_hook():
+    """on_memory_write mirror facts get the same Phase 5a relation hook as
+    consolidation-extracted facts: gated, non-fatal, and routed through the
+    dedicated relation model. Field finding: builtin_memory facts had zero
+    fact_relations rows because the mirror path skipped the hook."""
+    try:
+        prov = _load("__init__")
+    except Exception as e:
+        print(f"  SKIP mirror relation hook: {e}"); return
+
+    p = prov.LatticeMemoryProvider({
+        "relation_model": "tiny-triples:latest",
+        "ollama_endpoint_relation": "http://smallnode:11434",
+    })
+    calls = {}
+
+    class _StubStore:
+        def _extract_entities(self, content):
+            return ["A", "B"]
+
+        def add_or_reinforce_fact(self, content, emb, category, session_id, **kw):
+            calls["added"] = (content, category)
+            return ("added", 42)
+
+        def extract_and_store_relations(self, fact_id, content, **kw):
+            calls["relations"] = (fact_id, kw.get("reason_model"),
+                                  kw.get("ollama_endpoint"))
+            return 1
+
+    class _StubRetriever:
+        def _get_embedding(self, content):
+            return [0.1] * 8
+
+    p._store = _StubStore()
+    p._retriever = _StubRetriever()
+    p._write_enabled = True
+    p._enable_relations = True
+    p._gate_self_writes = False
+    p._session_id = "s-mirror"
+
+    # Run the ingest thread synchronously so the assertions are deterministic.
+    g = p.on_memory_write.__func__.__globals__
+    orig_thread = g["threading"].Thread
+
+    class _SyncThread:
+        def __init__(self, target=None, **kw):
+            self._t = target
+
+        def start(self):
+            self._t()
+
+    g["threading"].Thread = _SyncThread
+    try:
+        p.on_memory_write("add", "memory", "Fact A relates to B for the mirror hook")
+    finally:
+        g["threading"].Thread = orig_thread
+
+    assert calls.get("added"), calls
+    assert calls["added"][1] == "builtin_memory", calls
+    assert calls.get("relations") == (42, "tiny-triples:latest",
+                                      "http://smallnode:11434"), calls
+    print("  mirror relation hook OK: builtin fact routed through relation extraction")
+
+
 def test_freshness_penalty_curve():
     """Phase 2: the recall freshness nudge is gentle, bounded, monotonic, and
     fully off when disabled (pure math — no Ollama)."""

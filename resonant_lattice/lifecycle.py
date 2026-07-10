@@ -166,10 +166,16 @@ class LifecycleMixin:
                     return
                 entities = self._store._extract_entities(content)
                 hrr_vec = hrr.encode_fact(content, entities, dim=self._hrr_dim) if _HRR_AVAILABLE else None
-                self._store.add_or_reinforce_fact(
+                action, fid = self._store.add_or_reinforce_fact(
                     content, emb, f"builtin_{target}", self._session_id,
                     hrr_vector=hrr_vec, entities=entities,
                 )
+                # Phase 5a parity: mirrored builtin-memory facts join the relation
+                # graph exactly like consolidation-extracted ones (same gate, same
+                # non-fatal helper, same relation_model routing). This closure is
+                # already off the hot path on a background thread.
+                if self._enable_relations and action == "added" and fid and fid > 0:
+                    self._extract_relations_for_fact(fid, content, entities)
             except Exception as e:
                 logger.debug("on_memory_write mirror failed: %s", e)
 
