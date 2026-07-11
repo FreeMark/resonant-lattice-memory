@@ -341,10 +341,18 @@ class BlindRetriever(LatticeRetriever):
     he_crypto)."""
 
     def __init__(self, store: LatticeStore, ollama_endpoint: str, embed_model: str,
-                 blind, min_similarity: float = 0.30, blind_hrr=None):
+                 blind, min_similarity: float = 0.30, blind_hrr=None,
+                 scan_batch: int = 0, scan_concurrency: int = 1):
         super().__init__(store, ollama_endpoint, embed_model,
                          min_similarity=min_similarity)
         self.blind = blind
+        # A1 streaming-scan sizing: scan_batch 0 = auto (size from measured per-ct footprint +
+        # detected RAM in _resolve_scan_batch), a positive value pins a fixed batch;
+        # scan_concurrency tells the auto-tuner how many blind recalls may run at once so each
+        # gets a proportional RAM share. Bounds the recall scan's memory instead of the old
+        # fetchall-the-whole-corpus behavior (see store_blind.stream_he_vectors).
+        self._scan_batch = int(scan_batch)
+        self._scan_concurrency = max(1, int(scan_concurrency))
         # Separate HE client for the HRR (cos,sin) lift over ``semantic_he_hrr`` (Option A:
         # sized 2·hrr_dim, a DISTINCT context from the embed-dim ``blind`` recall client). The
         # HRR methods MUST use this, never ``self.blind`` — encrypting a 2·hrr_dim lift with the
@@ -377,18 +385,34 @@ class BlindRetriever(LatticeRetriever):
         scored.sort(key=lambda t: t[1], reverse=True)   # cosine descending
         return self._materialize_blind(scored, limit)
 
+    def _resolve_scan_batch(self, table: str) -> int:
+        """Auto-size the streaming blind-recall batch (A1) from the MEASURED per-ct footprint
+        and DETECTED available RAM (``store_blind.resolve_scan_batch``), honoring an explicit
+        ``self._scan_batch`` override. Portable: adapts to the host, nothing hardcoded."""
+        import store_blind as _sb
+        return _sb.resolve_scan_batch(
+            self._scan_batch,
+            self.store.he_blob_size(table),
+            self.store.count_he_vectors(table),
+            _sb.detect_available_ram_bytes(),
+            self._scan_concurrency,
+        )
+
     def blind_scores(self, query_vec: List[float]) -> List[tuple]:
         """``[(fact_id, decrypted_cosine), …]`` over every stored ciphertext.
 
-        Encrypt the query under the public key -> homomorphic ``EvalInnerProduct``
-        per stored ct (store side, eval keys only, never decrypts) -> client decrypts
-        each scalar score. The encrypted score is kept in memory between scoring and
-        decrypting (no per-fact serialization round-trip)."""
-        q_ct = self.blind.encrypt_unit_vector(query_vec)
+        Encrypt the query under the public key -> homomorphic ``EvalInnerProduct`` per stored
+        ct (store side, eval keys only, never decrypts) -> client decrypts each scalar score.
+        The scan STREAMS the ciphertexts in auto-sized batches (A1: bounded RAM instead of
+        materializing the whole corpus) and deserializes the query ONCE up front, so a
+        full-corpus recall no longer holds every ciphertext in memory at the same time."""
+        table = "semantic_he"
+        q_blob = self.blind.encrypt_unit_vector(query_vec)
+        q_prep = self.blind.prepare_query(q_blob) if hasattr(self.blind, "prepare_query") else q_blob
+        batch = self._resolve_scan_batch(table)
         scored = []
-        for fid, ct in self.store.iter_he_vectors():
-            score_ct = self.blind.cosine_score(q_ct, ct)
-            scored.append((fid, self.blind.decrypt_score(score_ct)))
+        for fid, ct in self.store.stream_he_vectors(table, batch=batch):
+            scored.append((fid, self.blind.decrypt_score(self.blind.cosine_score(q_prep, ct))))
         return scored
 
     def _materialize_blind(self, scored: List[tuple], limit: int) -> List[Dict]:
@@ -432,11 +456,14 @@ class BlindRetriever(LatticeRetriever):
         2·hrr_dim HRR context, distinct from the embed-dim recall ``self.blind``). The store
         never sees the phases."""
         import holographic as _hg
+        table = "semantic_he_hrr"
         lift = _hg.hrr_lift(probe_phases)
-        q_ct = self.blind_hrr.encrypt_unit_vector(lift.tolist())
+        q_blob = self.blind_hrr.encrypt_unit_vector(lift.tolist())
+        q_prep = self.blind_hrr.prepare_query(q_blob) if hasattr(self.blind_hrr, "prepare_query") else q_blob
+        batch = self._resolve_scan_batch(table)
         scored = []
-        for fid, ct in self.store.iter_he_vectors(table="semantic_he_hrr"):
-            scored.append((fid, self.blind_hrr.decrypt_score(self.blind_hrr.cosine_score(q_ct, ct))))
+        for fid, ct in self.store.stream_he_vectors(table, batch=batch):
+            scored.append((fid, self.blind_hrr.decrypt_score(self.blind_hrr.cosine_score(q_prep, ct))))
         return scored
 
     def blind_hrr_search(self, probe_phases, limit: int = 8) -> List[Dict]:

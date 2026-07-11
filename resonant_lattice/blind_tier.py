@@ -180,15 +180,18 @@ class BlindTier:
                 crypto_keys.secure_zero(passphrase)
 
     # ── recall + write ────────────────────────────────────────────────────────────
-    def decorate_retriever(self, plaintext_retriever, ollama_endpoint, embed_model, min_similarity):
+    def decorate_retriever(self, plaintext_retriever, ollama_endpoint, embed_model, min_similarity,
+                           scan_batch: int = 0, scan_concurrency: int = 1):
         """Return a BlindRetriever (homomorphic vector + HRR recall over the encrypted tables) when
         the recall context is up, else the plaintext retriever unchanged (entity-only / openfhe-less
-        sessions keep plaintext recall). HRR recall routes through the separate 2*hrr_dim context."""
+        sessions keep plaintext recall). HRR recall routes through the separate 2*hrr_dim context.
+        ``scan_batch``/``scan_concurrency`` size the A1 streaming recall scan (0 = auto)."""
         if self.recall is None:
             return plaintext_retriever
         from retrieval import BlindRetriever
         return BlindRetriever(self.store, ollama_endpoint, embed_model, blind=self.recall,
-                              min_similarity=min_similarity, blind_hrr=self.hrr)
+                              min_similarity=min_similarity, blind_hrr=self.hrr,
+                              scan_batch=scan_batch, scan_concurrency=scan_concurrency)
 
     def reconcile(self, store=None, limit: int = 0) -> int:
         """Write-path completeness (roadmap §14 6a): mirror every fact that has a plaintext row but

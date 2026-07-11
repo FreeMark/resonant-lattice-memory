@@ -276,6 +276,53 @@ def test_store_he_vector_blob_substrate():
     s.close()
 
 
+def test_blind_stream_scan_equivalence():
+    """A1: stream_he_vectors pages the EXACT same (id, ct) sequence as the fetchall
+    iter_he_vectors for any batch size, so the bounded-RAM recall scan is a drop-in.
+    Also checks he_blob_size (the per-ct footprint the auto-tuner reads). Pure SQLite."""
+    if not _STORE_OK:
+        print(f"  SKIP store tests: {_SKIP_REASON}"); return
+    s = _fresh_store(vector_dim=8)
+    ids = []
+    for i in range(7):
+        _, fid = s.add_or_reinforce_fact(f"fact{i}", _emb(s, f"fact{i}"), "general", "t")
+        s.store_he_vector(fid, bytes([i]) + os.urandom(2048))
+        ids.append(fid)
+    ref = s.iter_he_vectors()                          # fetchall baseline
+    assert [fid for fid, _ in ref] == sorted(ids)      # stable id order
+    for B in (1, 2, 3, 7, 100):
+        assert list(s.stream_he_vectors(batch=B)) == ref, f"batch={B} diverged from fetchall"
+    assert s.he_blob_size() == 2049                     # 1 prefix byte + 2048 random, uniform
+    s2 = _fresh_store(vector_dim=8)                      # empty table: empty stream, zero size
+    assert list(s2.stream_he_vectors(batch=4)) == [] and s2.he_blob_size() == 0
+    s.close(); s2.close()
+
+
+def test_blind_scan_batch_autotune():
+    """A1: resolve_scan_batch DEFAULTS to the latency-optimal target and only SHRINKS on small
+    or busy hosts (latency is flat across batch size, so a bigger page just wastes RAM and
+    starves concurrency). Honors an explicit override and never exceeds the corpus count. Pure
+    arithmetic — no store, no openfhe, nothing hardcoded to a host."""
+    import store_blind as sb
+    TGT, MN = sb._SCAN_BATCH_TARGET, sb._SCAN_BATCH_MIN
+    GB = 1 << 30
+    # explicit override wins, but never exceeds the corpus count
+    assert sb.resolve_scan_batch(512, 1_000_000, 10_000, 8 * GB) == 512
+    assert sb.resolve_scan_batch(512, 1_000_000, 100, 8 * GB) == 100
+    # roomy host: default to the target — does NOT inflate to fill RAM (the bug the vault caught)
+    assert sb.resolve_scan_batch(0, 1_000_000, 100_000, 8 * GB) == TGT
+    assert sb.resolve_scan_batch(0, 100_000, 1_000_000, 256 * GB) == TGT     # huge RAM, small ct -> still target
+    # tight host: shrink below target, floored at MIN
+    assert sb.resolve_scan_batch(0, 1_000_000, 100_000, GB // 2) < TGT       # ~0.5GB budget -> ~107
+    assert sb.resolve_scan_batch(0, 8_000_000, 100_000, GB // 4) == MN       # tiny budget -> floor
+    # concurrency splits the RAM budget, so a busy host shrinks
+    assert sb.resolve_scan_batch(0, 1_000_000, 100_000, 8 * GB, concurrency=64) < \
+           sb.resolve_scan_batch(0, 1_000_000, 100_000, 8 * GB, concurrency=1)
+    # measurement unavailable -> the target, still clamped to the corpus count
+    assert sb.resolve_scan_batch(0, 0, 100_000, None) == TGT
+    assert sb.resolve_scan_batch(0, 0, 10, None) == 10
+
+
 def test_store_blind_retriever_orchestration():
     """E2.3: BlindRetriever scan/score/rank/materialize over semantic_he, validated on
     Windows with a plaintext stand-in crypto (real CKKS correctness is E2.4 on the

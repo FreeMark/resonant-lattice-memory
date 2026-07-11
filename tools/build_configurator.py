@@ -103,6 +103,7 @@ KEY_GROUP = {
     "health_near_cap": "housekeeping", "hrr_dim": "housekeeping",
     "encryption_mode": "encryption", "encryption_keystore_path": "encryption",
     "blind_he_keystore_path": "encryption", "blind_reconcile_batch": "encryption",
+    "blind_scan_batch": "encryption", "blind_scan_concurrency": "encryption",
 }
 
 SELECT_OPTIONS = {

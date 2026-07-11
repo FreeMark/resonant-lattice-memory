@@ -19,7 +19,7 @@ and the `LatticeStore` mixins (see MODULE_MAP.md / README.md):
 
 from __future__ import annotations
 
-__version__ = "1.4.0"  # consolidation debt + [SYNTHESIZED] provenance + seal/unseal after the fact + blind backfill proven at scale
+__version__ = "1.4.1"  # A1: bounded-RAM streaming blind-recall scan (auto-tuned batch, parity-exact)
 
 import json
 import logging
@@ -439,6 +439,11 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         # than doing thousands of HE encryptions in one pass. Normal operation (a few new facts
         # per cycle) never hits the cap. 0 = unlimited.
         self._blind_reconcile_batch = int(self._config.get("blind_reconcile_batch", DEFAULTS["blind_reconcile_batch"]))
+        # A1 streaming blind-recall scan sizing: batch 0 = auto (sized from measured per-ct
+        # footprint + detected RAM so the recall scan's memory stays bounded regardless of
+        # corpus size); concurrency tells the auto-tuner how many blind recalls may run at once.
+        self._blind_scan_batch = int(self._config.get("blind_scan_batch", DEFAULTS["blind_scan_batch"]))
+        self._blind_scan_concurrency = int(self._config.get("blind_scan_concurrency", DEFAULTS["blind_scan_concurrency"]))
         # NOTE: multi-modal (image/audio) ingestion is NOT implemented.
         # See ENCRYPTION_ROADMAP.md §3.1. The old `enable_multimodal` stub was
         # removed; re-add a precomputed-embedding path only when needed.
@@ -689,7 +694,9 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
             if self._blind_tier is not None:
                 self._retriever = self._blind_tier.decorate_retriever(
                     self._retriever, self._ollama_endpoint_embed, self._embed_model,
-                    float(self._config.get("recall_floor", DEFAULTS["recall_floor"])))
+                    float(self._config.get("recall_floor", DEFAULTS["recall_floor"])),
+                    scan_batch=self._blind_scan_batch,
+                    scan_concurrency=self._blind_scan_concurrency)
         # P3e tool-grounding seed: ingest durable procedural/guardrail facts so the agent is grounded
         # from day one (the retriever now exists to embed them). Idempotent + non-fatal; gated on
         # write access + a non-empty seed. Embeds via the live retriever (Ollama); skipped if down.

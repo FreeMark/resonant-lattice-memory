@@ -257,18 +257,25 @@ class BlindCrypto:
     def _deser_ct(self, blob: bytes):
         return _ofhe.DeserializeCiphertextString(blob, _ofhe.BINARY)
 
-    def cosine_score(self, query_ct_blob: bytes, stored_ct_blob: bytes):
+    def cosine_score(self, query_ct_blob, stored_ct_blob: bytes):
         """STORE side: homomorphic cosine (inner product of unit vectors).
 
         Returns the encrypted scalar Ciphertext OBJECT (kept in-memory; serializing
         each score would move ~hundreds of KB per fact between store and client — we
         only serialize when the store is a genuinely separate process). Uses ONLY
-        public + eval keys; never touches a secret key.
+        public + eval keys; never touches a secret key. ``query_ct_blob`` may be raw
+        bytes OR a handle from ``prepare_query`` (deserialized once per scan, A1).
         """
         _require()
-        q = self._deser_ct(query_ct_blob)
+        q = self._deser_ct(query_ct_blob) if isinstance(query_ct_blob, (bytes, bytearray)) else query_ct_blob
         s = self._deser_ct(stored_ct_blob)
         return self._cc.EvalInnerProduct(q, s, self._batch)
+
+    def prepare_query(self, query_ct_blob):
+        """Deserialize a query ciphertext ONCE for reuse across a whole scan (A1); returns an
+        opaque live-Ciphertext handle for ``cosine_score``. Idempotent on a prepared handle."""
+        _require()
+        return self._deser_ct(query_ct_blob) if isinstance(query_ct_blob, (bytes, bytearray)) else query_ct_blob
 
     def serialize_score(self, score_ct) -> bytes:
         """Serialize an encrypted score Ciphertext (store -> client transfer)."""
@@ -672,13 +679,23 @@ class BlindRecallPRE:
     def _deser_ct(self, blob):
         return _ofhe.DeserializeCiphertextString(blob, _ofhe.BINARY)
 
-    def cosine_score(self, query_ct_blob: bytes, stored_ct_blob: bytes):
+    def cosine_score(self, query_ct_blob, stored_ct_blob: bytes):
         """STORE side: homomorphic cosine (inner product of unit vectors) -> score Ciphertext
-        OBJECT. Public + eval keys only; never a secret."""
+        OBJECT. Public + eval keys only; never a secret. ``query_ct_blob`` may be raw bytes OR
+        a handle from ``prepare_query`` (deserialized ONCE for a whole scan so the query is not
+        re-deserialized per fact — the A1 streaming recall path passes a prepared handle)."""
         _require()
-        q = self._deser_ct(query_ct_blob)
+        q = self._deser_ct(query_ct_blob) if isinstance(query_ct_blob, (bytes, bytearray)) else query_ct_blob
         s = self._deser_ct(stored_ct_blob)
         return self._cc.EvalInnerProduct(q, s, self._batch)
+
+    def prepare_query(self, query_ct_blob):
+        """Deserialize a query ciphertext ONCE for reuse across a full scan (A1). Returns an
+        OPAQUE handle (a live Ciphertext) the caller hands back to ``cosine_score`` per fact,
+        so the openfhe seam stays here (BlindRetriever needs no openfhe import). Idempotent on
+        an already-prepared handle."""
+        _require()
+        return self._deser_ct(query_ct_blob) if isinstance(query_ct_blob, (bytes, bytearray)) else query_ct_blob
 
     def reencrypt_score(self, score_ct) -> bytes:
         """STORE side: PRE re-encrypt the score ct to the agent use-key, serialize for the

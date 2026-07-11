@@ -386,6 +386,20 @@ CONFIG_SCHEMA = [
                     "rather than doing thousands of HE encryptions at once. Normal operation (a few "
                     "new facts per cycle) never hits the cap. 0 = unlimited.",
      "default": 200},
+    {"key": "blind_scan_batch",
+     "description": "Tier-1 blind only: streaming blind-recall scan batch — how many encrypted "
+                    "ciphertexts are pulled from disk and scored at a time. 0 = AUTO (recommended): "
+                    "sized at runtime from available RAM and the MEASURED per-ciphertext footprint so "
+                    "the scan's memory stays bounded no matter the corpus size (a full-corpus recall no "
+                    "longer materializes every ciphertext at once, which at ~1MB/ct was gigabytes). A "
+                    "positive value pins a fixed batch. Recall latency is flat across batch size; this "
+                    "trades only memory vs DB round-trips.",
+     "default": 0},
+    {"key": "blind_scan_concurrency",
+     "description": "Tier-1 blind only: how many blind recalls the auto-tuner should assume may run at "
+                    "once when sizing blind_scan_batch (each concurrent scan gets a proportional share of "
+                    "the RAM budget). 1 = size for a single scan. Only consulted when blind_scan_batch = 0.",
+     "default": 1},
     # Additional runtime defaults used by provider/retriever.
     # NOTE: recall_floor / conflict_sim_low / conflict_sim_high are already defined
     # above (Hebbian block) — do NOT re-add them here or they double-list in the

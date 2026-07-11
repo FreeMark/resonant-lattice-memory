@@ -352,6 +352,8 @@ plugins:
     encryption_keystore_path: ""        # keystore sidecar (salt/KDF params/key-check; NO secrets). Empty = '<db>.keys'
     blind_he_keystore_path: ""          # blind only: HE keystore sidecar (public/eval blobs + wrapped secrets). Empty = '<db>.he'
     blind_reconcile_batch: 200          # blind only: max facts mirrored to the encrypted tables per reconcile pass (0 = unlimited)
+    blind_scan_batch: 0                  # blind only: streaming recall scan batch (0 = auto: sized from RAM + measured ct size so recall memory stays bounded)
+    blind_scan_concurrency: 1            # blind only: assumed simultaneous blind recalls when auto-sizing blind_scan_batch (splits the RAM budget)
 
     # ── Prompts (override the built-in defaults; the shown text IS the default) ──
     # Each is plain text; a config value overrides the corresponding DEFAULT_* in prompts.py.

@@ -20,7 +20,7 @@ Mixed into LatticeStore; uses self._conn/_lock like the sibling store_* mixins a
 never imports the composite (flat sibling imports only)."""
 
 import logging
-from typing import List, Optional, Tuple
+from typing import Iterator, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +57,63 @@ _HE_SOURCE_PRESENT = {
     "semantic_he_meta": None,        # resonance is always settable
     "semantic_he_entities": None,    # an empty set is mirrorable (set_entities([]) writes a row)
 }
+
+
+# ── streaming blind-recall scan sizing (A1) ──────────────────────────────────────────
+# The blind recall scan scores the query against EVERY stored ciphertext. iter_he_vectors
+# fetchall's the whole table, so at ~1 MB per embedding ciphertext a real corpus lands
+# GIGABYTES resident and the scan thrashes the memory bus (measured: 4,952 facts => ~5 GB
+# RSS, and adding CPU threads made it SLOWER — bandwidth-bound). stream_he_vectors pages
+# instead, holding only `batch` ciphertexts at once. Latency is flat across batch size, so
+# the batch is purely a RAM/concurrency dial; resolve_scan_batch sizes it PORTABLY from the
+# MEASURED per-ciphertext footprint and DETECTED available RAM — nothing hardcoded to a host.
+# Latency is FLAT across batch size (measured: B=64/256/1024 all ~275s), so a bigger batch buys
+# nothing but RAM. The tuner therefore DEFAULTS to a modest latency-optimal page and only SHRINKS
+# it when RAM (per concurrent scan) can't afford even that — it never inflates to fill memory,
+# which on a big-RAM host would just recreate the fetchall problem (whole corpus resident) and
+# starve concurrency. Smaller batch => more scans fit in RAM at once.
+_SCAN_BATCH_TARGET = 256       # round-trip-amortized sweet spot; the default page size
+_SCAN_BATCH_MIN = 32           # never page fewer than this (keep DB round-trips amortized)
+_SCAN_RAM_FRACTION = 0.20      # of MemAvailable, per concurrent scan — a CEILING, not a target
+
+
+def detect_available_ram_bytes() -> Optional[int]:
+    """Best-effort available RAM in bytes (Linux ``/proc/meminfo`` MemAvailable). Returns
+    None on hosts without it (e.g. the non-Linux dev box) so callers fall back to the safe
+    default batch. Blind recall only runs where openfhe is installed (Linux), so the
+    common path resolves; this stays dependency-free and never raises."""
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable"):
+                    return int(line.split()[1]) * 1024
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def resolve_scan_batch(configured: int, per_ct_bytes: int, count: int,
+                       avail_ram_bytes: Optional[int], concurrency: int = 1) -> int:
+    """Choose the streaming-scan batch size.
+
+    A positive ``configured`` is an explicit override and wins. Otherwise AUTO: start at the
+    latency-optimal ``_SCAN_BATCH_TARGET`` and SHRINK it (down to ``_SCAN_BATCH_MIN``) only if a
+    fraction of DETECTED available RAM, split across the intended ``concurrency``, can't hold
+    that many MEASURED-size ciphertexts. It never GROWS the batch to fill RAM: latency is flat
+    across batch size, so a bigger page would only waste memory and starve concurrent scans (and
+    on a big-RAM host recreate the whole-corpus-resident fetchall problem). Never larger than the
+    corpus. Portable: adapts DOWN on small/busy hosts, nothing hardcoded to a machine."""
+    if configured and int(configured) > 0:
+        batch = int(configured)
+    else:
+        batch = _SCAN_BATCH_TARGET
+        if per_ct_bytes and avail_ram_bytes:
+            ram_budget = avail_ram_bytes * _SCAN_RAM_FRACTION / max(1, int(concurrency))
+            batch = min(batch, int(ram_budget / per_ct_bytes))
+        batch = max(_SCAN_BATCH_MIN, batch)
+    if count and int(count) > 0:
+        batch = min(batch, int(count))
+    return max(1, batch)
 
 
 class BlindMixin:
@@ -104,6 +161,45 @@ class BlindMixin:
                 f"SELECT id, ct FROM {tbl} ORDER BY id"
             ).fetchall()
         return [(r["id"], bytes(r["ct"])) for r in rows]
+
+    def stream_he_vectors(self, table: str = DEFAULT_HE_TABLE,
+                          batch: int = _SCAN_BATCH_TARGET) -> Iterator[Tuple[int, bytes]]:
+        """Yield ``(fact_id, ct_blob)`` for every stored ct in id order, ``batch`` rows at a
+        time — the BOUNDED-RAM blind-recall scan (A1). Unlike iter_he_vectors (which
+        fetchall's the whole table, so ~1 MB/ct becomes GBs resident at corpus scale), this
+        keeps only ``batch`` ciphertexts in memory at once via KEYED PAGINATION
+        (``WHERE id > last ORDER BY id LIMIT batch`` over the primary key — O(log n) per page,
+        no OFFSET rescan). It reuses ``self._conn`` (so it composes with at-rest SQLCipher; a
+        fresh connection would lack the unlocked key) and holds ``self._lock`` only for each
+        brief page fetch, releasing it while the caller does the slow homomorphic scoring."""
+        tbl = _he_table(table)
+        batch = max(1, int(batch))
+        last_id: Optional[int] = None
+        while True:
+            with self._lock:
+                if last_id is None:
+                    rows = self._conn.execute(
+                        f"SELECT id, ct FROM {tbl} ORDER BY id LIMIT ?", (batch,)
+                    ).fetchall()
+                else:
+                    rows = self._conn.execute(
+                        f"SELECT id, ct FROM {tbl} WHERE id > ? ORDER BY id LIMIT ?",
+                        (last_id, batch),
+                    ).fetchall()
+            if not rows:
+                break
+            for r in rows:
+                yield (int(r["id"]), bytes(r["ct"]))
+            last_id = int(rows[-1]["id"])
+
+    def he_blob_size(self, table: str = DEFAULT_HE_TABLE) -> int:
+        """Average stored ciphertext size in bytes (0 if the table is empty) — the MEASURED
+        per-ct footprint that ``resolve_scan_batch`` uses to size the streaming scan. Cheap
+        AVG(LENGTH) over the (small) blind table."""
+        tbl = _he_table(table)
+        with self._lock:
+            row = self._conn.execute(f"SELECT AVG(LENGTH(ct)) FROM {tbl}").fetchone()
+        return int(row[0]) if row and row[0] else 0
 
     def count_he_vectors(self, table: str = DEFAULT_HE_TABLE) -> int:
         """Number of stored ciphertexts — leaks only the fact count (see §7.3)."""

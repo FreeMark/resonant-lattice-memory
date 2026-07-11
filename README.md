@@ -1,48 +1,15 @@
-﻿## 🆕 What's new: v1.3.0 (2026-07-08)
-
-Conflict detection learned to stop arresting innocent facts. Found in a live
-training deployment, fixed and shipped the same day:
-
-- **Parallel-subject veto** (`conflict_subject_veto`, default on). Template-parallel
-  facts about *different* subjects ("gl_FragCoord is available in GLSL ES 1.00/3.00"
-  vs "gl_FrontFacing is available in GLSL ES 1.00/3.00") share context entities and
-  sentence shape, which used to read as the contradiction signature and quarantine
-  both facts from recall. The detector now consults the stored (subject, relation,
-  object) triples: disjoint subjects means parallel facts, not a conflict.
-- **LLM adjudication** (`conflict_llm_adjudication`, default on). Candidate pairs that
-  pass the heuristic gates get a reasoning-model second opinion ("do these actually
-  contradict?") before a conflict group is locked. Fail-open by design: any model
-  error or ambiguous answer keeps the old conservative behavior (flag, protect,
-  arbitrate), so this can only reduce false positives, never hide a real conflict.
-- **New `dismiss_conflict` tool action**: the missing second resolution verb. When
-  arbitration finds both facts TRUE (a false-positive flag), the agent can now unlock
-  the whole group symmetrically; nothing is retired and no winner is picked.
-  `resolve_conflict` remains the winner-picking path for real contradictions.
-- Unit suite grew to **112 tests**, including the four real-world pairs from the
-  incident as must-NOT-flag regression cases, with a veto-off counterfactual that
-  reproduces the original bug.
-
-## 🔥 Overnight Business Proof (5-Hour Stress Test)
-
-- **236,750** business facts ingested  
-- **947** hijack attempts → **0** succeeded  
-- **1,894** policy poisons → **8** surfaced for human arbitration  
-- **Bounded Memory**: Live rows plateaued at ~3,933 (out of 236k ingested)  
-- **Pinned Rule Retention**: 12/12 (100%) every cycle  
-- **HARD INVARIANTS**: 10/10 PASS
-
 # Resonant Lattice Memory
 
 A **neuroplastic, local-first long-term memory** plugin for AI agents (built for
 [hermes-agent](https://hermes-agent.nousresearch.com), usable standalone). Facts
 behave like resonant circuits: a memory that keeps getting struck stays in tune
-and rings loud (reinforced → promoted to a durable tier); the ones nothing
-resonates with fade to silence (decay → prune). The result is a memory that
-**keeps what matters and forgets the noise — on its own, driven by usage cycles,
+and rings loud (reinforced, promoted to a durable tier); the ones nothing
+resonates with fade to silence (decay, prune). The result is a memory that
+**keeps what matters and forgets the noise, on its own, driven by usage cycles,
 not wall-clock timers.**
 
 It is designed so **an agent can read this file, verify the system on its own
-machine, deploy it, and configure it** — the same loop a human + agent used to
+machine, deploy it, and configure it**, the same loop a human and agent used to
 build and harden it.
 
 > **Thesis:** for an agent that earns, spends, or runs real operations, *memory is
@@ -50,23 +17,77 @@ build and harden it.
 > (2) never fabricate a fact, (3) obey standing rules, and (4) resist being
 > poisoned or going stale. This system is built and **tested** around those four.
 
+**⚙️ Tune it visually:** the [**RLM Configurator**](https://freemark.github.io/resonant-lattice-memory/)
+is a live, dependency-free page generated from `config_schema.py`. Every knob, its
+default, and ready-made preset profiles (Scholar, Sovereign Vault, Business
+Treasurer, and more) in one place.
+
+---
+
+## What's new
+
+### v1.4.1 (2026-07-11): bounded-RAM blind recall (streaming scan)
+
+Homomorphic blind recall no longer loads the whole encrypted corpus into memory to
+answer one query. The scan streams ciphertexts in batches sized automatically to the
+host (available RAM, the measured ciphertext size, and intended concurrency), so a
+full-corpus recall's peak memory drops sharply with bit-identical results.
+
+- Measured on a 4,952-fact encrypted corpus: recall working set **5.0 GB to 0.65 GB**
+  (7.7x smaller), top-10 results **identical**, latency unchanged (the win is memory
+  and concurrency, not speed).
+- New config: `blind_scan_batch` (0 = auto) and `blind_scan_concurrency`.
+- Unit suite grows to **130 tests** (streaming-equivalence and auto-tuner cases).
+
+### v1.4.0 (2026-07-11): trained in the open, sealed after the fact, still searchable blind
+
+A memory trained entirely in plaintext was run through the full encryption stack
+*after the fact*, then sealed. You can train a lattice in the open, seal it later,
+and it stays searchable while encrypted.
+
+- **Blind backfill at scale:** 4,952 live facts mirrored into the homomorphic tables,
+  blind recall proven **identical** to plaintext recall on every benchmark query, then
+  the whole store sealed at rest under one passphrase.
+- **Consolidation debt:** the substrate never discards a session it logged but never
+  digested (epoch death, gate wipeout); it retries the consolidation on a later cycle.
+- **The `[SYNTHESIZED]` provenance label:** facts the agent forms by reflecting on its
+  own memory are marked as its own conclusions with no source URL. The label was chosen
+  by a four-model measurement gauntlet, not by taste.
+- **Seal / unseal an existing database:** `encrypt_existing_db` and
+  `decrypt_to_plaintext` migrate a store between plaintext and SQLCipher, verified
+  opaque at the substrate.
+
+### Earlier
+
+v1.3.0 (2026-07-08) taught conflict detection to stop arresting innocent facts
+(parallel-subject veto, LLM adjudication, and the `dismiss_conflict` verb). Full
+history in the [Releases](https://github.com/FreeMark/resonant-lattice-memory/releases).
+
+## Proven under stress (5-hour overnight run)
+
+- **236,750** business facts ingested; live rows plateaued at **~3,933** (bounded memory)
+- **947** hijack attempts, **0** succeeded
+- **1,894** policy poisons, **8** surfaced for human arbitration
+- **12/12** pinned rules retained every cycle; **10/10** hard invariants PASS
+
 ---
 
 ## What's in this repo
 
 | Path | What it is |
 |---|---|
-| `resonant_lattice/` | The plugin (runtime code, `plugin.yaml`, `recommended_config.yaml`, architecture docs, the 112-test unit suite, the eval harness). |
-| `tests/` | The test suite (substrate → behaviour → scale → durability), plus the live end-to-end exercise `live_e2e.py`. |
+| `resonant_lattice/` | The plugin (runtime code, `plugin.yaml`, `recommended_config.yaml`, architecture docs, the 130-test unit suite, the eval harness). |
+| `tests/` | The test suite (substrate, behaviour, scale, durability), plus the live end-to-end exercise `live_e2e.py`. |
 | `results/` | All test evidence in one place: per-test outputs, metrics (`.jsonl`), model-comparison summaries, and the single-file [`CONSOLIDATED_RESULTS.md`](results/CONSOLIDATED_RESULTS.md). |
-| `tools/` | [`rl_monitor`](tools/README.md) — a live, read-only `nvtop`-style TUI to watch the memory work (tiers, cycle-by-cycle activity feed, conflicts, health). `python tools/rl_monitor.py --demo`. |
+| `docs/` | The [RLM Configurator](https://freemark.github.io/resonant-lattice-memory/) page (GitHub Pages), generated from `config_schema.py`. |
+| `tools/` | [`rl_monitor`](tools/README.md), a live, read-only `nvtop`-style TUI to watch the memory work (tiers, cycle-by-cycle activity feed, conflicts, health). `python tools/rl_monitor.py --demo`. Plus `build_configurator.py`. |
 | `resonant_lattice/DEPLOY_HERMES.md` | The exact, field-tested hermes install procedure. |
-| `resonant_lattice/MODULE_MAP.md` · `MEMORY_ROADMAP.md` | Architecture + design. |
+| `resonant_lattice/MODULE_MAP.md` · `MEMORY_ROADMAP.md` | Architecture and design. |
 
 ## Requirements
 
 - **Python 3.10+**
-- **`sqlite-vec`** (required — the provider declines without it) and **`numpy`** (HRR).
+- **`sqlite-vec`** (required, the provider declines without it) and **`numpy`** (HRR).
 - **Ollama** reachable (local or LAN) for an **embedding** model (e.g. `nomic-embed-text`
   or `embeddinggemma:300m`) and a **reasoning** model for the off-hot-path consolidation
   (e.g. `deepseek-v4-flash:cloud`, `gemma`/`nemotron`, or any local model).
@@ -78,13 +99,13 @@ pip install numpy sqlite-vec
 
 ---
 
-## Agent quickstart (verify → deploy → use)
+## Agent quickstart (verify, deploy, use)
 
 ### 1. Verify it works on *your* machine
 
-**Unit suite (no LLM needed — pure SQLite/HRR substrate, ~seconds):**
+**Unit suite (no LLM needed, pure SQLite/HRR substrate, ~seconds):**
 ```bash
-python resonant_lattice/test_resonant_lattice.py     # expect: 112 passed, 0 failed
+python resonant_lattice/test_resonant_lattice.py     # expect: 130 passed, 0 failed
 ```
 
 **Behaviour / trust / scale suite (needs Ollama for embeddings; a few also need a
@@ -94,8 +115,8 @@ results file under `results/`:
 # the corrected business-robustness battery (pinning, anti-fabrication, cross-session, …)
 python tests/run_all.py
 
-# the trust axis — does the agent recall the right thing and refuse the wrong thing?
-python tests/test_cross_entity_contamination.py   # right entity → right value
+# the trust axis: does the agent recall the right thing and refuse the wrong thing?
+python tests/test_cross_entity_contamination.py   # right entity -> right value
 python tests/test_supersession_recency.py         # current value, not stale
 python tests/test_memory_poisoning.py             # pinned rule beats injected poison
 python tests/test_conflict_flagging.py            # contradictions get surfaced
@@ -130,12 +151,15 @@ hermes config set plugins.resonant_lattice.embed_model  <your-embed-tag>
 hermes config set plugins.resonant_lattice.reason_model <your-reason-tag>
 hermes config set plugins.resonant_lattice.ollama_endpoint_embed  http://localhost:11434
 hermes config set plugins.resonant_lattice.ollama_endpoint_reason http://localhost:11434
-hermes memory status     # → Provider: resonant_lattice … available ✓
+hermes memory status     # -> Provider: resonant_lattice … available ✓
 ```
 For a multi-profile install, repeat into `~/.hermes/profiles/<name>/plugins/`.
 
 ### 3. Configure for your use case
 
+- **Tune it visually:** the [**RLM Configurator**](https://freemark.github.io/resonant-lattice-memory/)
+  renders every setting with its default and ships preset profiles; it is generated
+  from `config_schema.py`, so it never drifts from the code.
 - Defaults are a solid, lighter core. For the full experience (gist, relations,
   self-model, narrative, importance-weighted retention) copy **`resonant_lattice/recommended_config.yaml`**.
 - **Every tunable lives in one place:** `resonant_lattice/config_schema.py` (the
@@ -158,30 +182,30 @@ on real models. Results live in `results/` (start with `CONSOLIDATED_RESULTS.md`
 
 | Property | Evidence |
 |---|---|
-| **Recall holds at scale** — recall@1 = recall@10 = **1.0 up to ~48k live rows**, sub-linear latency | `scale_ceiling_results.md` |
-| **Bounded forgetting** — 20k facts → bounded live set, real plateau; salient kept, noise pruned | `stress_report.md`, `forgetting_report.md` |
-| **No cross-entity contamination** — right entity → right amount, even under load | `contamination_results.md` |
-| **Current-not-stale** — value updates retained + surfaced for resolution | `recency_results.md` |
-| **Poison-resistant** — a pinned rule beats a query-optimized poison; contradictions flagged | `poisoning_results.md`, `conflict_flagging_results.md` |
-| **No fabrication** — source-quote attestation drops invented specifics; gist keeps exact $/IDs | `anti_fabrication_results.md`, `abstraction_fidelity_results.md` |
-| **Durable** — concurrency-safe + crash/restart (SQLite ACID) | `durability_results.md` |
-| **Agentic, end-to-end** — grounded recall + rule-following + poison-resistance *from memory*, on real models | `agentic_e2e_results.md` |
-| **Marker A/B** — the authority tag the agent reads measurably changes obedience (validated on two model families) | `marker_ab_*.md` |
+| **Recall holds at scale**, recall@1 = recall@10 = **1.0 up to ~48k live rows**, sub-linear latency | `scale_ceiling_results.md` |
+| **Bounded forgetting**, 20k facts to a bounded live set, real plateau; salient kept, noise pruned | `stress_report.md`, `forgetting_report.md` |
+| **No cross-entity contamination**, right entity to right amount, even under load | `contamination_results.md` |
+| **Current-not-stale**, value updates retained and surfaced for resolution | `recency_results.md` |
+| **Poison-resistant**, a pinned rule beats a query-optimized poison; contradictions flagged | `poisoning_results.md`, `conflict_flagging_results.md` |
+| **No fabrication**, source-quote attestation drops invented specifics; gist keeps exact $/IDs | `anti_fabrication_results.md`, `abstraction_fidelity_results.md` |
+| **Durable**, concurrency-safe and crash/restart (SQLite ACID) | `durability_results.md` |
+| **Agentic, end-to-end**, grounded recall + rule-following + poison-resistance *from memory*, on real models | `agentic_e2e_results.md` |
+| **Marker A/B**, the authority tag the agent reads measurably changes obedience (two model families) | `marker_ab_*.md` |
 
 ---
 
 ## How it works (one paragraph)
 
-A three-tier resonance store (short → mid → long) over SQLite + `sqlite-vec`, with
+A three-tier resonance store (short, mid, long) over SQLite + `sqlite-vec`, with
 HRR (holographic) compositional encoding and an entity graph. Cycle-driven "dream
-cycles" decay, promote, abstract, and resolve conflicts — no wall-clock. Recall is
+cycles" decay, promote, abstract, and resolve conflicts, with no wall-clock. Recall is
 hybrid (vector + keyword) with a precision gate and an authority preference for
 pinned facts. Anti-fabrication is enforced by source-quote attestation; the agent
 *influences* memory (reinforce / pin / feedback) but cannot silently destroy it
 (no agent delete by default). See `resonant_lattice/MODULE_MAP.md` and
 `MEMORY_ROADMAP.md` for the full design.
 
-## Encryption tier — EXPERIMENTAL
+## Encryption tier: EXPERIMENTAL
 
 `blind_*.py`, `crypto_keys.py`, `he_crypto.py`, `store_blind.py` and
 `ENCRYPTION_ROADMAP.md` implement an optional two-tier private store (at-rest
@@ -189,20 +213,20 @@ SQLCipher + a homomorphic "blind" recall tier). It needs extra dependencies
 (`sqlcipher3`, `argon2-cffi`, a real OpenFHE build) and is **not required** for the
 core memory system. Treat it as a preview.
 
-**Readiness matrix** — be explicit about what each mode does and does not guarantee:
+**Readiness matrix**, be explicit about what each mode does and does not guarantee:
 
 | Mode | At-rest on disk | Recall | Extra deps | Status |
 |---|---|---|---|---|
 | **plaintext** (default) | plaintext SQLite | full hybrid | none beyond core | stable, fully tested |
 | **at-rest** | SQLCipher-encrypted (opaque without the key) | full (decrypted in memory) | `sqlcipher3`, `argon2-cffi` | experimental; at-rest byte-opacity is unit-checked |
-| **blind (HE)** | **plaintext-at-rest in this build** unless composed with at-rest | homomorphic blind recall | a real OpenFHE build | preview; node-validated only, not a turnkey install |
+| **blind (HE)** | **plaintext-at-rest in this build** unless composed with at-rest | homomorphic blind recall (bounded-RAM streaming scan, v1.4.1) | a real OpenFHE build | preview; node-validated only, not a turnkey install |
 | **blind + at-rest** | encrypted | blind | all of the above | **not a turnkey composition yet** |
 
 Failure mode is **fail-closed**: if a requested encrypted binding is unavailable the
 provider declines rather than silently falling back to plaintext (no false sense of
-encryption). Recovery is your own key custody (`*.db.keys`) — lose the key, lose the DB.
+encryption). Recovery is your own key custody (`*.db.keys`), lose the key, lose the DB.
 Do **not** rely on the blind tier alone for at-rest confidentiality in this build.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).
