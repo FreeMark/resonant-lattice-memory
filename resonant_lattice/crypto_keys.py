@@ -292,6 +292,145 @@ def db_key_to_pragma_value(db_key: bytes) -> str:
     return "x'" + bytes(db_key).hex() + "'"
 
 
+# ── E0 step 6: seal / unseal an existing DB FILE (sqlcipher_export) ─────────────
+# The migration path for a store TRAINED in plaintext and sealed at_rest after the
+# fact, plus the audited way back out. File-level only (no LatticeStore import,
+# leaf discipline preserved). Both directions refuse to overwrite an existing
+# destination and verify the result at the substrate (file header + readback)
+# before returning, per the E0 validation bar.
+
+_SQLITE_HEADER = b"SQLite format 3\x00"
+
+
+def _sqlcipher_module():
+    try:
+        import sqlcipher3
+        return sqlcipher3
+    except Exception as e:
+        raise CryptoUnavailableError(
+            f"sealing/unsealing a DB file requires sqlcipher3 "
+            f"(`pip install sqlcipher3-wheels`): {e}")
+
+
+def _file_is_plaintext_sqlite(path: str) -> bool:
+    with open(path, "rb") as f:
+        return f.read(16) == _SQLITE_HEADER
+
+
+def _as_passphrase_bytes(passphrase) -> bytes:
+    return passphrase.encode("utf-8") if isinstance(passphrase, str) else bytes(passphrase)
+
+
+def encrypt_existing_db(plain_path: str, encrypted_path: str, passphrase,
+                        *, keystore_path: Optional[str] = None,
+                        kdf_params: Optional[Dict[str, int]] = None) -> Dict:
+    """Seal an existing PLAINTEXT store into a new SQLCipher file (after-the-fact at_rest).
+
+    Copies schema + rows + user_version into ``encrypted_path`` via SQLCipher's
+    ``sqlcipher_export`` under a raw key derived from ``passphrase``. The keystore
+    sidecar (default ``<encrypted_path>.keys``) is created if missing, or loaded and
+    verified if present (so a re-seal under an existing keystore needs the matching
+    passphrase). The source file is never modified. Returns
+    ``{"sealed_path", "keystore_path", "tables"}``.
+
+    Raises FileExistsError if ``encrypted_path`` exists, ValueError if the source is
+    not a plaintext SQLite file, WrongPassphraseError on a keystore mismatch, and
+    CryptoUnavailableError if sqlcipher3/argon2 are missing.
+    """
+    sqlcipher = _sqlcipher_module()
+    plain_path, encrypted_path = str(plain_path), str(encrypted_path)
+    if os.path.abspath(plain_path) == os.path.abspath(encrypted_path):
+        raise ValueError("source and destination are the same file")
+    if not os.path.exists(plain_path):
+        raise FileNotFoundError(plain_path)
+    if not _file_is_plaintext_sqlite(plain_path):
+        raise ValueError(f"{plain_path} is not a plaintext SQLite file (already sealed?)")
+    if os.path.exists(encrypted_path):
+        raise FileExistsError(f"refusing to overwrite existing {encrypted_path}")
+    ks_path = keystore_path or (encrypted_path + ".keys")
+    pw = _as_passphrase_bytes(passphrase)
+    if os.path.exists(ks_path):
+        keystore = load_keystore(ks_path)
+    else:
+        keystore = create_keystore(pw, params=kdf_params)
+        save_keystore(ks_path, keystore)
+    db_key = derive_db_key(pw, keystore)          # raises WrongPassphraseError on mismatch
+    try:
+        key_text = db_key_to_pragma_value(db_key)
+        con = sqlcipher.connect(plain_path)
+        try:
+            n_tables = con.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table'").fetchone()[0]
+            user_version = con.execute("PRAGMA main.user_version").fetchone()[0]
+            con.execute("ATTACH DATABASE ? AS encrypted KEY ?", (encrypted_path, key_text))
+            con.execute("SELECT sqlcipher_export('encrypted')")
+            con.execute(f"PRAGMA encrypted.user_version = {int(user_version)}")
+            con.execute("DETACH DATABASE encrypted")
+        finally:
+            con.close()
+        # Substrate verification: the sealed file must be opaque to a header sniff
+        # and must open + enumerate under the derived key.
+        if _file_is_plaintext_sqlite(encrypted_path):
+            raise RuntimeError(f"seal failed: {encrypted_path} still has a plaintext header")
+        vcon = sqlcipher.connect(encrypted_path)
+        try:
+            vcon.execute(f'PRAGMA key = "{key_text}"')
+            n_sealed = vcon.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table'").fetchone()[0]
+        finally:
+            vcon.close()
+        if n_sealed != n_tables:
+            raise RuntimeError(f"seal verification: {n_sealed} tables sealed vs {n_tables} in source")
+    finally:
+        secure_zero(db_key)
+    return {"sealed_path": encrypted_path, "keystore_path": ks_path, "tables": n_tables}
+
+
+def decrypt_to_plaintext(encrypted_path: str, plain_path: str, passphrase,
+                         *, keystore_path: Optional[str] = None) -> Dict:
+    """Export a sealed (at_rest) store back to a new PLAINTEXT SQLite file.
+
+    The deliberate, audited exit door: requires the passphrase (verified against the
+    keystore sidecar, default ``<encrypted_path>.keys``) and writes a fresh plaintext
+    file via ``sqlcipher_export``. The sealed source is never modified. Returns
+    ``{"plain_path", "tables"}``.
+    """
+    sqlcipher = _sqlcipher_module()
+    encrypted_path, plain_path = str(encrypted_path), str(plain_path)
+    if os.path.abspath(plain_path) == os.path.abspath(encrypted_path):
+        raise ValueError("source and destination are the same file")
+    if not os.path.exists(encrypted_path):
+        raise FileNotFoundError(encrypted_path)
+    if _file_is_plaintext_sqlite(encrypted_path):
+        raise ValueError(f"{encrypted_path} is already a plaintext SQLite file")
+    if os.path.exists(plain_path):
+        raise FileExistsError(f"refusing to overwrite existing {plain_path}")
+    ks_path = keystore_path or (encrypted_path + ".keys")
+    if not os.path.exists(ks_path):
+        raise FileNotFoundError(f"keystore sidecar not found: {ks_path}")
+    keystore = load_keystore(ks_path)
+    db_key = derive_db_key(_as_passphrase_bytes(passphrase), keystore)
+    try:
+        key_text = db_key_to_pragma_value(db_key)
+        con = sqlcipher.connect(encrypted_path)
+        try:
+            con.execute(f'PRAGMA key = "{key_text}"')   # first statement, always
+            n_tables = con.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table'").fetchone()[0]
+            user_version = con.execute("PRAGMA main.user_version").fetchone()[0]
+            con.execute("ATTACH DATABASE ? AS plaintext KEY ''", (plain_path,))
+            con.execute("SELECT sqlcipher_export('plaintext')")
+            con.execute(f"PRAGMA plaintext.user_version = {int(user_version)}")
+            con.execute("DETACH DATABASE plaintext")
+        finally:
+            con.close()
+        if not _file_is_plaintext_sqlite(plain_path):
+            raise RuntimeError(f"unseal failed: {plain_path} did not come out plaintext")
+    finally:
+        secure_zero(db_key)
+    return {"plain_path": plain_path, "tables": n_tables}
+
+
 # ── Tier-1 (HE blind store): wrap/unwrap the HE secret key under the master ──────
 # The HE keypair is randomly generated at setup (not derived from the master); the
 # SECRET key is then AES-256-GCM-wrapped under a master-derived subkey and persisted

@@ -3188,6 +3188,78 @@ def test_crypto_keys_binding_selection():
     assert enc.__name__ == "sqlcipher3" and hasattr(enc, "IntegrityError")
 
 
+def test_crypto_keys_seal_unseal_existing_db():
+    """E0 step 6: encrypt_existing_db / decrypt_to_plaintext round-trip on a real file.
+
+    The after-the-fact migration path for a store trained in plaintext: seal via
+    sqlcipher_export under a keystore-derived raw key, verify true at-rest opacity
+    (header + plain-binding read failure), then the audited exit door back to
+    plaintext with rows and user_version intact. Wrong passphrase fails loudly;
+    neither direction overwrites an existing destination."""
+    if not _CK_OK:
+        print(f"  SKIP seal/unseal: {_CK_SKIP}"); return
+    try:
+        import sqlcipher3  # noqa: F401
+    except Exception as e:
+        print(f"  SKIP seal/unseal: sqlcipher3 not installed ({e})"); return
+    import sqlite3 as plain_sqlite
+    import tempfile
+    ck = _ck
+    with tempfile.TemporaryDirectory() as td:
+        plain = os.path.join(td, "trained.db")
+        sealed = os.path.join(td, "sealed.db")
+        back = os.path.join(td, "back.db")
+        con = plain_sqlite.connect(plain)
+        con.execute("CREATE TABLE semantic_facts (id INTEGER PRIMARY KEY, content TEXT)")
+        con.executemany("INSERT INTO semantic_facts (content) VALUES (?)",
+                        [("fact %d" % i,) for i in range(50)])
+        con.execute("PRAGMA user_version = 7")
+        con.commit(); con.close()
+
+        info = ck.encrypt_existing_db(plain, sealed, "correct horse")
+        assert info["tables"] >= 1 and os.path.exists(info["keystore_path"])
+        assert ck.keystore_is_secret_free(ck.load_keystore(info["keystore_path"]))
+        # Substrate opacity: header is not SQLite, and the PLAIN binding cannot read it.
+        with open(sealed, "rb") as f:
+            assert f.read(16) != b"SQLite format 3\x00"
+        try:
+            c = plain_sqlite.connect(sealed)
+            c.execute("SELECT COUNT(*) FROM sqlite_master").fetchone()
+            assert False, "plain sqlite3 read an at_rest-sealed file"
+        except plain_sqlite.DatabaseError:
+            pass
+        finally:
+            c.close()
+        # Source untouched, still plaintext.
+        assert ck._file_is_plaintext_sqlite(plain)
+
+        # Wrong passphrase: loud, precise failure before any file is written.
+        try:
+            ck.decrypt_to_plaintext(sealed, back, "wrong horse")
+            assert False, "wrong passphrase did not raise"
+        except ck.WrongPassphraseError:
+            pass
+        assert not os.path.exists(back)
+
+        out = ck.decrypt_to_plaintext(sealed, back, "correct horse")
+        assert out["tables"] == info["tables"]
+        c = plain_sqlite.connect(back)
+        assert c.execute("SELECT COUNT(*) FROM semantic_facts").fetchone()[0] == 50
+        assert c.execute("PRAGMA user_version").fetchone()[0] == 7
+        c.close()
+
+        # Refuse-overwrite contract, both directions.
+        for fn, args in ((ck.encrypt_existing_db, (plain, sealed, "correct horse")),
+                         (ck.decrypt_to_plaintext, (sealed, back, "correct horse"))):
+            try:
+                fn(*args)
+                assert False, f"{fn.__name__} overwrote an existing destination"
+            except FileExistsError:
+                pass
+    print("  seal/unseal OK: sqlcipher_export round-trip, opacity verified, "
+          "wrong-key + overwrite guards hold")
+
+
 _ENC_CHILD = r'''
 import os, sys
 plugin_dir, db = sys.argv[1], sys.argv[2]
