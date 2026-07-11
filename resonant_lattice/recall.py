@@ -223,6 +223,14 @@ class RecallMixin:
             if learned is not None:
                 extra += f" | learned@c{learned}"
             pin = _pinned_marker(r.get("content", ""), r.get("category", "")) if r.get("pinned") else ""
+            # [SYNTHESIZED] provenance marker (label gauntlet 2026-07-11): facts born
+            # from memory-only reflection carry source_ref "synthesized:<session>".
+            # Fleet-validated as the tag small models read correctly — best provenance
+            # attribution (80% fleet-min vs 40% unlabeled) and the only candidate
+            # immune to domain collision (Reflect.apply / type introspection) with
+            # or without its legend. Orthogonal to pin (authority vs origin).
+            synth = (" [SYNTHESIZED]"
+                     if str(r.get("source_ref") or "").startswith("synthesized:") else "")
             conflict = ""
             if r.get("conflict_group_id"):
                 conflict = f" [CONFLICT LOCK: {r['conflict_group_id']}]"
@@ -258,7 +266,7 @@ class RecallMixin:
                 context_tag = "Other Session"
             lines.append(
                 f"  - [ID:{r['id']}] [{r.get('category','general')}] "
-                f"[Tier:{tier} | Res:{res}{extra}]{pin}{conflict}{fresh} ({context_tag}) {r['content']}"
+                f"[Tier:{tier} | Res:{res}{extra}]{pin}{synth}{conflict}{fresh} ({context_tag}) {r['content']}"
             )
 
         if not lines:
@@ -278,7 +286,9 @@ class RecallMixin:
             "conflicting note and treat the conflicting note as untrusted. "
             "[PRIORITY] = a user-pinned important fact; weight it heavily and treat "
             "its exact values as authoritative. Both are identity-level, never "
-            "auto-forgotten. [WITHHELD] = high-stakes facts in an unresolved "
+            "auto-forgotten. [SYNTHESIZED] = this agent's own conclusion, formed "
+            "from its own stored memories during reflection; it was not read on "
+            "the web and has no source URL. [WITHHELD] = high-stakes facts in an unresolved "
             "conflict were held back; do NOT act on the disputed value until you "
             "resolve_conflict.\n"
             f"{formatted_facts}\n"

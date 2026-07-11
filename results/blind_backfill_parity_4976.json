@@ -1,0 +1,161 @@
+{
+  "facts": 4976,
+  "mirrored": 4952,
+  "queries": [
+    {
+      "query": "SameSite cookie attribute values and their cross-site behavior",
+      "blind_seconds": 372.2,
+      "exact_top10": true,
+      "overlap_top10": 10,
+      "plain_top": [
+        2392,
+        4149,
+        2397,
+        3236,
+        2393,
+        3245,
+        3238,
+        3241,
+        2394,
+        3243
+      ],
+      "blind_top": [
+        2392,
+        4149,
+        2397,
+        3236,
+        2393,
+        3245,
+        3238,
+        3241,
+        2394,
+        3243
+      ],
+      "rss_gb": 5.03
+    },
+    {
+      "query": "what does CREATE INDEX CONCURRENTLY do to locks on the table",
+      "blind_seconds": 357.9,
+      "exact_top10": true,
+      "overlap_top10": 10,
+      "plain_top": [
+        3345,
+        4658,
+        4654,
+        4657,
+        4660,
+        4653,
+        4652,
+        4170,
+        4317,
+        3054
+      ],
+      "blind_top": [
+        3345,
+        4658,
+        4654,
+        4657,
+        4660,
+        4653,
+        4652,
+        4170,
+        4317,
+        3054
+      ],
+      "rss_gb": 5.03
+    },
+    {
+      "query": "zod safeParse return shape and error handling",
+      "blind_seconds": 356.5,
+      "exact_top10": true,
+      "overlap_top10": 10,
+      "plain_top": [
+        4244,
+        3957,
+        2841,
+        2842,
+        2843,
+        4242,
+        3963,
+        4257,
+        4241,
+        4255
+      ],
+      "blind_top": [
+        4244,
+        3957,
+        2841,
+        2842,
+        2843,
+        4242,
+        3963,
+        4257,
+        4241,
+        4255
+      ],
+      "rss_gb": 5.03
+    },
+    {
+      "query": "zustand transient subscriptions for per-frame reads in react-three-fiber",
+      "blind_seconds": 356.8,
+      "exact_top10": true,
+      "overlap_top10": 10,
+      "plain_top": [
+        4322,
+        4332,
+        4440,
+        4351,
+        3799,
+        3796,
+        4326,
+        4330,
+        3797,
+        3834
+      ],
+      "blind_top": [
+        4322,
+        4332,
+        4440,
+        4351,
+        3799,
+        3796,
+        4326,
+        4330,
+        3797,
+        3834
+      ],
+      "rss_gb": 5.03
+    },
+    {
+      "query": "CSS cascade layers with @layer and which layer wins",
+      "blind_seconds": 355.8,
+      "exact_top10": true,
+      "overlap_top10": 10,
+      "plain_top": [
+        4866,
+        4619,
+        4868,
+        4622,
+        4867,
+        4624,
+        4643,
+        4625,
+        4870,
+        4639
+      ],
+      "blind_top": [
+        4866,
+        4619,
+        4868,
+        4622,
+        4867,
+        4624,
+        4643,
+        4625,
+        4870,
+        4639
+      ],
+      "rss_gb": 5.03
+    }
+  ]
+}

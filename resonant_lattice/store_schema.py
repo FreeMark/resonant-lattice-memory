@@ -180,6 +180,7 @@ class SchemaMixin:
         self._migrate_add_tool_episodes()
         self._migrate_add_canonical_facts()
         self._migrate_add_write_batches()
+        self._migrate_add_consolidation_debt()
 
 
     def _migrate_add_columns(self) -> None:
@@ -1000,6 +1001,39 @@ class SchemaMixin:
                 self._conn.commit()
             except Exception as e:
                 logger.debug("Migration (write_batches) failed or already exists: %s", e)
+
+
+    def _migrate_add_consolidation_debt(self) -> None:
+        """Create the consolidation-debt ledger (idempotent).
+
+        A session that logged substantial episodes but banked ZERO facts is a debt:
+        an experience the substrate has not digested (epoch death, gate wipeout, a
+        reason-model outage — the failure classes extraction_max_attempts cannot see
+        because they happen outside or after the extraction call). The dream cycle
+        flags debts BEFORE episode pruning, the pruner exempts open debts so the
+        evidence survives, and a bounded post-dream retry re-runs the consolidation
+        epoch until the session settles. settled: NULL = open, 'recovered' = a retry
+        banked facts, 'organic' = facts appeared without our retry, 'exhausted' =
+        attempts used up with nothing banked (surfaced in the health snapshot).
+        Cycle-stamped, never wall-clock. Empty and free on stores that disable it."""
+        with self._lock:
+            try:
+                self._conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS consolidation_debt (
+                        session_id          TEXT PRIMARY KEY,
+                        episode_rows        INTEGER NOT NULL DEFAULT 0,
+                        attempts            INTEGER NOT NULL DEFAULT 0,
+                        settled             TEXT,
+                        first_flagged_cycle INTEGER,
+                        last_attempt_cycle  INTEGER,
+                        created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_consolidation_debt_open
+                        ON consolidation_debt(first_flagged_cycle) WHERE settled IS NULL;
+                """)
+                self._conn.commit()
+            except Exception as e:
+                logger.debug("Migration (consolidation_debt) failed or already exists: %s", e)
 
 
     def _stamp_meta(self) -> None:

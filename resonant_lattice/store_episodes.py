@@ -37,6 +37,12 @@ class EpisodesMixin:
         `max_rows` (0 = unlimited) additionally caps the TOTAL episode count,
         deleting oldest-first. Guards against a single never-ending session
         growing the table without bound (the session filter alone can't).
+
+        CONSOLIDATION-DEBT EXEMPTION: sessions flagged as open debt (substantial
+        episodes, zero banked facts — see flag_consolidation_debt) are never
+        pruned by either clause. Their episodes are the only remaining evidence
+        of an undigested experience; deleting them made the TanStack loss
+        unrecoverable. The exemption lifts as soon as the debt settles.
         """
         with self._lock:
             self._conn.execute(
@@ -49,6 +55,9 @@ class EpisodesMixin:
                     ORDER BY MAX(id) DESC
                     LIMIT ?
                 )
+                AND session_id NOT IN (
+                    SELECT session_id FROM consolidation_debt WHERE settled IS NULL
+                )
                 """,
                 (keep_sessions,)
             )
@@ -59,10 +68,123 @@ class EpisodesMixin:
                     WHERE id NOT IN (
                         SELECT id FROM episodes ORDER BY id DESC LIMIT ?
                     )
+                    AND session_id NOT IN (
+                        SELECT session_id FROM consolidation_debt WHERE settled IS NULL
+                    )
                     """,
                     (max_rows,)
                 )
             self._conn.commit()
+
+
+    # ================== CONSOLIDATION DEBT (undigested sessions) ==================
+    # A session with substantial episodes and ZERO facts born from it is an
+    # experience the substrate failed to digest. The ledger lives here because
+    # debt is an episode-lifecycle concern: it is flagged from the episode log,
+    # it exempts episodes from pruning, and it settles when facts finally land.
+
+    # A debt needs at least this many episode rows (2 full user+assistant turns);
+    # smaller sessions are legitimately fact-free smalltalk, not failures.
+    DEBT_MIN_EPISODES = 4
+
+    def flag_consolidation_debt(self, current_cycle: int,
+                                exclude_session: str = "",
+                                min_episodes: int = 0) -> int:
+        """Flag sessions with >= min_episodes episode rows and zero born facts.
+
+        Pure SQL, idempotent (a session is flagged once, ever). ``exclude_session``
+        keeps the CURRENT session out — its consolidation may simply not have run
+        yet. A concurrent process's live session can still be flagged early; that
+        false positive self-heals because the retry path re-checks born facts
+        before spending any LLM call and settles it 'organic'. Returns rows added.
+        """
+        m = int(min_episodes) if min_episodes > 0 else self.DEBT_MIN_EPISODES
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                INSERT INTO consolidation_debt
+                    (session_id, episode_rows, first_flagged_cycle)
+                SELECT e.session_id, COUNT(*), ?
+                FROM episodes e
+                WHERE e.session_id != ?
+                  AND e.session_id NOT IN
+                      (SELECT session_id FROM consolidation_debt)
+                  AND e.session_id NOT IN
+                      (SELECT DISTINCT source_session FROM semantic_facts
+                       WHERE source_session IS NOT NULL)
+                GROUP BY e.session_id
+                HAVING COUNT(*) >= ?
+                """,
+                (int(current_cycle), exclude_session or "", m),
+            )
+            self._conn.commit()
+            added = cur.rowcount or 0
+            if added:
+                logger.info("Consolidation debt: flagged %d undigested session(s)", added)
+            return added
+
+    def get_open_consolidation_debts(self, before_cycle: int, limit: int = 1) -> List[Dict]:
+        """Open debts flagged BEFORE the given dream cycle, oldest first.
+
+        The one-cycle seasoning delay means a session flagged mid-flight by a
+        concurrent process gets a full dream cycle to consolidate on its own
+        before we touch it."""
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT session_id, episode_rows, attempts, first_flagged_cycle
+                FROM consolidation_debt
+                WHERE settled IS NULL AND first_flagged_cycle < ?
+                ORDER BY first_flagged_cycle ASC
+                LIMIT ?
+                """,
+                (int(before_cycle), int(limit)),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def session_born_fact_count(self, session_id: str) -> int:
+        """Facts whose source_session is this session (the debt receipt check)."""
+        with self._lock:
+            return self._conn.execute(
+                "SELECT COUNT(*) FROM semantic_facts WHERE source_session = ?",
+                (session_id,),
+            ).fetchone()[0]
+
+    def settle_consolidation_debt(self, session_id: str, outcome: str,
+                                  current_cycle: int = 0) -> None:
+        """Close a debt: 'recovered' (retry banked facts), 'organic' (facts
+        appeared without us), or 'exhausted' (attempts used up, still zero)."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE consolidation_debt SET settled = ?, last_attempt_cycle = ? "
+                "WHERE session_id = ?",
+                (outcome, int(current_cycle), session_id),
+            )
+            self._conn.commit()
+
+    def record_debt_attempt(self, session_id: str, current_cycle: int) -> int:
+        """Increment a debt's retry counter; returns the new attempt count."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE consolidation_debt SET attempts = attempts + 1, "
+                "last_attempt_cycle = ? WHERE session_id = ?",
+                (int(current_cycle), session_id),
+            )
+            self._conn.commit()
+            row = self._conn.execute(
+                "SELECT attempts FROM consolidation_debt WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            return row[0] if row else 0
+
+    def consolidation_debt_counts(self) -> Dict[str, int]:
+        """Health-snapshot rollup: open / recovered / organic / exhausted."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT COALESCE(settled, 'open') AS state, COUNT(*) "
+                "FROM consolidation_debt GROUP BY state"
+            ).fetchall()
+            return {r[0]: r[1] for r in rows}
 
 
     def add_episode(self, session_id: str, role: str, content: str) -> None:
@@ -150,6 +272,20 @@ class EpisodesMixin:
                 d["success"] = bool(d.get("success"))
                 out.append(d)
             return out
+
+
+    def session_tool_names(self, session_id: str) -> set:
+        """Distinct tool names this session invoked — its tool profile.
+
+        Used by synthesis detection (zero web tools + lattice reads = reflection).
+        lattice_store itself is deliberately absent from tool_episodes; its read
+        signal travels in-process via provider._lattice_read_sessions."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT DISTINCT tool_name FROM tool_episodes WHERE session_id = ?",
+                (session_id,),
+            ).fetchall()
+            return {r[0] for r in rows}
 
 
     def prune_tool_episodes(self, keep: int = 500) -> int:

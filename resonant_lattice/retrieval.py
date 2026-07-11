@@ -152,7 +152,7 @@ class LatticeRetriever:
                 vec_sql = """
                     SELECT f.id, f.content, f.category, f.tier,
                            f.resonance_count, f.conflict_group_id, f.conflict_since_cycle,
-                           f.source_session, f.last_confirmed_cycle,
+                           f.source_session, f.source_ref, f.last_confirmed_cycle,
                            f.learned_at_cycle, f.max_resonance_seen, f.pinned, v.distance
                     FROM semantic_vec v
                     JOIN semantic_facts f ON f.id = v.id
@@ -175,7 +175,7 @@ class LatticeRetriever:
             fts_sql = """
                 SELECT f.id, f.content, f.category, f.tier,
                        f.resonance_count, f.conflict_group_id, f.conflict_since_cycle,
-                       f.source_session, f.last_confirmed_cycle,
+                       f.source_session, f.source_ref, f.last_confirmed_cycle,
                        f.learned_at_cycle, f.max_resonance_seen, f.pinned, fts.rank
                 FROM semantic_fts fts
                 JOIN semantic_facts f ON f.id = fts.rowid
@@ -405,7 +405,7 @@ class BlindRetriever(LatticeRetriever):
                     break
                 row = self.store._conn.execute(
                     "SELECT id, content, category, tier, resonance_count, "
-                    "conflict_group_id, conflict_since_cycle, source_session, "
+                    "conflict_group_id, conflict_since_cycle, source_session, source_ref, "
                     "last_confirmed_cycle, learned_at_cycle, max_resonance_seen, pinned "
                     "FROM semantic_facts "
                     "WHERE id = ? AND tier != 'superseded'",

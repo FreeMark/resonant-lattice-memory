@@ -51,6 +51,22 @@ CONFIG_SCHEMA = [
                     "extractable knowledge; retrying recovers the turn's facts instead of silently "
                     "dropping them. 1 = no retry (legacy).",
      "default": 3},
+    {"key": "reconsolidate_zero_fact_sessions",
+     "description": "Consolidation debt: never discard an experience the substrate has not "
+                    "digested. A session that logged substantial episodes but banked ZERO facts "
+                    "(epoch death, gate wipeout, reason-model outage — failures "
+                    "extraction_max_attempts cannot see) is flagged as debt, its episodes are "
+                    "exempt from pruning while the debt is open, and the dream cycle retries the "
+                    "consolidation epoch for one debt session per cycle until facts land or "
+                    "attempts run out. Off = legacy behavior (zero-fact sessions prune away "
+                    "silently).",
+     "default": True},
+    {"key": "reconsolidation_max_attempts",
+     "description": "How many dream-cycle retries a consolidation-debt session gets before it "
+                    "is settled 'exhausted' and its episodes return to normal pruning. Each "
+                    "retry is one consolidation epoch (which internally retries extraction up "
+                    "to extraction_max_attempts times), so total LLM work stays bounded.",
+     "default": 2},
     {"key": "hrr_dim", "description": "HRR phase-vector dimension", "default": 1024},
     {"key": "reflection_frequency", "description": "Consolidate every N turns", "default": 5},
     {"key": "dream_every_n_consolidations", "description": "Dream cycle every N consolidations",

@@ -3924,6 +3924,286 @@ def test_store_cycle_counter_multiprocess_atomicity():
     print("  cycle counters atomic across store instances (multi-process safe)")
 
 
+def test_store_consolidation_debt_ledger():
+    """Consolidation debt, store layer (pure SQL, no LLM): a session with
+    substantial episodes and ZERO born facts is flagged once, its episodes are
+    exempt from BOTH pruning clauses while the debt is open, the seasoning
+    delay hides it from retries until the next dream cycle, and settling
+    (any outcome) releases the episodes back to normal pruning. Fixes the
+    class that lost the TanStack block (episodes pruned before recovery)."""
+    if not _STORE_OK:
+        print(f"  SKIP consolidation debt: {_SKIP_REASON}"); return
+    s = _fresh_store()
+
+    # Session A: substantial episodes, no facts  -> DEBT
+    for i in range(3):
+        s.add_turn("sess-A", f"question {i}", f"answer {i}")
+    # Session B: substantial episodes + a born fact -> not debt
+    for i in range(2):
+        s.add_turn("sess-B", f"q {i}", f"a {i}")
+    s.add_or_reinforce_fact("session B banked this fact", _emb(s, "b fact"),
+                            "general", "sess-B")
+    # Session C: below the substantiality floor -> not debt
+    s.add_turn("sess-C", "hi", "hello")
+    # Session D: the CURRENT session (excluded), no facts yet
+    for i in range(3):
+        s.add_turn("sess-D", f"live q {i}", f"live a {i}")
+
+    added = s.flag_consolidation_debt(5, exclude_session="sess-D")
+    assert added == 1, added
+    assert s.flag_consolidation_debt(5, exclude_session="sess-D") == 0  # idempotent
+    debts = s.get_open_consolidation_debts(before_cycle=6)
+    assert [d["session_id"] for d in debts] == ["sess-A"], debts
+    assert debts[0]["episode_rows"] == 6, debts
+    # Seasoning: flagged AT cycle 5 is invisible to a retry scan AT cycle 5.
+    assert s.get_open_consolidation_debts(before_cycle=5) == []
+
+    # Pruning exemption, session-window clause: keep only the most recent
+    # session -> A survives (open debt), B and C are pruned.
+    s.prune_episodes(keep_sessions=1)
+    left = {r[0] for r in s._conn.execute(
+        "SELECT DISTINCT session_id FROM episodes").fetchall()}
+    assert "sess-A" in left, left
+    assert "sess-B" not in left and "sess-C" not in left, left
+    # Pruning exemption, max_rows clause: a 2-row cap cannot touch A's 6 rows.
+    s.prune_episodes(keep_sessions=1, max_rows=2)
+    a_rows = s._conn.execute(
+        "SELECT COUNT(*) FROM episodes WHERE session_id='sess-A'").fetchone()[0]
+    assert a_rows == 6, a_rows
+
+    # Receipt + attempts + settlement.
+    assert s.session_born_fact_count("sess-A") == 0
+    assert s.session_born_fact_count("sess-B") == 1
+    assert s.record_debt_attempt("sess-A", 6) == 1
+    assert s.record_debt_attempt("sess-A", 7) == 2
+    s.settle_consolidation_debt("sess-A", "exhausted", 7)
+    assert s.get_open_consolidation_debts(before_cycle=99) == []
+    counts = s.consolidation_debt_counts()
+    assert counts == {"exhausted": 1}, counts
+    # A settled session may never be re-flagged (tracked forever).
+    assert s.flag_consolidation_debt(8, exclude_session="") == 0 or True
+    re_flagged = s._conn.execute(
+        "SELECT COUNT(*) FROM consolidation_debt WHERE session_id='sess-A'"
+    ).fetchone()[0]
+    assert re_flagged == 1, re_flagged
+    # Exemption lifted: pruning may now delete A's episodes.
+    s.prune_episodes(keep_sessions=1)
+    a_rows = s._conn.execute(
+        "SELECT COUNT(*) FROM episodes WHERE session_id='sess-A'").fetchone()[0]
+    assert a_rows == 0, a_rows
+    # Health snapshot surfaces the ledger.
+    h = s.get_memory_health()
+    assert h["consolidation_debt_exhausted"] == 1 and h["consolidation_debt_open"] == 0
+    s.close()
+    print("  consolidation debt ledger OK: flag once, exempt both prune clauses, "
+          "seasoning delay, settle releases episodes, health surfaced")
+
+
+def test_consolidation_debt_retry_flow():
+    """Consolidation debt, provider layer (stubbed store, no LLM): the post-dream
+    retry re-checks the receipt BEFORE spending an epoch (organic settlement is
+    free), retries with suppress_dream=True, judges recovery at the substrate
+    (born facts, not the epoch's return), and settles 'exhausted' only after
+    reconsolidation_max_attempts."""
+    try:
+        prov = _load("__init__")
+    except Exception as e:
+        print(f"  SKIP debt retry flow: {e}"); return
+
+    class _DebtStore:
+        def __init__(self, born=0):
+            self.born = born
+            self.attempts = 0
+            self.settled = None
+
+        def get_open_consolidation_debts(self, before_cycle, limit=1):
+            if self.settled is not None:
+                return []
+            return [{"session_id": "s-debt", "episode_rows": 8,
+                     "attempts": self.attempts, "first_flagged_cycle": 3}]
+
+        def session_born_fact_count(self, sid):
+            return self.born
+
+        def record_debt_attempt(self, sid, cycle):
+            self.attempts += 1
+            return self.attempts
+
+        def settle_consolidation_debt(self, sid, outcome, cycle=0):
+            self.settled = outcome
+
+    def _mk(born=0):
+        p = prov.LatticeMemoryProvider({})
+        p._store = _DebtStore(born)
+        p._write_enabled = True
+        p._reconsolidate_zero_fact_sessions = True
+        p._reconsolidation_max_attempts = 2
+        p._dream_cycle_count = 5
+        p._epochs = []
+        p._run_consolidation_epoch = (
+            lambda sid, force_blocking=False, suppress_dream=False:
+            p._epochs.append((sid, suppress_dream)))
+        return p
+
+    # Organic: facts already landed -> settled with ZERO epoch calls.
+    p = _mk(born=3)
+    p._reconsolidate_debt()
+    assert p._store.settled == "organic" and p._epochs == [], (p._store.settled, p._epochs)
+
+    # Recovery: first retry stays open (attempt 1/2), a later retry that banks
+    # facts settles 'recovered'. suppress_dream must be True on every retry.
+    p = _mk(born=0)
+    p._reconsolidate_debt()                      # attempt 1: still 0 facts
+    assert p._store.settled is None and p._store.attempts == 1
+    assert p._epochs == [("s-debt", True)], p._epochs
+    orig = p._run_consolidation_epoch
+    p._run_consolidation_epoch = (
+        lambda sid, force_blocking=False, suppress_dream=False:
+        (orig(sid, force_blocking, suppress_dream), setattr(p._store, "born", 11)))
+    p._reconsolidate_debt()                      # attempt 2: recovers 11 facts
+    assert p._store.settled == "recovered" and p._store.attempts == 2
+
+    # Exhaustion: two failed retries -> 'exhausted', never a third epoch.
+    p = _mk(born=0)
+    p._reconsolidate_debt()
+    p._reconsolidate_debt()
+    assert p._store.settled == "exhausted" and p._store.attempts == 2
+    n_epochs = len(p._epochs)
+    p._reconsolidate_debt()                      # settled -> no further work
+    assert len(p._epochs) == n_epochs
+    print("  consolidation debt retry OK: organic free, recovery substrate-judged, "
+          "exhaustion bounded at max attempts")
+
+
+def test_synthesized_label_epoch_stamping():
+    """[SYNTHESIZED] provenance (label gauntlet, fleet-validated): the consolidation
+    epoch stamps source_ref 'synthesized:<session>' on facts born from a session
+    that READ its own memory (in-process lattice-read flag) and touched NO web
+    tools. A session with web tools keeps the extractor's ref (firsthand); a
+    session that never read memory keeps it too (conversation provenance).
+    Domain category is preserved — unlike mental_note. Runs the REAL epoch with a
+    faked reason-model response."""
+    try:
+        prov = _load("__init__")
+    except Exception as e:
+        print(f"  SKIP synthesized stamping: {e}"); return
+    import json
+    import tempfile
+
+    captured = {}
+
+    class _EpochStore:
+        def __init__(self, tmp, profile):
+            self.db_path = os.path.join(tmp, "stub.db")
+            self._profile = profile
+
+        def get_recent_episodes(self, limit=10, session_id=None):
+            return [{"role": "user", "content": "synthesize what you know" * 8},
+                    {"role": "assistant", "content": "principles follow" * 20}]
+
+        def get_cycle_counts(self):
+            return (0, 0)
+
+        def _clean_llm_json(self, text):
+            return text
+
+        def begin_write_batch(self, **kw):
+            return 1
+
+        def end_write_batch(self):
+            pass
+
+        def _extract_entities(self, content):
+            return []
+
+        def session_tool_names(self, session_id):
+            return set(self._profile)
+
+        def increment_cycle(self, key):
+            return 1
+
+        def add_or_reinforce_fact(self, content, emb, category, session_id, **kw):
+            captured[session_id] = (category, kw.get("source_ref"))
+            return ("added", 77)
+
+    class _EpochRetriever:
+        def _get_embedding(self, content):
+            return [0.1] * 8
+
+    fake_response = {"response": json.dumps([{
+        "content": "Container queries beat media queries for reusable components",
+        "category": "webdev",
+        "source_ref": "https://echo.example/secondhand",
+    }])}
+
+    def _run(session_id, profile, lattice_read):
+        p = prov.LatticeMemoryProvider({})
+        tmp = tempfile.mkdtemp()
+        p._store = _EpochStore(tmp, profile)
+        p._retriever = _EpochRetriever()
+        p._write_enabled = True
+        p._gate_self_writes = False
+        p._enable_relations = False
+        p._session_id = session_id
+        if lattice_read:
+            p._lattice_read_sessions.add(session_id)
+        g = p._run_consolidation_epoch.__func__.__globals__
+        orig = g["_ollama_post_with_retry"]
+        g["_ollama_post_with_retry"] = lambda url, payload, timeout, max_attempts=3: fake_response
+        try:
+            p._run_consolidation_epoch(session_id, suppress_dream=True)
+        finally:
+            g["_ollama_post_with_retry"] = orig
+
+    # Memory reads + zero web tools -> stamped, category kept.
+    _run("s-reflect", {"search_files"}, lattice_read=True)
+    assert captured["s-reflect"] == ("webdev", "synthesized:s-reflect"), captured
+    # Memory reads + web tools -> research session, extractor ref preserved.
+    _run("s-research", {"web_search", "web_extract"}, lattice_read=True)
+    assert captured["s-research"] == ("webdev", "https://echo.example/secondhand"), captured
+    # No memory reads -> conversation provenance, untouched.
+    _run("s-chat", set(), lattice_read=False)
+    assert captured["s-chat"] == ("webdev", "https://echo.example/secondhand"), captured
+    print("  synthesized stamping OK: reflection stamped (category kept), "
+          "research + chat sessions untouched")
+
+
+def test_synthesized_recall_marker():
+    """[SYNTHESIZED] surfaces in the recall block: the marker on the fact line and
+    the legend sentence in the header (the exact wording the gauntlet validated),
+    and only for facts whose source_ref carries the synthesized: prefix."""
+    try:
+        prov = _load("__init__")
+    except Exception as e:
+        print(f"  SKIP synthesized marker: {e}"); return
+
+    class _MarkerRetriever:
+        def search(self, query, limit=10, **kw):
+            base = {"category": "webdev", "tier": "long", "resonance_count": 5.0,
+                    "conflict_group_id": None, "source_session": "s-old",
+                    "pinned": 0}
+            return [dict(base, id=101, content="synthesized principle",
+                         source_ref="synthesized:s-old"),
+                    dict(base, id=102, content="web-attested fact",
+                         source_ref="https://developer.mozilla.org/x")]
+
+    p = prov.LatticeMemoryProvider({})
+    p._retriever = _MarkerRetriever()
+    p._store = None
+    p._write_enabled = False          # recall reinforcement no-ops
+    block = p._compute_prefetch("container queries", "s-now")
+    assert "[ID:101]" in block and "[ID:102]" in block, block
+    line1 = next(l for l in block.splitlines() if "[ID:101]" in l)
+    line2 = next(l for l in block.splitlines() if "[ID:102]" in l)
+    assert "[SYNTHESIZED]" in line1, line1
+    assert "[SYNTHESIZED]" not in line2, line2
+    assert ("[SYNTHESIZED] = this agent's own conclusion, formed from its own "
+            "stored memories during reflection; it was not read on the web and "
+            "has no source URL." in block.replace("\n", " ")), block[:400]
+    print("  synthesized recall marker OK: line marker + gauntlet legend, "
+          "non-synthesis facts unmarked")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = skipped = failed = 0

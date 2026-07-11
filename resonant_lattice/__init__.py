@@ -163,6 +163,19 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         # Retry consolidation extraction when a reasoning model flakily returns 0 facts.
         self._extraction_max_attempts = int(self._config.get(
             "extraction_max_attempts", DEFAULTS.get("extraction_max_attempts", 3)))
+        # Synthesis-session signal (label gauntlet): sessions that READ their own
+        # memory via lattice_store, tracked in-process by the tool handler.
+        # Consolidation pairs this with a zero-web tool profile to stamp
+        # reflection-born facts source_ref "synthesized:<session>".
+        self._lattice_read_sessions: set = set()
+        # Consolidation debt: flag zero-fact sessions, exempt their episodes from
+        # pruning, and retry their epoch from the dream cycle (bounded).
+        self._reconsolidate_zero_fact_sessions = bool(self._config.get(
+            "reconsolidate_zero_fact_sessions",
+            DEFAULTS.get("reconsolidate_zero_fact_sessions", True)))
+        self._reconsolidation_max_attempts = int(self._config.get(
+            "reconsolidation_max_attempts",
+            DEFAULTS.get("reconsolidation_max_attempts", 2)))
 
         # Serialize the memory layer's reasoning-model calls to at most N in flight
         # (default 1 = strictly serial). Guarantees the memory layer holds one endpoint

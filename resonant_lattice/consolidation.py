@@ -19,6 +19,11 @@ from self_write_gate import is_task_process_meta
 
 logger = logging.getLogger(__name__)
 
+# Web-facing tool names for the synthesis-session test. Matches web_search /
+# web_extract / web_fetch / browser / fetch_url / firecrawl-style names but NOT
+# local tools like search_files (must START with web/fetch/http or be a crawler).
+_WEB_TOOL_RE = re.compile(r"^web|^browser|^fetch|^http|crawl", re.I)
+
 
 def _ollama_post_with_retry(url: str, payload: dict, timeout: float, max_attempts: int = 3) -> dict:
     """Basic retry helper for Ollama POSTs (Phase 7 resilience).
@@ -263,6 +268,26 @@ class ConsolidationMixin:
                 f"({len(episodes)} recent episodes, reason model)"
             )
 
+            # [SYNTHESIZED] provenance detection (label gauntlet 2026-07-11): a
+            # session that READ its own memory (lattice_store reads, tracked
+            # in-process) and touched NO web tools is reflection, not research —
+            # facts born from it restate or recombine stored knowledge. They get
+            # source_ref "synthesized:<session>" below so recall can mark them and
+            # no secondhand URL masquerades as firsthand provenance. Domain
+            # category is KEPT (unlike mental_note): a synthesized webdev
+            # principle is still webdev knowledge.
+            synthesis_session = False
+            if session_id in getattr(self, "_lattice_read_sessions", set()):
+                try:
+                    _profile = self._store.session_tool_names(session_id)
+                except Exception:
+                    _profile = set()
+                synthesis_session = not any(_WEB_TOOL_RE.search(t or "") for t in _profile)
+                if synthesis_session:
+                    logger.info("Synthesis session detected (%s): memory reads, "
+                                "zero web tools — facts will carry [SYNTHESIZED]",
+                                session_id)
+
             # 2. Build prompt for the reasoning model
             prompt = f"{self._extraction_prompt}\n\nLOG:\n{transcript}\n\nJSON OUTPUT:"
 
@@ -359,6 +384,12 @@ class ConsolidationMixin:
                 source_quote = source_quote.strip()[:500] if isinstance(source_quote, str) and source_quote.strip() else None
                 source_ref = fact.get("source_ref")
                 source_ref = source_ref.strip()[:500] if isinstance(source_ref, str) and source_ref.strip() else None
+                # Synthesis stamp: in a memory-only reflection session the agent
+                # fetched nothing, so ANY ref the extractor emits is secondhand
+                # (echoed from recalled content — the fact #2913 class). Record
+                # the truthful origin instead.
+                if synthesis_session:
+                    source_ref = f"synthesized:{session_id}"
 
                 # Phase D+ attestation: verify the quote against the transcript via
                 # the two-channel grounding verifier. A fabricated/changed hard
@@ -616,6 +647,15 @@ class ConsolidationMixin:
             # 7. Detect new conflicts in long-term memory via HRR algebra
             self._resolve_long_term_conflicts()
  
+            # 7.9 Consolidation debt: flag sessions with substantial episodes and
+            #     ZERO born facts BEFORE the pruner runs, so their episodes are
+            #     exempt from step 8 and the evidence survives (gated). Stamped on
+            #     the dream_cycle clock; the retry itself runs post-dream, outside
+            #     these locks (see _reconsolidate_debt).
+            if getattr(self, "_reconsolidate_zero_fact_sessions", False):
+                self._store.flag_consolidation_debt(
+                    self._dream_cycle_count, exclude_session=self._session_id)
+
             # 8. Keep episode table bounded — session window (prune_keep_sessions)
             #    plus optional total-row cap (episode_max_rows, 0 = unlimited).
             self._store.prune_episodes(
@@ -661,6 +701,52 @@ class ConsolidationMixin:
             _flock.release()
             self._dream_lock.release()
 
+        # Consolidation-debt retry — MUST run after the locks above are released:
+        # the retry re-enters _run_consolidation_epoch, which takes its own
+        # consolidation + finalize locks and would deadlock/skip inside the dream.
+        if getattr(self, "_reconsolidate_zero_fact_sessions", False):
+            try:
+                self._reconsolidate_debt()
+            except Exception as e:
+                logger.debug("Debt reconsolidation failed (non-fatal): %s", e)
+
+    def _reconsolidate_debt(self) -> None:
+        """Retry the consolidation epoch for ONE seasoned open debt per dream cycle.
+
+        The substrate never discards an experience it has not digested: a debt is a
+        session with substantial episodes and zero born facts (flagged in dream step
+        7.9, its episodes exempt from pruning). Bounded on every axis — one session
+        per dream cycle, reconsolidation_max_attempts retries per session, and the
+        one-cycle seasoning delay in get_open_consolidation_debts. The receipt
+        check (born facts on source_session) runs BEFORE the retry so a debt that
+        settled organically costs zero LLM calls, and again AFTER so recovery is
+        judged at the substrate, not by the epoch's return path. suppress_dream
+        stops the retried epoch from firing a recursive dream cycle."""
+        store = self._store
+        if store is None or not self._write_enabled:
+            return
+        max_attempts = max(1, int(getattr(self, "_reconsolidation_max_attempts", 2)))
+        for debt in store.get_open_consolidation_debts(self._dream_cycle_count, limit=1):
+            sid = debt["session_id"]
+            if store.session_born_fact_count(sid) >= 1:
+                store.settle_consolidation_debt(sid, "organic", self._dream_cycle_count)
+                logger.info("Consolidation debt: %s settled organically", sid)
+                continue
+            attempts = store.record_debt_attempt(sid, self._dream_cycle_count)
+            logger.info(
+                "Consolidation debt: retrying epoch for %s (attempt %d/%d, %d episode rows)",
+                sid, attempts, max_attempts, debt.get("episode_rows", 0))
+            self._run_consolidation_epoch(sid, suppress_dream=True)
+            born = store.session_born_fact_count(sid)
+            if born >= 1:
+                store.settle_consolidation_debt(sid, "recovered", self._dream_cycle_count)
+                logger.info("Consolidation debt: RECOVERED %d fact(s) from %s", born, sid)
+            elif attempts >= max_attempts:
+                store.settle_consolidation_debt(sid, "exhausted", self._dream_cycle_count)
+                logger.warning(
+                    "Consolidation debt: %s EXHAUSTED after %d attempt(s), still 0 facts; "
+                    "episodes released to normal pruning", sid, attempts)
+
     def _reembed_if_needed(self) -> int:
         """P4d migration: re-embed all facts to the configured embed_model if it changed.
 
@@ -704,7 +790,8 @@ class ConsolidationMixin:
             logger.info(
                 "🩺 Memory health (dream cycle %d): %d facts (long=%d, near_cap>=%.0f: %d) | "
                 "conflicts: %d groups / %d facts | entities: %d (orphan %d) | "
-                "abstractions: %d (evidence_gone %d) | tool episodes: %d (undistilled %d)%s",
+                "abstractions: %d (evidence_gone %d) | tool episodes: %d (undistilled %d) | "
+                "consolidation debt: %d open / %d exhausted%s",
                 self._dream_cycle_count, health.get("total_facts", 0),
                 health.get("long_tier_facts", 0), health.get("near_cap_threshold", 0),
                 health.get("near_cap_facts", 0), health.get("active_conflict_groups", 0),
@@ -712,6 +799,8 @@ class ConsolidationMixin:
                 health.get("orphan_entities", 0), health.get("abstractions_tracked", 0),
                 health.get("abstractions_evidence_gone", 0),
                 health.get("tool_episodes_total", 0), health.get("tool_episodes_undistilled", 0),
+                health.get("consolidation_debt_open", 0),
+                health.get("consolidation_debt_exhausted", 0),
                 "  [DEGRADED — FTS-only]" if health.get("degraded") else "",
             )
             return health

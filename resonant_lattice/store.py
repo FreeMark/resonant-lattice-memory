@@ -323,6 +323,15 @@ class LatticeStore(SchemaMixin, FactsMixin, DreamCycleMixin, AbstractionMixin,
                 1 for r in prov
                 if (r["total_sources"] or 0) > 0 and (r["active_sources"] or 0) == 0
             )
+            # Consolidation debt: undigested sessions (episodes without born facts).
+            # 'open' = awaiting retry, 'exhausted' = retries used up with 0 facts —
+            # the number a human should look at.
+            debt = {
+                r[0]: r[1] for r in self._conn.execute(
+                    "SELECT COALESCE(settled, 'open'), COUNT(*) "
+                    "FROM consolidation_debt GROUP BY COALESCE(settled, 'open')"
+                ).fetchall()
+            }
             return {
                 "total_facts": sum(by_tier.values()),
                 "by_tier": by_tier,
@@ -339,6 +348,9 @@ class LatticeStore(SchemaMixin, FactsMixin, DreamCycleMixin, AbstractionMixin,
                 "tool_episodes_undistilled": tool_undistilled,
                 "abstractions_tracked": abstractions_tracked,
                 "abstractions_evidence_gone": abstractions_evidence_gone,
+                "consolidation_debt_open": debt.get("open", 0),
+                "consolidation_debt_exhausted": debt.get("exhausted", 0),
+                "consolidation_debt_recovered": debt.get("recovered", 0),
                 "degraded": self.degraded,
                 "vector_dim": self.vector_dim,
                 "hrr_dim": self.hrr_dim,

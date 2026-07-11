@@ -325,6 +325,8 @@ plugins:
     # ── Episodic log ──────────────────────────────────────────────────────
     prune_keep_sessions: 20             # episodic sessions to retain
     episode_max_rows: 0                 # total cap on episodic rows, oldest first (0 = unlimited)
+    reconsolidate_zero_fact_sessions: true  # consolidation debt: flag sessions with substantial episodes but zero born facts, exempt their episodes from pruning, and retry their epoch from the dream cycle (one per cycle) until facts land or attempts run out
+    reconsolidation_max_attempts: 2     # dream-cycle retries per debt session before it settles 'exhausted' and its episodes return to normal pruning
 
     # ── Tool / procedural memory ──────────────────────────────────────────
     enable_tool_memory: true            # log tool calls as episodes and distill them into 'procedural' facts

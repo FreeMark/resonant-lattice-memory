@@ -17,6 +17,18 @@ from store_common import hrr, _HRR_AVAILABLE
 
 logger = logging.getLogger(__name__)
 
+# READ-style lattice_store actions. A session that invokes any of these is
+# actively consulting its own memory — half of the synthesis-session signal
+# (the other half is a zero-web tool profile). Write/admin actions are
+# deliberately absent: a user dictating facts to store is conversation
+# provenance, not the agent reflecting on what it already knows.
+_LATTICE_READ_ACTIONS = frozenset({
+    "search", "get_fact", "fact_history", "facts_about_entity",
+    "entities_for_fact", "related_entities", "explain_abstraction",
+    "tool_history", "relational", "infer", "narrative", "get_canonical",
+    "get_self_model", "pending_conflicts", "stats", "memory_audit",
+})
+
 
 # ----------------------------------------------------------------------
 # Tool Schema (expanded with new actions)
@@ -134,6 +146,17 @@ class ToolHandlerMixin:
             )
 
         action = args.get("action")
+        # Synthesis-session signal (label gauntlet 2026-07-11): remember that THIS
+        # session read its own memory. lattice_store calls are deliberately kept
+        # out of tool_episodes (self-referential loop), so the read signal travels
+        # in-process; consolidation pairs it with a zero-web tool profile to stamp
+        # memory-only reflection facts source_ref "synthesized:<session>".
+        if action in _LATTICE_READ_ACTIONS:
+            reads = getattr(self, "_lattice_read_sessions", None)
+            if reads is not None:
+                if len(reads) > 1000:
+                    reads.clear()   # bounded; a process rarely sees > a few sessions
+                reads.add(self._session_id)
         if action in ("add", "feedback", "pin", "unpin", "request_abstraction", "remove", "resolve_conflict", "dismiss_conflict", "force_consolidation", "force_dream_cycle", "set_self_model", "set_canonical", "rollback_batch") \
                 and not self._write_enabled:
             return tool_error("Memory is read-only in this agent context (non-primary).")
