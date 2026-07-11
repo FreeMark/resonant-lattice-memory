@@ -444,6 +444,11 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         # corpus size); concurrency tells the auto-tuner how many blind recalls may run at once.
         self._blind_scan_batch = int(self._config.get("blind_scan_batch", DEFAULTS["blind_scan_batch"]))
         self._blind_scan_concurrency = int(self._config.get("blind_scan_concurrency", DEFAULTS["blind_scan_concurrency"]))
+        # Optional GPU blind-recall accelerator (off by default). When on AND available, the
+        # homomorphic recall scan offloads to the native FIDESlib/OpenFHE scorer with CPU fallback.
+        self._blind_gpu_recall = bool(self._config.get("blind_gpu_recall", DEFAULTS["blind_gpu_recall"]))
+        self._blind_gpu_binary = str(self._config.get("blind_gpu_binary", DEFAULTS["blind_gpu_binary"]))
+        self._blind_gpu_socket = str(self._config.get("blind_gpu_socket", DEFAULTS["blind_gpu_socket"]))
         # NOTE: multi-modal (image/audio) ingestion is NOT implemented.
         # See ENCRYPTION_ROADMAP.md §3.1. The old `enable_multimodal` stub was
         # removed; re-add a precomputed-embedding path only when needed.
@@ -696,7 +701,9 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
                     self._retriever, self._ollama_endpoint_embed, self._embed_model,
                     float(self._config.get("recall_floor", DEFAULTS["recall_floor"])),
                     scan_batch=self._blind_scan_batch,
-                    scan_concurrency=self._blind_scan_concurrency)
+                    scan_concurrency=self._blind_scan_concurrency,
+                    gpu_recall=self._blind_gpu_recall, gpu_binary=self._blind_gpu_binary,
+                    gpu_socket=self._blind_gpu_socket, db_path=eff_db_path)
         # P3e tool-grounding seed: ingest durable procedural/guardrail facts so the agent is grounded
         # from day one (the retriever now exists to embed them). Idempotent + non-fatal; gated on
         # write access + a non-empty seed. Embeds via the live retriever (Ollama); skipped if down.

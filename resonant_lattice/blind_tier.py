@@ -181,17 +181,34 @@ class BlindTier:
 
     # ── recall + write ────────────────────────────────────────────────────────────
     def decorate_retriever(self, plaintext_retriever, ollama_endpoint, embed_model, min_similarity,
-                           scan_batch: int = 0, scan_concurrency: int = 1):
+                           scan_batch: int = 0, scan_concurrency: int = 1,
+                           gpu_recall: bool = False, gpu_binary=None, gpu_socket=None, db_path=None):
         """Return a BlindRetriever (homomorphic vector + HRR recall over the encrypted tables) when
         the recall context is up, else the plaintext retriever unchanged (entity-only / openfhe-less
         sessions keep plaintext recall). HRR recall routes through the separate 2*hrr_dim context.
-        ``scan_batch``/``scan_concurrency`` size the A1 streaming recall scan (0 = auto)."""
+        ``scan_batch``/``scan_concurrency`` size the A1 streaming recall scan (0 = auto).
+
+        When ``gpu_recall`` is set, attach a GPUBlindBackend (native FIDESlib/OpenFHE scorer, via a
+        resident daemon at ``gpu_socket`` or the one-shot ``gpu_binary``) as a pure accelerator; if it
+        is not available the retriever keeps the CPU scan, so this is always safe to enable."""
         if self.recall is None:
             return plaintext_retriever
         from retrieval import BlindRetriever
+        gpu_backend = None
+        if gpu_recall:
+            try:
+                from gpu_recall import GPUBlindBackend
+                gb = GPUBlindBackend(self.recall, db_path, binary=(gpu_binary or None),
+                                     socket_path=(gpu_socket or None))
+                gpu_backend = gb if gb.available() else None
+                logger.info("Blind GPU recall %s.",
+                            "ACTIVE" if gpu_backend else "requested but no backend available; CPU scan")
+            except Exception as e:
+                logger.warning("Blind GPU recall init failed (%s); using CPU scan", e)
         return BlindRetriever(self.store, ollama_endpoint, embed_model, blind=self.recall,
                               min_similarity=min_similarity, blind_hrr=self.hrr,
-                              scan_batch=scan_batch, scan_concurrency=scan_concurrency)
+                              scan_batch=scan_batch, scan_concurrency=scan_concurrency,
+                              gpu_backend=gpu_backend)
 
     def reconcile(self, store=None, limit: int = 0) -> int:
         """Write-path completeness (roadmap §14 6a): mirror every fact that has a plaintext row but

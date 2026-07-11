@@ -400,6 +400,22 @@ CONFIG_SCHEMA = [
                     "once when sizing blind_scan_batch (each concurrent scan gets a proportional share of "
                     "the RAM budget). 1 = size for a single scan. Only consulted when blind_scan_batch = 0.",
      "default": 1},
+    {"key": "blind_gpu_recall",
+     "description": "Tier-1 blind only: offload the homomorphic recall scan to the GPU backend "
+                    "(openfhe-gpu-backend / FIDESlib) when available. Pure accelerator: identical results, "
+                    "the master secret never touches the GPU, and any failure falls back to the CPU scan. "
+                    "false (default) keeps the CPU-only path. Requires the native scorer (blind_gpu_binary "
+                    "and/or a running daemon at blind_gpu_socket), openfhe, and a CUDA GPU on the host.",
+     "default": False},
+    {"key": "blind_gpu_binary",
+     "description": "Path to the one-shot native GPU scorer (rlm_gpu_recall). Used when blind_gpu_recall "
+                    "is on and no daemon socket is reachable. Empty = not configured.",
+     "default": ""},
+    {"key": "blind_gpu_socket",
+     "description": "Unix socket of a resident GPU scorer daemon (rlm_gpu_recalld) that holds the encrypted "
+                    "corpus resident for ~7s/query instead of the ~29s one-shot cost. Preferred when set and "
+                    "reachable. Empty = no daemon.",
+     "default": ""},
     # Additional runtime defaults used by provider/retriever.
     # NOTE: recall_floor / conflict_sim_low / conflict_sim_high are already defined
     # above (Hebbian block) — do NOT re-add them here or they double-list in the
