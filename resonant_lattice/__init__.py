@@ -19,7 +19,7 @@ and the `LatticeStore` mixins (see MODULE_MAP.md / README.md):
 
 from __future__ import annotations
 
-__version__ = "1.3.0"  # conflict false-positive guards (subject veto + LLM adjudication) + dismiss_conflict verb
+__version__ = "1.4.0"  # consolidation debt + [SYNTHESIZED] provenance + seal/unseal after the fact + blind backfill proven at scale
 
 import json
 import logging
