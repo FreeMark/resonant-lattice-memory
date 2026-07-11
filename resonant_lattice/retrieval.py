@@ -342,10 +342,15 @@ class BlindRetriever(LatticeRetriever):
 
     def __init__(self, store: LatticeStore, ollama_endpoint: str, embed_model: str,
                  blind, min_similarity: float = 0.30, blind_hrr=None,
-                 scan_batch: int = 0, scan_concurrency: int = 1):
+                 scan_batch: int = 0, scan_concurrency: int = 1, gpu_backend=None):
         super().__init__(store, ollama_endpoint, embed_model,
                          min_similarity=min_similarity)
         self.blind = blind
+        # Optional GPU blind-recall accelerator (openfhe-gpu-backend). When provided AND
+        # available, blind_scores routes the homomorphic cosine scan through the native
+        # FIDESlib/OpenFHE GPU scorer; otherwise the CPU streaming scan below runs unchanged.
+        # None (the default) keeps behavior byte-identical to the CPU-only path.
+        self._gpu_backend = gpu_backend
         # A1 streaming-scan sizing: scan_batch 0 = auto (size from measured per-ct footprint +
         # detected RAM in _resolve_scan_batch), a positive value pins a fixed batch;
         # scan_concurrency tells the auto-tuner how many blind recalls may run at once so each
@@ -405,7 +410,17 @@ class BlindRetriever(LatticeRetriever):
         ct (store side, eval keys only, never decrypts) -> client decrypts each scalar score.
         The scan STREAMS the ciphertexts in auto-sized batches (A1: bounded RAM instead of
         materializing the whole corpus) and deserializes the query ONCE up front, so a
-        full-corpus recall no longer holds every ciphertext in memory at the same time."""
+        full-corpus recall no longer holds every ciphertext in memory at the same time.
+
+        When a GPU backend is configured and available, the whole scan is offloaded to the
+        native scorer (returning the same ``[(id, score), …]`` shape); any failure there is
+        logged and falls through to the CPU scan, so the GPU is a pure accelerator."""
+        if self._gpu_backend is not None:
+            try:
+                if self._gpu_backend.available():
+                    return self._gpu_backend.scores(query_vec)
+            except Exception as e:
+                logger.warning("GPU blind backend failed (%s); falling back to CPU scan", e)
         table = "semantic_he"
         q_blob = self.blind.encrypt_unit_vector(query_vec)
         q_prep = self.blind.prepare_query(q_blob) if hasattr(self.blind, "prepare_query") else q_blob
