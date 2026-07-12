@@ -1078,6 +1078,73 @@ def test_blind_sealed_text_surfaces():
     print("  sealed text OK: episode/triple/summary mirrored opaque, idempotent, CASCADE")
 
 
+def test_blind_visitor_parity():
+    """§5-2: the BlindVisitor reconstructs each fact's dream-cycle WORKING SET (content, entities,
+    triples) + session summaries from the §5-1 sealed ciphertext with PARITY to the plaintext store,
+    so a cognition pass re-routed through it cannot change outcomes (identical inputs -> identical
+    LLM-stubbed outputs). Also proves the view is truly BLIND-SOURCED: tampering the plaintext
+    content column does NOT change what the visitor returns (it reads ciphertext, not plaintext) —
+    the property the §5-4 seal relies on. Needs a store + argon2 + cryptography."""
+    if not _STORE_OK:
+        print(f"  SKIP visitor parity: {_SKIP_REASON}"); return
+    import crypto_keys
+    if not (crypto_keys.kdf_available() and crypto_keys.aead_available()):
+        print("  SKIP visitor parity: argon2/cryptography not installed"); return
+    from retrieval import BlindContentStore, BlindSealedStore, BlindEntityStore
+    from blind_tier import BlindTier
+    passphrase = b"correct horse battery staple"
+    keystore = crypto_keys.create_keystore(passphrase)
+    keys = crypto_keys.derive_sealed_keys(passphrase, keystore)
+    ent_key = crypto_keys.derive_entity_key(passphrase, keystore)
+    s = _fresh_store(vector_dim=8)
+    # fixture: facts with content + entities + a triple + a session summary
+    specs = [("photosynthesis converts light to chemical energy", "biology", ["Plant", "Light"]),
+             ("tcp guarantees ordered delivery", "networking", ["TCP", "Packet"])]
+    fids = []
+    for content_txt, cat, ents in specs:
+        _, fid = s.add_or_reinforce_fact(content_txt, _emb(s, content_txt), cat, "sess1")
+        with s._lock:
+            s._link_entities(fid, ents)
+        fids.append(fid)
+    s.store_fact_relations(fids[0], [{"subject": "photosynthesis", "relation": "converts",
+                                      "object": "light", "confidence": 1.0}])
+    sum_id = s.add_session_summary("sess1", "covered photosynthesis and tcp", created_cycle=1)
+
+    def mk_sealed(domain, table):
+        k = keys[domain]
+        return BlindSealedStore(s, lambda p, k=k, d=domain: crypto_keys.encrypt_sealed(p, k, d),
+                                lambda b, k=k, d=domain: crypto_keys.decrypt_sealed(b, k, d), table)
+    ck = keys["content"]
+    content = BlindContentStore(s, lambda p: crypto_keys.encrypt_sealed(p, ck, "content"),
+                                lambda b: crypto_keys.decrypt_sealed(b, ck, "content"))
+    entities = BlindEntityStore(s, lambda e: crypto_keys.encrypt_entities(e, ent_key),
+                                lambda b: crypto_keys.decrypt_entities(b, ent_key))
+    sealed = {"episode": mk_sealed("episode", "semantic_he_episodes"),
+              "triple":  mk_sealed("triple", "semantic_he_triples"),
+              "summary": mk_sealed("summary", "semantic_he_summaries")}
+    bt = BlindTier(s, content=content, entities=entities,
+                   content_hmac_fn=lambda t: crypto_keys.content_hmac(t, keys["hmac"]), sealed=sealed)
+    bt.reconcile()
+    v = bt.visitor()
+    # PARITY: fact working set (content + category + normalized entities)
+    for fid, (content_txt, cat, ents) in zip(fids, specs):
+        view = v.fact_view(fid)
+        assert view["content"] == content_txt and view["category"] == cat
+        assert set(view["entities"]) == {e.lower() for e in ents}
+    # PARITY: triples as sets (sans structural confidence), and non-empty
+    plain_t = {(t["subject"], t["relation"], t["object"]) for t in s.get_fact_relations(fids[0])}
+    blind_t = {(t["subject"], t["relation"], t["object"]) for t in v.triples(fids[0])}
+    assert blind_t == plain_t and blind_t
+    # PARITY: summary text
+    assert v.summary(sum_id) == "covered photosynthesis and tcp"
+    # BLIND-SOURCED: tamper the plaintext content; the visitor is unaffected (reads ciphertext)
+    s._conn.execute("UPDATE semantic_facts SET content='__tampered__' WHERE id=?", (fids[0],))
+    s._conn.commit()
+    assert v.fact_view(fids[0])["content"] == specs[0][0]     # still original, from ciphertext
+    s.close()
+    print("  visitor parity OK: working set reconstructed from ciphertext == plaintext, blind-sourced")
+
+
 def test_get_passphrase_returns_wipeable_bytearray():
     """#4 hygiene fix: get_passphrase returns a MUTABLE bytearray so the provider resolvers'
     ``finally: if isinstance(passphrase, bytearray): secure_zero(...)`` guards actually fire

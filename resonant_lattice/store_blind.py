@@ -338,6 +338,15 @@ class BlindMixin:
         return {"subject": row["subject"], "relation": row["relation"],
                 "object": row["object"]} if row else None
 
+    def relation_ids_for_fact(self, fact_id: int) -> List[int]:
+        """Structural map fact -> its relation ids (NO triple text) — what a §5-2 client visitor uses
+        to fetch + decrypt a fact's sealed triples. Survives the §5-4 seal, which nulls only the
+        triple TEXT columns while these structural rows/ids remain. Ordered by relation_id."""
+        with self._lock:
+            return [r["relation_id"] for r in self._conn.execute(
+                "SELECT relation_id FROM fact_relations WHERE fact_id = ? ORDER BY relation_id",
+                (int(fact_id),)).fetchall()]
+
     def summaries_missing_blind(self, limit: int = 0) -> List[int]:
         """Summary ids (session_summaries.summary_id) with a plaintext row but NO ciphertext in
         ``semantic_he_summaries`` — the §5-1b summary-mirror worklist. Idempotent; ``limit`` batches."""

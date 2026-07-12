@@ -754,3 +754,61 @@ class BlindSealedStore:
         """CLIENT-side: decrypt one row's sealed payload (None if absent)."""
         blob = self.store.get_he_vector(int(row_id), table=self.table)
         return None if blob is None else self._dec(blob)
+
+
+class BlindVisitor:
+    """§5-2 client visitor: assembles the dream cycle's per-fact WORKING SET from the §5-1 sealed
+    ciphertext (content / entities / triples) plus the sealed episode/summary text, instead of the
+    plaintext store — the read surface a cognition pass (clustering, conflict adjudication, gist,
+    narrative) needs to run WITHOUT the plaintext content, which is the property the §5-4 seal
+    requires. Read-only, trusted-client (it holds the decrypt binders via the sealed stores).
+
+    Pre-seal it runs BESIDE the authoritative plaintext store; the §5-2 parity harness asserts it
+    reconstructs the SAME working set the plaintext path sees, so re-routing a pass through it cannot
+    change outcomes. Only the sealed TEXT is served from ciphertext — STRUCTURAL metadata that never
+    held content (a fact's relation-id list, row ids) still reads from the plaintext ``store``, and
+    those columns survive the seal. A missing surface (e.g. no entity store) yields empty, not an
+    error, so the visitor degrades to whatever subset is mirrored."""
+
+    def __init__(self, store: LatticeStore, *, content=None, entities=None, sealed=None):
+        self.store = store
+        self._content = content            # BlindContentStore   | None
+        self._entities = entities          # BlindEntityStore    | None
+        self._sealed = sealed or {}        # {episode|triple|summary: BlindSealedStore}
+
+    def fact_view(self, fact_id: int) -> Optional[Dict]:
+        """The decrypted per-fact working set — ``{content, category, source_quote, source_ref,
+        entities:[...]}`` — or None if the fact's content is not mirrored. Content/quote/category
+        come from ``semantic_he_content``; entities from the AEAD set (normalized). This is exactly
+        what an abstraction/gist/conflict pass reads per fact, served blind."""
+        if self._content is None:
+            return None
+        view = self._content.get_content(fact_id)
+        if view is None:
+            return None
+        view = dict(view)
+        view["entities"] = (self._entities.get_entities(fact_id) or []) if self._entities else []
+        return view
+
+    def triples(self, fact_id: int) -> List[Dict]:
+        """Decrypted ``{subject, relation, object}`` triples for a fact — relation ids read
+        STRUCTURALLY from the plaintext store, text decrypted from ``semantic_he_triples``."""
+        ts = self._sealed.get("triple")
+        if ts is None:
+            return []
+        out: List[Dict] = []
+        for rid in self.store.relation_ids_for_fact(fact_id):
+            payload = ts.get_payload(rid)
+            if payload is not None:
+                out.append(payload)
+        return out
+
+    def summary(self, summary_id: int) -> Optional[str]:
+        """Decrypted session-summary text (None if absent / not mirrored)."""
+        ss = self._sealed.get("summary")
+        return ss.get_payload(summary_id) if ss is not None else None
+
+    def episode(self, episode_id: int) -> Optional[Dict]:
+        """Decrypted episode ``{role, content}`` (None if absent / not mirrored)."""
+        es = self._sealed.get("episode")
+        return es.get_payload(episode_id) if es is not None else None

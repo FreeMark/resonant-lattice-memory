@@ -172,6 +172,24 @@ Plaintext-mode code paths untouched. Acceptance: blind-mode dream cycle
 reproduces plaintext-mode outcomes on a fixture DB (same promotions, same
 conflict groups, same abstractions given the same LLM stubs).
 
+> STATUS 2026-07-12 - §5-2 FOUNDATION LANDED: the client-visitor read surface +
+> its parity acceptance. `retrieval.BlindVisitor` (via `BlindTier.visitor()`)
+> assembles each fact's dream-cycle WORKING SET — `fact_view` = {content, category,
+> quote, ref, entities}, plus `triples(fact_id)` (relation ids read structurally,
+> text decrypted from `semantic_he_triples`), `summary(id)`, `episode(id)` — entirely
+> from the §5-1 sealed ciphertext. `store_blind.relation_ids_for_fact` gives the
+> structural fact->relation map that survives the seal. Parity test proves the
+> blind-served working set == the plaintext store's, AND that it is truly
+> blind-sourced (tampering the plaintext `content` column does not change the
+> visitor's output — it reads ciphertext). This is the load-bearing mechanism +
+> acceptance for the READ half: identical working set + fixed LLM stub => identical
+> pass outcomes by construction. 1 new test, suite 134 -> 135 green.
+> REMAINING §5-2 (couples with §5-3/§5-4, next sessions): re-route each real
+> consolidation pass (abstraction/gist/conflict-adjudication/narrative) to CALL the
+> visitor instead of reading plaintext directly, behind the mode flag, so the dream
+> cycle runs with NO plaintext; then the end-to-end fixture-DB parity (same
+> promotions/conflict-groups/abstractions). NOT deployed.
+
 **§5-3 - Encrypted resonance becomes source of truth (absorbs roadmap 6b).**
 `set_cycle` column + decay-from-origin `BlindMaintainer` (depth-1, locked);
 recall bump = blind ADD (from §5-0b); public decay-class drives importance

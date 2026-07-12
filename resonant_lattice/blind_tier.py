@@ -282,6 +282,16 @@ class BlindTier:
                               scan_batch=scan_batch, scan_concurrency=scan_concurrency,
                               gpu_backend=gpu_backend)
 
+    def visitor(self):
+        """Return a §5-2 BlindVisitor over this tier's sealed stores — the client-visitor read
+        surface that serves the dream cycle's per-fact working set (content / entities / triples /
+        summaries / episodes) from ciphertext. None-safe: whatever subset of stores is up is what the
+        visitor can serve. The step toward §5-3/§5-4 where the passes read through this instead of the
+        (to-be-sealed) plaintext."""
+        from retrieval import BlindVisitor
+        return BlindVisitor(self.store, content=self.content, entities=self.entities,
+                            sealed=self.sealed)
+
     def reconcile(self, store=None, limit: int = 0) -> int:
         """Write-path completeness (roadmap §14 6a): mirror every fact that has a plaintext row but
         NO blind ciphertext into the encrypted tables, reading its embedding/HRR/entities back from
