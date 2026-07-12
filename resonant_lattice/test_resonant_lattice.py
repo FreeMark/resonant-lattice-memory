@@ -903,6 +903,121 @@ def test_blind_entity_key_derivation_wiring():
     print("  entity key derivation OK: passphrase->keystore->key round-trips + reopens, wrong key rejected")
 
 
+def test_crypto_sealed_content_aead():
+    """§5-1: crypto_keys.encrypt_sealed/decrypt_sealed round-trip for the content surface; RANDOM
+    nonce (same payload -> different ct, so the store sees no equality); opaque (plaintext not
+    recoverable); wrong key / wrong domain rejected. Plus content_hmac: STABLE, KEYED, and
+    whitespace-NORMALIZED but case-PRESERVING. Needs cryptography (AEAD)."""
+    import crypto_keys
+    if not crypto_keys.aead_available():
+        print("  SKIP sealed content aead: cryptography not installed"); return
+    key = os.urandom(32)
+    payload = {"content": "the powerhouse of the cell is the mitochondria",
+               "category": "biology", "source_quote": "quote text here", "source_ref": "ref-1"}
+    b1 = crypto_keys.encrypt_sealed(payload, key, "content")
+    b2 = crypto_keys.encrypt_sealed(payload, key, "content")
+    assert b1 != b2                                                     # random nonce
+    assert crypto_keys.decrypt_sealed(b1, key, "content") == payload    # round-trip
+    assert b"mitochondria" not in b1 and b"quote text" not in b1        # opaque
+    # a string surface (episode/triple/summary shape) round-trips too
+    s_blob = crypto_keys.encrypt_sealed("a summary sentence", key, "summary")
+    assert crypto_keys.decrypt_sealed(s_blob, key, "summary") == "a summary sentence"
+    # wrong key rejected
+    try:
+        crypto_keys.decrypt_sealed(b1, os.urandom(32), "content"); assert False, "wrong key accepted"
+    except crypto_keys.WrapAuthError:
+        pass
+    # wrong domain rejected (AAD binds the surface)
+    try:
+        crypto_keys.decrypt_sealed(b1, key, "episode"); assert False, "wrong domain accepted"
+    except crypto_keys.WrapAuthError:
+        pass
+    # content_hmac: deterministic + keyed + whitespace-normalized, case-preserving
+    hk = os.urandom(32)
+    h = crypto_keys.content_hmac("dark   theme\tpreferred", hk)
+    assert h == crypto_keys.content_hmac("dark theme preferred", hk)    # whitespace collapse
+    assert h != crypto_keys.content_hmac("Dark theme preferred", hk)    # case preserved
+    assert h != crypto_keys.content_hmac("dark theme preferred", os.urandom(32))  # keyed
+    assert len(h) == 64 and all(c in "0123456789abcdef" for c in h)     # sha256 hex
+    print("  sealed content AEAD OK: randomized/opaque/domain-bound; content_hmac stable+keyed")
+
+
+def test_store_blind_content_mirror():
+    """§5-1: BlindContentStore encrypts each fact's content surface into semantic_he_content (opaque,
+    randomized); the plaintext content is NOT recoverable from the stored blob; get_content
+    round-trips the {content, category, source_quote, source_ref} dict; CASCADE drops the ct with
+    the fact. Needs a store + cryptography."""
+    if not _STORE_OK:
+        print(f"  SKIP blind content: {_SKIP_REASON}"); return
+    import crypto_keys
+    if not crypto_keys.aead_available():
+        print("  SKIP blind content: cryptography not installed"); return
+    from retrieval import BlindContentStore
+    key = os.urandom(32)
+    s = _fresh_store(vector_dim=8)
+    bcs = BlindContentStore(s, lambda p: crypto_keys.encrypt_sealed(p, key, "content"),
+                            lambda b: crypto_keys.decrypt_sealed(b, key, "content"))
+    _, fid = s.add_or_reinforce_fact("the sky appears blue due to rayleigh scattering",
+                                     _emb(s, "sky"), "physics", "sess1")
+    assert bcs.set_content(fid, s.get_fact(fid))
+    assert s.count_he_vectors(table="semantic_he_content") == 1
+    blob = s.get_he_vector(fid, table="semantic_he_content")            # substrate
+    assert blob and b"rayleigh" not in blob and b"physics" not in blob  # opaque
+    got = bcs.get_content(fid)
+    assert got["content"] == "the sky appears blue due to rayleigh scattering"
+    assert got["category"] == "physics" and got["source_quote"] is None
+    s._conn.execute("DELETE FROM semantic_facts WHERE id=?", (fid,)); s._conn.commit()
+    assert s.count_he_vectors(table="semantic_he_content") == 0         # CASCADE
+    s.close()
+    print("  blind content OK: opaque content surface at rest, client round-trip, CASCADE")
+
+
+def test_blind_content_reconcile_and_hmac():
+    """§5-1: the BlindTier.reconcile content path mirrors semantic_he_content AND backfills the
+    keyed content_hmac dedup identity, both idempotently, from a passphrase-derived key (the
+    _resolve_content wiring). Proves: full backfill of a pre-existing store; the stored content_hmac
+    equals crypto_keys.content_hmac of the fact's content; a re-derived key (fresh session) decrypts
+    what the first wrote; a second reconcile is a no-op. Needs a store + argon2 + cryptography."""
+    if not _STORE_OK:
+        print(f"  SKIP content reconcile: {_SKIP_REASON}"); return
+    import crypto_keys
+    if not (crypto_keys.kdf_available() and crypto_keys.aead_available()):
+        print("  SKIP content reconcile: argon2/cryptography not installed"); return
+    from retrieval import BlindContentStore
+    from blind_tier import BlindTier
+    passphrase = b"correct horse battery staple"
+    keystore = crypto_keys.create_keystore(passphrase)
+    c_key = crypto_keys.derive_sealed_key(passphrase, keystore, "content")
+    h_key = crypto_keys.derive_content_hmac_key(passphrase, keystore)
+    s = _fresh_store(vector_dim=8)
+    contents = ["alpha fact one", "beta fact two", "gamma fact three"]
+    fids = [s.add_or_reinforce_fact(c, _emb(s, c), "general", "sess")[1] for c in contents]
+    # worklists start full
+    assert s.facts_missing_blind("semantic_he_content") == fids
+    assert s.facts_missing_content_hmac() == fids
+    bcs = BlindContentStore(s, lambda p: crypto_keys.encrypt_sealed(p, c_key, "content"),
+                            lambda b: crypto_keys.decrypt_sealed(b, c_key, "content"))
+    bt = BlindTier(s, content=bcs, content_hmac_fn=lambda t: crypto_keys.content_hmac(t, h_key))
+    bt.reconcile()
+    # content mirrored + hmac backfilled -> worklists drain
+    assert s.count_he_vectors(table="semantic_he_content") == 3
+    assert s.facts_missing_blind("semantic_he_content") == []
+    assert s.facts_missing_content_hmac() == []
+    # stored content_hmac matches the keyed HMAC of the fact's content
+    for fid, content in zip(fids, contents):
+        row = s._conn.execute("SELECT content_hmac FROM semantic_facts WHERE id=?", (fid,)).fetchone()
+        assert row["content_hmac"] == crypto_keys.content_hmac(content, h_key)
+    # reopen: a re-derived key (fresh session) decrypts what the first session wrote
+    c_key2 = crypto_keys.derive_sealed_key(passphrase, keystore, "content")
+    bcs2 = BlindContentStore(s, lambda p: p, lambda b: crypto_keys.decrypt_sealed(b, c_key2, "content"))
+    assert bcs2.get_content(fids[0])["content"] == "alpha fact one"
+    # idempotent: a second reconcile writes nothing new and does not error
+    bt.reconcile()
+    assert s.count_he_vectors(table="semantic_he_content") == 3
+    s.close()
+    print("  content reconcile OK: mirror + content_hmac backfill, idempotent, reopen-safe")
+
+
 def test_get_passphrase_returns_wipeable_bytearray():
     """#4 hygiene fix: get_passphrase returns a MUTABLE bytearray so the provider resolvers'
     ``finally: if isinstance(passphrase, bytearray): secure_zero(...)`` guards actually fire

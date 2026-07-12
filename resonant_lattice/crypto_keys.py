@@ -810,6 +810,129 @@ def decrypt_entities(blob: bytes, key: bytes) -> list:
     return list(json.loads(pt.decode("utf-8")))
 
 
+# ── Tier-1 §5-1 sealed-content mirror: AEAD text blobs + keyed dedup identity ────
+# §5 flips the blind store from "encrypted vectors beside plaintext" to holding the CONTENT
+# itself. §5-1 adds AEAD ciphertext mirrors of the natural-language surfaces (fact content +
+# quote/source, and later episodes / relation triples / session summaries) beside the existing
+# vector tables — additive and non-destructive (the plaintext stays authoritative until the
+# §5-4 seal). Each surface gets its OWN master-derived AEAD key (a distinct HKDF sibling, like
+# the entity key), so compromising one domain key can't read another. Same opaque
+# ``version||nonce||ct`` shape + random nonce as encrypt_entities: identical content yields
+# different ciphertext, so the store sees no equality across rows.
+_INFO_SEALED = {
+    "content": b"resonant-lattice/sealed-content/v1",
+    "episode": b"resonant-lattice/sealed-episode/v1",
+    "triple":  b"resonant-lattice/sealed-triple/v1",
+    "summary": b"resonant-lattice/sealed-summary/v1",
+}
+_SEALED_AAD = {d: b"resonant-lattice/sealed/" + d.encode("ascii") + b"/v1" for d in _INFO_SEALED}
+SEALED_WRAP_VERSION = 1
+
+# The dedup IDENTITY (3e): content UNIQUE -> content_hmac UNIQUE. A keyed HMAC-SHA256 of the
+# NORMALIZED content, so the store can still reject an exact-duplicate insert (equal hmacs
+# match) but, lacking the key, can NOT dictionary-attack the content or learn anything beyond
+# "a duplicate exists" — which the plaintext ``content UNIQUE`` already leaks today. A distinct
+# HKDF sibling from the content AEAD key. §5-1 computes + stores it beside the plaintext content
+# (non-authoritative); §5-4 makes ``content_hmac UNIQUE`` the identity when the plaintext
+# content column is nulled at seal.
+_INFO_CONTENT_HMAC = b"resonant-lattice/content-hmac/v1"
+
+
+def _derive_labeled_key(passphrase: bytes, keystore: Dict, info: bytes,
+                        length: int = _HE_WRAP_KEY_LEN, *, verify: bool = True) -> bytearray:
+    """Argon2id(master) -> HKDF(info, length) subkey, key-check-verified — the shared body of the
+    Tier-1 subkey derivations (a sibling of derive_db_key / derive_entity_key under the SAME
+    master, distinguished only by its HKDF info label). The returned bytearray is the caller's to
+    ``secure_zero``. Raises WrongPassphraseError if ``verify`` and the key-check fails."""
+    salt = base64.b64decode(keystore["salt_b64"])
+    master = _derive_master(passphrase, salt, _params_from_keystore(keystore))
+    try:
+        if verify:
+            got = _hkdf_sha256(master, _INFO_KEY_CHECK, _KEY_CHECK_LEN)
+            if not hmac.compare_digest(got, base64.b64decode(keystore["key_check_b64"])):
+                raise WrongPassphraseError("passphrase does not match this keystore")
+        key = bytearray(_hkdf_sha256(master, info, length))
+    finally:
+        secure_zero(master)
+    try_mlock(key)
+    return key
+
+
+def derive_sealed_key(passphrase: bytes, keystore: Dict, domain: str, *,
+                      verify: bool = True) -> bytearray:
+    """Re-derive the 32-byte AES-256-GCM key for a §5-1 sealed surface (``domain`` in
+    content|episode|triple|summary) — a distinct HKDF sibling per domain under the SAME master."""
+    if domain not in _INFO_SEALED:
+        raise ValueError(f"unknown sealed domain {domain!r} (expected {tuple(_INFO_SEALED)})")
+    return _derive_labeled_key(passphrase, keystore, _INFO_SEALED[domain], verify=verify)
+
+
+def derive_content_hmac_key(passphrase: bytes, keystore: Dict, *, verify: bool = True) -> bytearray:
+    """Re-derive the content-dedup HMAC key (3e) — its own HKDF sibling, independent of the
+    content AEAD key so neither reveals the other."""
+    return _derive_labeled_key(passphrase, keystore, _INFO_CONTENT_HMAC, verify=verify)
+
+
+def normalize_content(text: str) -> str:
+    """Canonical form for the content-dedup HMAC: strip + collapse internal whitespace, case
+    PRESERVED (fact-content case can be semantically load-bearing). Deliberately mild — §5-1
+    keeps the plaintext ``content UNIQUE`` authoritative, so this only needs to be STABLE; §5-4
+    makes ``content_hmac UNIQUE`` the identity and can revisit normalization then."""
+    return " ".join((text or "").split())
+
+
+def content_hmac(text: str, hmac_key: bytes) -> str:
+    """Keyed HMAC-SHA256 hex of the normalized content — the store's blind dedup identity (3e)."""
+    if len(hmac_key) != _HE_WRAP_KEY_LEN:
+        raise ValueError(f"hmac_key must be {_HE_WRAP_KEY_LEN} bytes, got {len(hmac_key)}")
+    return hmac.new(bytes(hmac_key), normalize_content(text).encode("utf-8"),
+                    hashlib.sha256).hexdigest()
+
+
+def encrypt_sealed(payload, key: bytes, domain: str) -> bytes:
+    """AES-256-GCM-encrypt a §5-1 content surface to an OPAQUE ``version||nonce||ct`` blob.
+
+    ``payload`` is JSON-serialized canonically (``sort_keys``) before encryption — a dict for
+    fact content (``{content, category, source_quote, source_ref}``), or a string for the
+    episode / triple / summary text surfaces. A fresh RANDOM nonce per call means identical
+    payloads yield DIFFERENT ciphertext (no equality leakage on the store). ``domain`` binds the
+    GCM associated data, so a blob from one surface cannot be silently decrypted as another."""
+    if not _AEAD_AVAILABLE:
+        raise CryptoUnavailableError(
+            "cryptography is required for sealed-content encryption. Install it "
+            "(`pip install cryptography`) or use encryption_mode in (none, at_rest).")
+    if domain not in _SEALED_AAD:
+        raise ValueError(f"unknown sealed domain {domain!r} (expected {tuple(_INFO_SEALED)})")
+    if len(key) != _HE_WRAP_KEY_LEN:
+        raise ValueError(f"key must be {_HE_WRAP_KEY_LEN} bytes, got {len(key)}")
+    blob = json.dumps(payload, separators=(",", ":"), sort_keys=True,
+                      ensure_ascii=False).encode("utf-8")
+    nonce = secrets.token_bytes(_GCM_NONCE_BYTES)
+    ct = _AESGCM(bytes(key)).encrypt(nonce, blob, _SEALED_AAD[domain])
+    return bytes([SEALED_WRAP_VERSION]) + nonce + ct
+
+
+def decrypt_sealed(blob: bytes, key: bytes, domain: str):
+    """Inverse of ``encrypt_sealed`` → the original payload (dict or str). Raises WrapAuthError on
+    a wrong key, tamper, wrong ``domain``, or version mismatch (GCM's auth tag makes all loud)."""
+    if not _AEAD_AVAILABLE:
+        raise CryptoUnavailableError("cryptography is required for sealed-content decryption.")
+    if domain not in _SEALED_AAD:
+        raise ValueError(f"unknown sealed domain {domain!r} (expected {tuple(_INFO_SEALED)})")
+    if len(key) != _HE_WRAP_KEY_LEN:
+        raise ValueError(f"key must be {_HE_WRAP_KEY_LEN} bytes, got {len(key)}")
+    if not blob or blob[0] != SEALED_WRAP_VERSION:
+        raise WrapAuthError(
+            f"unsupported sealed-blob version {blob[:1]!r} (expected {SEALED_WRAP_VERSION})")
+    nonce = blob[1:1 + _GCM_NONCE_BYTES]
+    ct = blob[1 + _GCM_NONCE_BYTES:]
+    try:
+        pt = _AESGCM(bytes(key)).decrypt(nonce, ct, _SEALED_AAD[domain])
+    except Exception as e:
+        raise WrapAuthError("sealed decrypt failed (wrong key, domain, or tampered blob)") from e
+    return json.loads(pt.decode("utf-8"))
+
+
 # ── Passphrase source (E0: explicit / env / interactive) ───────────────────────
 def get_passphrase(explicit: Optional[str] = None, *, prompt: bool = False,
                    prompt_label: str = "Memory passphrase: ") -> Optional[bytearray]:

@@ -33,7 +33,8 @@ class BlindTier:
     optional field and routes the retriever swap + reconcile through it."""
 
     def __init__(self, store, *, recall=None, hrr_client=None, maint=None,
-                 writer=None, hrr_writer=None, entities=None, reconcile_batch=200):
+                 writer=None, hrr_writer=None, entities=None, content=None,
+                 content_hmac_fn=None, reconcile_batch=200):
         self.store = store
         self.recall = recall            # BlindRecallPRE @ embed-dim (cosine + PRE) | None
         self.hrr = hrr_client           # BlindRecallPRE @ 2*hrr_dim (HRR lift)     | None
@@ -41,6 +42,8 @@ class BlindTier:
         self.writer = writer            # BlindWriter -> semantic_he                 | None
         self.hrr_writer = hrr_writer    # BlindWriter -> semantic_he_hrr             | None
         self.entities = entities        # BlindEntityStore -> semantic_he_entities   | None
+        self.content = content          # BlindContentStore -> semantic_he_content   | None (§5-1)
+        self.content_hmac_fn = content_hmac_fn  # text -> keyed hmac hex (dedup identity, 3e) | None
         self.reconcile_batch = int(reconcile_batch)
 
     # ── construction ──────────────────────────────────────────────────────────────
@@ -75,10 +78,17 @@ class BlindTier:
         if entities is not None:
             logger.info("\U0001f512 Blind entity sets ACTIVE — AEAD-encrypted names in "
                         "semantic_he_entities (client-side overlap, store learns nothing).")
-        if contexts is None and entities is None:
+        # §5-1 sealed content: AEAD content surface + keyed dedup identity. Pure AEAD/HMAC (no
+        # openfhe), like entities → set up INDEPENDENTLY of the HE contexts.
+        content, content_hmac_fn = cls._resolve_content(store, keystore_path)
+        if content is not None:
+            logger.info("\U0001f512 Blind content mirror ACTIVE — AEAD-encrypted content in "
+                        "semantic_he_content + keyed content_hmac dedup identity (§5-1).")
+        if contexts is None and entities is None and content is None:
             return None
         return cls(store, recall=recall, hrr_client=hrr_client, maint=maint, writer=writer,
-                   hrr_writer=hrr_writer, entities=entities, reconcile_batch=reconcile_batch)
+                   hrr_writer=hrr_writer, entities=entities, content=content,
+                   content_hmac_fn=content_hmac_fn, reconcile_batch=reconcile_batch)
 
     @staticmethod
     def _resolve_contexts(store, keystore_path, he_keystore_path, hrr_dim):
@@ -179,6 +189,52 @@ class BlindTier:
             if isinstance(passphrase, bytearray):
                 crypto_keys.secure_zero(passphrase)
 
+    @staticmethod
+    def _resolve_content(store, keystore_path):
+        """Build a BlindContentStore (AEAD content surface at rest in ``semantic_he_content``) and
+        a content-HMAC function (the keyed dedup identity, 3e) for §5-1. Returns
+        ``(content_store, content_hmac_fn)`` or ``(None, None)``. Needs argon2 + cryptography + a
+        passphrase + the keystore; **no openfhe** (pure AEAD/HMAC), so — like entities — it comes up
+        independently of the HE recall contexts. The derived content key and HMAC key are held for
+        the session inside the closures (trusted-client RAM keys, like the entity key)."""
+        import crypto_keys
+        if not (crypto_keys.kdf_available() and crypto_keys.aead_available()):
+            logger.error("blind content mirror requires argon2 + cryptography; content mirror disabled.")
+            return None, None
+        passphrase = crypto_keys.get_passphrase(prompt=False)
+        if not passphrase:
+            logger.error("encryption_mode=blind but no passphrase available for content mirror. "
+                         "Set %s in the environment. Content mirror disabled.",
+                         crypto_keys.ENV_PASSPHRASE)
+            return None, None
+        try:
+            if not os.path.exists(keystore_path):
+                keystore = crypto_keys.create_keystore(passphrase)
+                crypto_keys.save_keystore(keystore_path, keystore)
+                logger.warning("Blind-tier keystore CREATED at %s. The passphrase is the ONLY "
+                               "way to recover this memory — there is NO recovery.", keystore_path)
+            else:
+                keystore = crypto_keys.load_keystore(keystore_path)
+            c_key = crypto_keys.derive_sealed_key(passphrase, keystore, "content")  # verifies key-check
+            h_key = crypto_keys.derive_content_hmac_key(passphrase, keystore)
+            from retrieval import BlindContentStore
+            enc = lambda payload: crypto_keys.encrypt_sealed(payload, c_key, "content")
+            dec = lambda blob: crypto_keys.decrypt_sealed(blob, c_key, "content")
+            content_store = BlindContentStore(store, enc, dec)
+            content_hmac_fn = lambda text: crypto_keys.content_hmac(text, h_key)
+            return content_store, content_hmac_fn
+        except crypto_keys.WrongPassphraseError:
+            logger.error("Blind content mirror: passphrase does not match the keystore at %s. "
+                         "Content mirror disabled.", keystore_path)
+            return None, None
+        except Exception as e:
+            logger.error("Blind content mirror setup failed (%s); content mirror disabled.",
+                         e, exc_info=True)
+            return None, None
+        finally:
+            if isinstance(passphrase, bytearray):
+                crypto_keys.secure_zero(passphrase)
+
     # ── recall + write ────────────────────────────────────────────────────────────
     def decorate_retriever(self, plaintext_retriever, ollama_endpoint, embed_model, min_similarity,
                            scan_batch: int = 0, scan_concurrency: int = 1,
@@ -217,15 +273,17 @@ class BlindTier:
 
         The single mechanism for ALL write paths — catches facts created OUTSIDE the consolidation
         epoch (abstraction / gist / procedural distillation; the builtin-memory mirror) and BACKFILLS
-        a store on first blind-enable. Idempotent (the worklists are LEFT JOINs, so a mirrored fact
-        drops off; the entity set re-mirrors when ``entities_dirty`` flips) and non-fatal (each
-        writer swallows + logs). ``limit`` (>0, else ``reconcile_batch``) bounds the per-pass work.
-        Returns the count of embedding cts written."""
+        a store on first blind-enable. Also mirrors the §5-1 sealed CONTENT surface into
+        ``semantic_he_content`` and backfills the keyed ``content_hmac`` dedup identity. Idempotent
+        (the worklists are LEFT JOINs / NULL-column scans, so a mirrored fact drops off; the entity
+        set re-mirrors when ``entities_dirty`` flips) and non-fatal (each writer swallows + logs).
+        ``limit`` (>0, else ``reconcile_batch``) bounds the per-pass work. Returns the count of
+        embedding cts written."""
         st = store if store is not None else self.store
         if st is None:
             return 0
         eff_limit = limit if limit > 0 else self.reconcile_batch
-        n = 0
+        n = nc = 0
         if self.writer is not None:
             for fid in st.facts_missing_blind("semantic_he", eff_limit):
                 emb = st.get_fact_embedding(fid)
@@ -247,6 +305,26 @@ class BlindTier:
                         st.mark_entities_mirrored(fid)
                 except Exception as e:
                     logger.debug("Blind reconcile entity mirror failed for %s (non-fatal): %s", fid, e)
-        if n:
-            logger.debug("Blind reconcile mirrored %d embedding ct(s).", n)
+        # §5-1 sealed content: mirror the AEAD content surface + backfill the keyed dedup identity.
+        # Two independent idempotent worklists (a fact can have the ct without the hmac or vice
+        # versa), both reading the plaintext row back — NO Ollama.
+        if self.content is not None:
+            for fid in st.facts_missing_blind("semantic_he_content", eff_limit):
+                try:
+                    fact = st.get_fact(fid)
+                    if fact and self.content.set_content(fid, fact):
+                        nc += 1
+                except Exception as e:
+                    logger.debug("Blind reconcile content mirror failed for %s (non-fatal): %s", fid, e)
+        if self.content_hmac_fn is not None:
+            for fid in st.facts_missing_content_hmac(eff_limit):
+                try:
+                    fact = st.get_fact(fid)
+                    if fact and fact.get("content"):
+                        st.set_content_hmac(fid, self.content_hmac_fn(fact["content"]))
+                except Exception as e:
+                    logger.debug("Blind reconcile content_hmac backfill failed for %s (non-fatal): %s",
+                                 fid, e)
+        if n or nc:
+            logger.debug("Blind reconcile mirrored %d embedding + %d content ct(s).", n, nc)
         return n

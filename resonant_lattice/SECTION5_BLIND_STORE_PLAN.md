@@ -126,17 +126,19 @@ homomorphic ADD on `semantic_he_meta` - spike §5-0b.
 
 ## 4. Phase plan (house rhythm: gated, test-backed, substrate-validated, default-OFF)
 
-**§5-0 - Spikes (node, SSH heredoc, no sync needed).**
-- (a) Key-wrap context sizing: smallest serializable PRE-capable CKKS/BFV context
-  for a 32-byte payload; decides whether 3a-v2 is plausible. ~1 session.
-- (b) Homomorphic resonance ADD (encrypted bump onto a stored decay-from-origin
-  ct without depth blowup; may fold the bump into a new origin + set_cycle).
-- (c) Perf baseline: comes FREE from the queued webdev blind-backfill experiment
-  (backfill throughput, blind recall latency vs 2,500 facts) - run that first.
-- (d) Encrypted-control-vector spike (3b): one-hot class ct x public scalar
-  vector inner product driving decay at depth 2; encrypted include-flag
-  multiplied into recall scores. Verify numerics over many cycles (per-class
-  scalar divergence; rebase-at-settle) and measure the added recall depth.
+**§5-0 - Spikes (node, SSH heredoc, no sync needed). ALL DONE 2026-07-12.**
+- (a) DONE. Key-wrap sizing: BGV 128-bit depth-0 ring-4096, exact PRE roundtrip,
+  129 KB/fact (6x under the feared 787 KB); ~6-7% vault growth. 3a-v2 size-viable
+  -> kept for §5-5; 3a-v1 AEAD ships first.
+- (b) DONE. Homomorphic resonance ADD = depth-0 plaintext add of the public scalar
+  b*factor^(origin-c); exact ~1e-13 within a settle window, rebase-at-settle keeps
+  it unbounded. No new crypto, no depth cost; read stays depth-1.
+- (c) DONE (earlier, backfill experiment): ~356s/query CPU -> A1 streaming + GPU
+  (~7s). Dedup-at-scale tractable via batched-epoch + GPU.
+- (d) DONE. Encrypted-control-vector (3b): class-hidden decay (one-hot x public
+  rate vector, depth 2) exact ~1e-13 incl. the f=1.0 pinned class; include-flag
+  (x score, +1 recall depth) masks exactly. Tier/decay-class/limbo/quarantine move
+  behind HE. Cost: maint keyset depth 2 (~2.6MB), +1 ct/fact, +1 recall depth.
 
 **§5-1 - Sealed-content mirror (additive, non-destructive).**
 Keystore v3 (+content key, +episode key, +triple key); new tables
@@ -145,6 +147,19 @@ Keystore v3 (+content key, +episode key, +triple key); new tables
 extended to mirror ALL of it. Store stays plaintext-authoritative; suite +
 substrate checks prove the mirror is complete and opaque. Migration stays
 idempotent.
+
+> STATUS 2026-07-12 - §5-1 CONTENT surface LANDED (the anchor); episodes/triples/
+> summaries are the fast-follow §5-1b. Delivered: `semantic_he_content` (AEAD
+> `{content, category, source_quote, source_ref}`, random-nonce opaque),
+> `semantic_facts.content_hmac` (keyed HMAC dedup identity, 3e) + partial index,
+> `crypto_keys.encrypt_sealed`/`decrypt_sealed`/`derive_sealed_key`(domain-parametrized
+> for all four surfaces)/`content_hmac`, `retrieval.BlindContentStore`, and the
+> `BlindTier.reconcile` content-mirror + hmac-backfill worklists (idempotent).
+> DESIGN NOTE: "keystore v3" is realized as HKDF SIBLING keys derived on demand (like
+> the entity key), NOT a keystore-sidecar version bump - the sidecar format is
+> unchanged, so existing keystores keep working and `keystore_is_secret_free` still
+> holds. 3 new tests, suite 130 -> 133 green; Windows-substrate-validated (pure
+> AEAD/HMAC, no openfhe - same faithfulness bar as the E7 entity AEAD). NOT deployed.
 
 **§5-2 - Client-visitor dream cycle (the big code motion).**
 Behind the existing mode flag, dream-cycle passes route through a BlindTier

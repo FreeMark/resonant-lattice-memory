@@ -675,3 +675,48 @@ class BlindEntityStore:
                 out.append((fid, ov))
         out.sort(key=lambda t: t[1], reverse=True)
         return out[:limit]
+
+
+class BlindContentStore:
+    """§5-1 sealed-content mirror (client-side): a fact's CONTENT surface (content text +
+    category + source quote/ref) is AEAD-encrypted at rest in ``semantic_he_content`` — one
+    opaque, RANDOM-nonce blob per fact, so the untrusted store holds only ciphertext and
+    identical content is indistinguishable on disk. The blind analogue of BlindEntityStore for
+    the natural-language surface; the first step of §5's move to a full blind store where the
+    ciphertext becomes the source of truth. Additive today: the plaintext ``semantic_facts``
+    stays authoritative until the §5-4 seal.
+
+    ``encrypt_fn`` / ``decrypt_fn`` are the trusted-client binders over
+    ``crypto_keys.encrypt_sealed`` / ``decrypt_sealed`` (domain 'content') with the content key,
+    so BlindContentStore carries no crypto import and is testable with a stand-in cipher. The
+    canonical payload dict is assembled here, so callers pass the plaintext fields directly."""
+
+    _FIELDS = ("content", "category", "source_quote", "source_ref")
+
+    def __init__(self, store: LatticeStore, encrypt_fn, decrypt_fn,
+                 table: str = "semantic_he_content"):
+        self.store = store
+        self._enc = encrypt_fn
+        self._dec = decrypt_fn
+        self.table = table
+
+    def set_content(self, fact_id: int, fields: Dict) -> bool:
+        """Encrypt a fact's content surface (the ``_FIELDS`` subset of its plaintext row) and store
+        the opaque blob. ``fields`` is any dict/row exposing those keys (e.g. store.get_fact);
+        missing keys serialize as None. Non-fatal — a blind-write hiccup never unwinds the
+        already-committed plaintext write."""
+        if fact_id is None or int(fact_id) <= 0:
+            return False
+        try:
+            payload = {k: (fields.get(k) if fields else None) for k in self._FIELDS}
+            self.store.store_he_vector(int(fact_id), self._enc(payload), table=self.table)
+            return True
+        except Exception as e:
+            logger.warning("Blind content write failed for fact %s (non-fatal): %s", fact_id, e)
+            return False
+
+    def get_content(self, fact_id: int) -> Optional[Dict]:
+        """CLIENT-side: decrypt one fact's content surface back to the ``_FIELDS`` dict (None if
+        absent). Needs the content key (via the decrypt binder)."""
+        blob = self.store.get_he_vector(int(fact_id), table=self.table)
+        return None if blob is None else dict(self._dec(blob))

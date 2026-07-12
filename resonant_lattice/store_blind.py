@@ -34,8 +34,10 @@ DEFAULT_HE_VERSION = 1
 DEFAULT_HE_TABLE = "semantic_he"
 # semantic_he = encrypted embedding (E2); semantic_he_hrr = encrypted HRR lift (E4);
 # semantic_he_meta = encrypted resonance scalar (E5 5b); semantic_he_entities = AEAD-encrypted
-# per-fact entity-name set (E7 7b — opaque blob, overlap is a client-side op).
-_HE_TABLES = ("semantic_he", "semantic_he_hrr", "semantic_he_meta", "semantic_he_entities")
+# per-fact entity-name set (E7 7b — opaque blob, overlap is a client-side op);
+# semantic_he_content = AEAD-encrypted content surface ({content, category, quote, source}, §5-1).
+_HE_TABLES = ("semantic_he", "semantic_he_hrr", "semantic_he_meta", "semantic_he_entities",
+              "semantic_he_content")
 
 
 def _he_table(table: str) -> str:
@@ -56,6 +58,7 @@ _HE_SOURCE_PRESENT = {
     "semantic_he_hrr": "f.hrr_vector IS NOT NULL",
     "semantic_he_meta": None,        # resonance is always settable
     "semantic_he_entities": None,    # an empty set is mirrorable (set_entities([]) writes a row)
+    "semantic_he_content": None,     # every fact has content -> always mirrorable (§5-1)
 }
 
 
@@ -260,6 +263,33 @@ class BlindMixin:
                 "UPDATE semantic_facts SET entities_dirty = 0 WHERE id = ?", (int(fact_id),)
             )
             self._conn.commit()
+
+    # ── §5-1 sealed-content dedup identity (content_hmac, 3e) ─────────────────────
+    def set_content_hmac(self, fact_id: int, hmac_hex: str) -> None:
+        """Store a fact's blind dedup identity — the keyed HMAC hex of its normalized content
+        (crypto_keys.content_hmac). Pure column write; the store never holds the HMAC key, so it
+        can match equal identities but not derive them. Idempotent per fact (plain UPDATE)."""
+        if not hmac_hex:
+            raise ValueError("hmac_hex must be non-empty")
+        with self._lock:
+            self._conn.execute(
+                "UPDATE semantic_facts SET content_hmac = ? WHERE id = ?",
+                (str(hmac_hex), int(fact_id)),
+            )
+            self._conn.commit()
+
+    def facts_missing_content_hmac(self, limit: int = 0) -> List[int]:
+        """Fact ids (non-superseded) whose ``content_hmac`` is not yet computed — the §5-1
+        dedup-identity backfill worklist. Independent of the content ciphertext mirror (a fact can
+        have one without the other), so ``_blind_reconcile`` drives it as its own idempotent pass:
+        once ``set_content_hmac`` stamps a row it drops off. ``limit`` > 0 batches; ordered by id
+        for stable, resumable batching."""
+        sql = ("SELECT id FROM semantic_facts "
+               "WHERE content_hmac IS NULL AND tier != 'superseded' ORDER BY id")
+        if int(limit) > 0:
+            sql += f" LIMIT {int(limit)}"
+        with self._lock:
+            return [r["id"] for r in self._conn.execute(sql).fetchall()]
 
     # ── E6 re-encryption audit (the persisted §7.2 trail) ─────────────────────────
     def record_reencrypt_event(self, cycle: int, query_token: str, k: int) -> None:

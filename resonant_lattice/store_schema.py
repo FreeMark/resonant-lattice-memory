@@ -172,6 +172,8 @@ class SchemaMixin:
         self._migrate_add_semantic_he_hrr()
         self._migrate_add_semantic_he_meta()
         self._migrate_add_semantic_he_entities()
+        self._migrate_add_semantic_he_content()
+        self._migrate_add_content_hmac()
         self._migrate_add_reencrypt_audit()
         self._migrate_vec_to_cosine()
         self._migrate_fts_trigger()
@@ -620,6 +622,64 @@ class SchemaMixin:
                 self._conn.commit()
             except Exception as e:
                 logger.debug("Migration (semantic_he_entities) failed or already exists: %s", e)
+
+
+    def _migrate_add_semantic_he_content(self) -> None:
+        """Create the §5-1 sealed-content table semantic_he_content (idempotent, table-only).
+
+        Holds the per-fact AEAD-encrypted CONTENT surface — one opaque, RANDOM-nonce blob per
+        fact wrapping ``{content, category, source_quote, source_ref}`` (crypto_keys.encrypt_sealed,
+        domain 'content'). The first surface of the §5 full blind store: the natural-language text
+        moves behind the same client key as the entity sets, so the untrusted store holds only
+        ciphertext and identical content is indistinguishable on disk. Additive + non-destructive —
+        the plaintext ``semantic_facts.content`` stays authoritative until the §5-4 seal nulls it.
+        Same shape + CASCADE-FK-on-id as semantic_he; only the blind content-write path populates it.
+        """
+        with self._lock:
+            try:
+                self._conn.execute("""
+                    CREATE TABLE IF NOT EXISTS semantic_he_content (
+                        id         INTEGER PRIMARY KEY REFERENCES semantic_facts(id) ON DELETE CASCADE,
+                        ct         BLOB NOT NULL,
+                        he_version INTEGER NOT NULL DEFAULT 1,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                self._conn.commit()
+            except Exception as e:
+                logger.debug("Migration (semantic_he_content) failed or already exists: %s", e)
+
+
+    def _migrate_add_content_hmac(self) -> None:
+        """Add semantic_facts.content_hmac (§5-1 blind dedup identity, 3e) if missing.
+
+        A keyed HMAC-SHA256 hex of the normalized content (crypto_keys.content_hmac). It is the
+        blind analogue of the plaintext ``content UNIQUE``: the store can reject an exact-duplicate
+        insert by matching equal hmacs without holding the key or reading the content. §5-1 computes
+        + backfills it beside the plaintext content (NON-authoritative — the plaintext UNIQUE still
+        governs dedup); §5-4 makes ``content_hmac UNIQUE`` the identity once the plaintext content is
+        nulled at seal. Nullable TEXT (legacy/unmirrored rows are NULL until reconciled); a PARTIAL
+        index over the non-null values readies the future uniqueness check without constraining the
+        NULLs. Self-detecting + idempotent like the sibling column migrations; no wall-clock.
+        """
+        with self._lock:
+            try:
+                cols = {
+                    r["name"]
+                    for r in self._conn.execute("PRAGMA table_info(semantic_facts)").fetchall()
+                }
+                if "content_hmac" not in cols:
+                    self._conn.execute(
+                        "ALTER TABLE semantic_facts ADD COLUMN content_hmac TEXT"
+                    )
+                    logger.info("Migration: added semantic_facts.content_hmac")
+                self._conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_semantic_facts_content_hmac "
+                    "ON semantic_facts(content_hmac) WHERE content_hmac IS NOT NULL"
+                )
+                self._conn.commit()
+            except Exception as e:
+                logger.error("Migration (content_hmac) failed: %s", e)
 
 
     def _migrate_add_reencrypt_audit(self) -> None:
