@@ -174,6 +174,9 @@ class SchemaMixin:
         self._migrate_add_semantic_he_entities()
         self._migrate_add_semantic_he_content()
         self._migrate_add_content_hmac()
+        self._migrate_add_semantic_he_episodes()
+        self._migrate_add_semantic_he_triples()
+        self._migrate_add_semantic_he_summaries()
         self._migrate_add_reencrypt_audit()
         self._migrate_vec_to_cosine()
         self._migrate_fts_trigger()
@@ -680,6 +683,76 @@ class SchemaMixin:
                 self._conn.commit()
             except Exception as e:
                 logger.error("Migration (content_hmac) failed: %s", e)
+
+
+    def _migrate_add_semantic_he_episodes(self) -> None:
+        """Create the §5-1b sealed-episode table semantic_he_episodes (idempotent, table-only).
+
+        Per-episode AEAD blob of ``{role, content}`` (crypto_keys.encrypt_sealed, domain 'episode'),
+        keyed by the SOURCE episodes.id (CASCADE-FK — episodes are L1/ephemeral and pruned often, so
+        the ciphertext drops with the row). Additive/non-destructive like the sibling sealed tables;
+        only the blind episode-mirror path populates it.
+        """
+        with self._lock:
+            try:
+                self._conn.execute("""
+                    CREATE TABLE IF NOT EXISTS semantic_he_episodes (
+                        id         INTEGER PRIMARY KEY REFERENCES episodes(id) ON DELETE CASCADE,
+                        ct         BLOB NOT NULL,
+                        he_version INTEGER NOT NULL DEFAULT 1,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                self._conn.commit()
+            except Exception as e:
+                logger.debug("Migration (semantic_he_episodes) failed or already exists: %s", e)
+
+
+    def _migrate_add_semantic_he_triples(self) -> None:
+        """Create the §5-1b sealed-triple table semantic_he_triples (idempotent, table-only).
+
+        Per-triple AEAD blob of ``{subject, relation, object}`` (domain 'triple'), keyed by the
+        SOURCE fact_relations.relation_id (CASCADE-FK — pruning a fact drops its triples, and now
+        their ciphertext). The blind analogue of the plaintext triple text; the fuzzy-HRR triple
+        scoring stays as is, graph walks move client-side (3c). Only the blind triple-mirror path
+        populates it.
+        """
+        with self._lock:
+            try:
+                self._conn.execute("""
+                    CREATE TABLE IF NOT EXISTS semantic_he_triples (
+                        id         INTEGER PRIMARY KEY REFERENCES fact_relations(relation_id) ON DELETE CASCADE,
+                        ct         BLOB NOT NULL,
+                        he_version INTEGER NOT NULL DEFAULT 1,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                self._conn.commit()
+            except Exception as e:
+                logger.debug("Migration (semantic_he_triples) failed or already exists: %s", e)
+
+
+    def _migrate_add_semantic_he_summaries(self) -> None:
+        """Create the §5-1b sealed-summary table semantic_he_summaries (idempotent, table-only).
+
+        Per-summary AEAD blob of the session-summary TEXT (domain 'summary'), keyed by the SOURCE
+        session_summaries.summary_id (CASCADE-FK). Session summaries are the durable autobiographical
+        layer (they survive episode pruning), so their text is a first-class seal surface. Only the
+        blind summary-mirror path populates it.
+        """
+        with self._lock:
+            try:
+                self._conn.execute("""
+                    CREATE TABLE IF NOT EXISTS semantic_he_summaries (
+                        id         INTEGER PRIMARY KEY REFERENCES session_summaries(summary_id) ON DELETE CASCADE,
+                        ct         BLOB NOT NULL,
+                        he_version INTEGER NOT NULL DEFAULT 1,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                self._conn.commit()
+            except Exception as e:
+                logger.debug("Migration (semantic_he_summaries) failed or already exists: %s", e)
 
 
     def _migrate_add_reencrypt_audit(self) -> None:

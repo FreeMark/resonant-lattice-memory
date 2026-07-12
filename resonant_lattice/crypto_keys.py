@@ -873,6 +873,32 @@ def derive_content_hmac_key(passphrase: bytes, keystore: Dict, *, verify: bool =
     return _derive_labeled_key(passphrase, keystore, _INFO_CONTENT_HMAC, verify=verify)
 
 
+def derive_sealed_keys(passphrase: bytes, keystore: Dict, *, verify: bool = True) -> Dict[str, bytearray]:
+    """Derive ALL §5-1 sealed keys in ONE master pass — a single (expensive) Argon2id followed by
+    cheap HKDF per subkey — and return ``{content, episode, triple, summary, hmac}`` bytearrays.
+    The blind tier calls this once at setup instead of paying a separate Argon2id per key (the
+    granular ``derive_sealed_key`` / ``derive_content_hmac_key`` stay for tests + focused use). Each
+    value is the caller's to ``secure_zero``. Raises WrongPassphraseError if ``verify`` and the
+    key-check fails."""
+    salt = base64.b64decode(keystore["salt_b64"])
+    master = _derive_master(passphrase, salt, _params_from_keystore(keystore))
+    try:
+        if verify:
+            got = _hkdf_sha256(master, _INFO_KEY_CHECK, _KEY_CHECK_LEN)
+            if not hmac.compare_digest(got, base64.b64decode(keystore["key_check_b64"])):
+                raise WrongPassphraseError("passphrase does not match this keystore")
+        out: Dict[str, bytearray] = {
+            domain: bytearray(_hkdf_sha256(master, info, _HE_WRAP_KEY_LEN))
+            for domain, info in _INFO_SEALED.items()
+        }
+        out["hmac"] = bytearray(_hkdf_sha256(master, _INFO_CONTENT_HMAC, _HE_WRAP_KEY_LEN))
+    finally:
+        secure_zero(master)
+    for k in out.values():
+        try_mlock(k)
+    return out
+
+
 def normalize_content(text: str) -> str:
     """Canonical form for the content-dedup HMAC: strip + collapse internal whitespace, case
     PRESERVED (fact-content case can be semantically load-bearing). Deliberately mild — §5-1

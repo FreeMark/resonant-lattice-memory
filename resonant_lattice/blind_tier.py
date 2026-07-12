@@ -34,7 +34,7 @@ class BlindTier:
 
     def __init__(self, store, *, recall=None, hrr_client=None, maint=None,
                  writer=None, hrr_writer=None, entities=None, content=None,
-                 content_hmac_fn=None, reconcile_batch=200):
+                 content_hmac_fn=None, sealed=None, reconcile_batch=200):
         self.store = store
         self.recall = recall            # BlindRecallPRE @ embed-dim (cosine + PRE) | None
         self.hrr = hrr_client           # BlindRecallPRE @ 2*hrr_dim (HRR lift)     | None
@@ -44,6 +44,7 @@ class BlindTier:
         self.entities = entities        # BlindEntityStore -> semantic_he_entities   | None
         self.content = content          # BlindContentStore -> semantic_he_content   | None (§5-1)
         self.content_hmac_fn = content_hmac_fn  # text -> keyed hmac hex (dedup identity, 3e) | None
+        self.sealed = sealed or {}      # {episode|triple|summary: BlindSealedStore}  (§5-1b)
         self.reconcile_batch = int(reconcile_batch)
 
     # ── construction ──────────────────────────────────────────────────────────────
@@ -78,17 +79,18 @@ class BlindTier:
         if entities is not None:
             logger.info("\U0001f512 Blind entity sets ACTIVE — AEAD-encrypted names in "
                         "semantic_he_entities (client-side overlap, store learns nothing).")
-        # §5-1 sealed content: AEAD content surface + keyed dedup identity. Pure AEAD/HMAC (no
-        # openfhe), like entities → set up INDEPENDENTLY of the HE contexts.
-        content, content_hmac_fn = cls._resolve_content(store, keystore_path)
+        # §5-1 sealed surfaces: AEAD content + keyed dedup identity (§5-1) and the episode / triple
+        # / summary text mirrors (§5-1b). Pure AEAD/HMAC (no openfhe), like entities → set up
+        # INDEPENDENTLY of the HE contexts, and all keys derived in ONE master pass.
+        content, content_hmac_fn, sealed = cls._resolve_sealed(store, keystore_path)
         if content is not None:
-            logger.info("\U0001f512 Blind content mirror ACTIVE — AEAD-encrypted content in "
-                        "semantic_he_content + keyed content_hmac dedup identity (§5-1).")
+            logger.info("\U0001f512 Blind sealed surfaces ACTIVE — AEAD content in semantic_he_content "
+                        "(+ keyed content_hmac) and episode/triple/summary text mirrors (§5-1/§5-1b).")
         if contexts is None and entities is None and content is None:
             return None
         return cls(store, recall=recall, hrr_client=hrr_client, maint=maint, writer=writer,
                    hrr_writer=hrr_writer, entities=entities, content=content,
-                   content_hmac_fn=content_hmac_fn, reconcile_batch=reconcile_batch)
+                   content_hmac_fn=content_hmac_fn, sealed=sealed, reconcile_batch=reconcile_batch)
 
     @staticmethod
     def _resolve_contexts(store, keystore_path, he_keystore_path, hrr_dim):
@@ -190,23 +192,25 @@ class BlindTier:
                 crypto_keys.secure_zero(passphrase)
 
     @staticmethod
-    def _resolve_content(store, keystore_path):
-        """Build a BlindContentStore (AEAD content surface at rest in ``semantic_he_content``) and
-        a content-HMAC function (the keyed dedup identity, 3e) for §5-1. Returns
-        ``(content_store, content_hmac_fn)`` or ``(None, None)``. Needs argon2 + cryptography + a
-        passphrase + the keystore; **no openfhe** (pure AEAD/HMAC), so — like entities — it comes up
-        independently of the HE recall contexts. The derived content key and HMAC key are held for
-        the session inside the closures (trusted-client RAM keys, like the entity key)."""
+    def _resolve_sealed(store, keystore_path):
+        """Build the §5-1 sealed surfaces: a BlindContentStore (AEAD content in
+        ``semantic_he_content``), the content-HMAC function (keyed dedup identity, 3e), and the
+        §5-1b BlindSealedStores for episode/triple/summary text. Returns
+        ``(content_store, content_hmac_fn, sealed_dict)`` or ``(None, None, {})``. Needs argon2 +
+        cryptography + a passphrase + the keystore; **no openfhe** (pure AEAD/HMAC), so — like
+        entities — it comes up independently of the HE recall contexts. ALL keys are derived in ONE
+        master pass (``derive_sealed_keys``) and held for the session inside the encrypt/decrypt
+        closures (trusted-client RAM keys, like the entity key)."""
         import crypto_keys
         if not (crypto_keys.kdf_available() and crypto_keys.aead_available()):
-            logger.error("blind content mirror requires argon2 + cryptography; content mirror disabled.")
-            return None, None
+            logger.error("blind sealed surfaces require argon2 + cryptography; sealed mirror disabled.")
+            return None, None, {}
         passphrase = crypto_keys.get_passphrase(prompt=False)
         if not passphrase:
-            logger.error("encryption_mode=blind but no passphrase available for content mirror. "
-                         "Set %s in the environment. Content mirror disabled.",
+            logger.error("encryption_mode=blind but no passphrase available for the sealed mirror. "
+                         "Set %s in the environment. Sealed mirror disabled.",
                          crypto_keys.ENV_PASSPHRASE)
-            return None, None
+            return None, None, {}
         try:
             if not os.path.exists(keystore_path):
                 keystore = crypto_keys.create_keystore(passphrase)
@@ -215,22 +219,34 @@ class BlindTier:
                                "way to recover this memory — there is NO recovery.", keystore_path)
             else:
                 keystore = crypto_keys.load_keystore(keystore_path)
-            c_key = crypto_keys.derive_sealed_key(passphrase, keystore, "content")  # verifies key-check
-            h_key = crypto_keys.derive_content_hmac_key(passphrase, keystore)
-            from retrieval import BlindContentStore
-            enc = lambda payload: crypto_keys.encrypt_sealed(payload, c_key, "content")
-            dec = lambda blob: crypto_keys.decrypt_sealed(blob, c_key, "content")
-            content_store = BlindContentStore(store, enc, dec)
+            keys = crypto_keys.derive_sealed_keys(passphrase, keystore)   # verifies key-check
+            from retrieval import BlindContentStore, BlindSealedStore
+
+            def _binders(domain):
+                k = keys[domain]
+                return (lambda payload: crypto_keys.encrypt_sealed(payload, k, domain),
+                        lambda blob: crypto_keys.decrypt_sealed(blob, k, domain))
+
+            c_enc, c_dec = _binders("content")
+            content_store = BlindContentStore(store, c_enc, c_dec)
+            h_key = keys["hmac"]
             content_hmac_fn = lambda text: crypto_keys.content_hmac(text, h_key)
-            return content_store, content_hmac_fn
+            sealed = {}
+            surface_tables = {"episode": "semantic_he_episodes",
+                              "triple": "semantic_he_triples",
+                              "summary": "semantic_he_summaries"}
+            for domain, table in surface_tables.items():
+                enc, dec = _binders(domain)
+                sealed[domain] = BlindSealedStore(store, enc, dec, table)
+            return content_store, content_hmac_fn, sealed
         except crypto_keys.WrongPassphraseError:
-            logger.error("Blind content mirror: passphrase does not match the keystore at %s. "
-                         "Content mirror disabled.", keystore_path)
-            return None, None
+            logger.error("Blind sealed mirror: passphrase does not match the keystore at %s. "
+                         "Sealed mirror disabled.", keystore_path)
+            return None, None, {}
         except Exception as e:
-            logger.error("Blind content mirror setup failed (%s); content mirror disabled.",
+            logger.error("Blind sealed mirror setup failed (%s); sealed mirror disabled.",
                          e, exc_info=True)
-            return None, None
+            return None, None, {}
         finally:
             if isinstance(passphrase, bytearray):
                 crypto_keys.secure_zero(passphrase)
@@ -325,6 +341,26 @@ class BlindTier:
                 except Exception as e:
                     logger.debug("Blind reconcile content_hmac backfill failed for %s (non-fatal): %s",
                                  fid, e)
+        # §5-1b sealed TEXT surfaces: episode / triple / summary, each its own source-table worklist
+        # + payload reader. Idempotent (LEFT-JOIN worklists) and non-fatal (per-row swallow).
+        if self.sealed:
+            surface_ops = {
+                "episode": (st.episodes_missing_blind, st.get_episode_payload),
+                "triple":  (st.triples_missing_blind, st.get_triple_payload),
+                "summary": (st.summaries_missing_blind, st.get_summary_payload),
+            }
+            for domain, (worklist, reader) in surface_ops.items():
+                sealed_store = self.sealed.get(domain)
+                if sealed_store is None:
+                    continue
+                for rid in worklist(eff_limit):
+                    try:
+                        payload = reader(rid)
+                        if payload is not None and sealed_store.set_payload(rid, payload):
+                            nc += 1
+                    except Exception as e:
+                        logger.debug("Blind reconcile %s mirror failed for %s (non-fatal): %s",
+                                     domain, rid, e)
         if n or nc:
-            logger.debug("Blind reconcile mirrored %d embedding + %d content ct(s).", n, nc)
+            logger.debug("Blind reconcile mirrored %d embedding + %d sealed ct(s).", n, nc)
         return n

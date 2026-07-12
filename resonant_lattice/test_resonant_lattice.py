@@ -1018,6 +1018,66 @@ def test_blind_content_reconcile_and_hmac():
     print("  content reconcile OK: mirror + content_hmac backfill, idempotent, reopen-safe")
 
 
+def test_blind_sealed_text_surfaces():
+    """§5-1b: BlindSealedStore mirrors episode / triple / summary TEXT into their own AEAD tables
+    via BlindTier.reconcile — each keyed by its SOURCE row (not fact id), opaque, idempotent, and
+    CASCADE-dropped with the source. crypto_keys.derive_sealed_keys yields all five sealed keys in
+    ONE master pass. Needs a store + argon2 + cryptography."""
+    if not _STORE_OK:
+        print(f"  SKIP sealed text: {_SKIP_REASON}"); return
+    import crypto_keys
+    if not (crypto_keys.kdf_available() and crypto_keys.aead_available()):
+        print("  SKIP sealed text: argon2/cryptography not installed"); return
+    from retrieval import BlindSealedStore
+    from blind_tier import BlindTier
+    passphrase = b"correct horse battery staple"
+    keystore = crypto_keys.create_keystore(passphrase)
+    keys = crypto_keys.derive_sealed_keys(passphrase, keystore)
+    assert set(keys) == {"content", "episode", "triple", "summary", "hmac"}   # one master pass
+    s = _fresh_store(vector_dim=8)
+    _, fid = s.add_or_reinforce_fact("python is a programming language", _emb(s, "py"), "tech", "sess1")
+    s.add_episode("sess1", "user", "remember my secret token zzz-hidden")
+    s.store_fact_relations(fid, [{"subject": "python", "relation": "is_a",
+                                  "object": "language", "confidence": 1.0}])
+    sum_id = s.add_session_summary("sess1", "we covered scattering and python basics", created_cycle=1)
+    ep_id = s.episodes_missing_blind()[0]
+    rel_id = s.triples_missing_blind()[0]
+    assert s.summaries_missing_blind() == [sum_id]
+
+    def mk(domain, table):
+        k = keys[domain]
+        return BlindSealedStore(s,
+                                lambda p, k=k, d=domain: crypto_keys.encrypt_sealed(p, k, d),
+                                lambda b, k=k, d=domain: crypto_keys.decrypt_sealed(b, k, d), table)
+    sealed = {"episode": mk("episode", "semantic_he_episodes"),
+              "triple":  mk("triple", "semantic_he_triples"),
+              "summary": mk("summary", "semantic_he_summaries")}
+    bt = BlindTier(s, sealed=sealed)
+    bt.reconcile()
+    # mirrored + worklists drained
+    assert s.count_he_vectors(table="semantic_he_episodes") == 1
+    assert s.count_he_vectors(table="semantic_he_triples") == 1
+    assert s.count_he_vectors(table="semantic_he_summaries") == 1
+    assert (s.episodes_missing_blind() == [] and s.triples_missing_blind() == []
+            and s.summaries_missing_blind() == [])
+    # opacity on the substrate
+    eb = s.get_he_vector(ep_id, table="semantic_he_episodes")
+    assert eb and b"zzz-hidden" not in eb
+    # client round-trip per surface
+    assert sealed["episode"].get_payload(ep_id)["content"] == "remember my secret token zzz-hidden"
+    assert sealed["triple"].get_payload(rel_id) == {"subject": "python", "relation": "is_a",
+                                                    "object": "language"}
+    assert sealed["summary"].get_payload(sum_id) == "we covered scattering and python basics"
+    # idempotent second pass
+    bt.reconcile()
+    assert s.count_he_vectors(table="semantic_he_episodes") == 1
+    # CASCADE: deleting the fact drops its triple AND the triple ciphertext (transitive FK)
+    s._conn.execute("DELETE FROM semantic_facts WHERE id=?", (fid,)); s._conn.commit()
+    assert s.count_he_vectors(table="semantic_he_triples") == 0
+    s.close()
+    print("  sealed text OK: episode/triple/summary mirrored opaque, idempotent, CASCADE")
+
+
 def test_get_passphrase_returns_wipeable_bytearray():
     """#4 hygiene fix: get_passphrase returns a MUTABLE bytearray so the provider resolvers'
     ``finally: if isinstance(passphrase, bytearray): secure_zero(...)`` guards actually fire

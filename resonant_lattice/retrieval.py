@@ -720,3 +720,37 @@ class BlindContentStore:
         absent). Needs the content key (via the decrypt binder)."""
         blob = self.store.get_he_vector(int(fact_id), table=self.table)
         return None if blob is None else dict(self._dec(blob))
+
+
+class BlindSealedStore:
+    """§5-1b generic sealed TEXT surface (episodes / triples / summaries): store one opaque AEAD
+    payload — a str or a dict — keyed by its SOURCE row id, in the given ``table``. The blind
+    analogue of the plaintext episode/triple/summary text; unlike BlindContentStore (which shapes a
+    fixed fact-content field set) the payload is passed through as-is, so the reconcile loop shapes
+    it per surface. ``encrypt_fn`` / ``decrypt_fn`` are the trusted-client binders over
+    ``crypto_keys.encrypt_sealed`` / ``decrypt_sealed`` for this surface's domain + key, so this
+    carries no crypto import and is testable with a stand-in cipher."""
+
+    def __init__(self, store: LatticeStore, encrypt_fn, decrypt_fn, table: str):
+        self.store = store
+        self._enc = encrypt_fn
+        self._dec = decrypt_fn
+        self.table = table
+
+    def set_payload(self, row_id: int, payload) -> bool:
+        """Encrypt ``payload`` (str or dict) and store the opaque blob keyed by ``row_id``.
+        Non-fatal — a blind-write hiccup never unwinds the committed plaintext write."""
+        if row_id is None or int(row_id) <= 0 or payload is None:
+            return False
+        try:
+            self.store.store_he_vector(int(row_id), self._enc(payload), table=self.table)
+            return True
+        except Exception as e:
+            logger.warning("Blind sealed write (%s) failed for row %s (non-fatal): %s",
+                           self.table, row_id, e)
+            return False
+
+    def get_payload(self, row_id: int):
+        """CLIENT-side: decrypt one row's sealed payload (None if absent)."""
+        blob = self.store.get_he_vector(int(row_id), table=self.table)
+        return None if blob is None else self._dec(blob)

@@ -35,9 +35,13 @@ DEFAULT_HE_TABLE = "semantic_he"
 # semantic_he = encrypted embedding (E2); semantic_he_hrr = encrypted HRR lift (E4);
 # semantic_he_meta = encrypted resonance scalar (E5 5b); semantic_he_entities = AEAD-encrypted
 # per-fact entity-name set (E7 7b — opaque blob, overlap is a client-side op);
-# semantic_he_content = AEAD-encrypted content surface ({content, category, quote, source}, §5-1).
+# semantic_he_content = AEAD content surface ({content, category, quote, source}, §5-1); and the
+# §5-1b sealed TEXT surfaces keyed by their SOURCE row (not fact id): semantic_he_episodes
+# ({role, content} from episodes), semantic_he_triples ({subject, relation, object} from
+# fact_relations), semantic_he_summaries (summary text from session_summaries).
 _HE_TABLES = ("semantic_he", "semantic_he_hrr", "semantic_he_meta", "semantic_he_entities",
-              "semantic_he_content")
+              "semantic_he_content", "semantic_he_episodes", "semantic_he_triples",
+              "semantic_he_summaries")
 
 
 def _he_table(table: str) -> str:
@@ -290,6 +294,68 @@ class BlindMixin:
             sql += f" LIMIT {int(limit)}"
         with self._lock:
             return [r["id"] for r in self._conn.execute(sql).fetchall()]
+
+    # ── §5-1b sealed TEXT surfaces (episodes / triples / summaries) ───────────────
+    # Each mirrors a DIFFERENT source table (not fact-keyed), so each has its own LEFT-JOIN
+    # worklist keyed on the SOURCE row PK + a payload reader. The SQL fragments are static and
+    # code-controlled (no untrusted interpolation). The mirror table's CASCADE-FK to the source PK
+    # means pruning the source (episode prune, fact prune -> triple CASCADE, summary prune) drops
+    # the ciphertext automatically — no stale blind rows.
+    def episodes_missing_blind(self, limit: int = 0) -> List[int]:
+        """Episode ids with a plaintext row but NO ciphertext in ``semantic_he_episodes`` — the
+        §5-1b episode-mirror worklist. Idempotent (LEFT JOIN); ``limit`` > 0 batches; id order."""
+        sql = ("SELECT e.id FROM episodes e LEFT JOIN semantic_he_episodes b ON b.id = e.id "
+               "WHERE b.id IS NULL ORDER BY e.id")
+        if int(limit) > 0:
+            sql += f" LIMIT {int(limit)}"
+        with self._lock:
+            return [r["id"] for r in self._conn.execute(sql).fetchall()]
+
+    def get_episode_payload(self, episode_id: int) -> Optional[dict]:
+        """The sealable text surface of one episode — ``{role, content}`` — or None if absent."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT role, content FROM episodes WHERE id = ?", (int(episode_id),)).fetchone()
+        return {"role": row["role"], "content": row["content"]} if row else None
+
+    def triples_missing_blind(self, limit: int = 0) -> List[int]:
+        """Relation ids (fact_relations.relation_id) with a plaintext row but NO ciphertext in
+        ``semantic_he_triples`` — the §5-1b triple-mirror worklist. Idempotent; ``limit`` batches."""
+        sql = ("SELECT r.relation_id FROM fact_relations r "
+               "LEFT JOIN semantic_he_triples b ON b.id = r.relation_id "
+               "WHERE b.id IS NULL ORDER BY r.relation_id")
+        if int(limit) > 0:
+            sql += f" LIMIT {int(limit)}"
+        with self._lock:
+            return [r["relation_id"] for r in self._conn.execute(sql).fetchall()]
+
+    def get_triple_payload(self, relation_id: int) -> Optional[dict]:
+        """The sealable text of one triple — ``{subject, relation, object}`` — or None if absent."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT subject, relation, object FROM fact_relations WHERE relation_id = ?",
+                (int(relation_id),)).fetchone()
+        return {"subject": row["subject"], "relation": row["relation"],
+                "object": row["object"]} if row else None
+
+    def summaries_missing_blind(self, limit: int = 0) -> List[int]:
+        """Summary ids (session_summaries.summary_id) with a plaintext row but NO ciphertext in
+        ``semantic_he_summaries`` — the §5-1b summary-mirror worklist. Idempotent; ``limit`` batches."""
+        sql = ("SELECT s.summary_id FROM session_summaries s "
+               "LEFT JOIN semantic_he_summaries b ON b.id = s.summary_id "
+               "WHERE b.id IS NULL ORDER BY s.summary_id")
+        if int(limit) > 0:
+            sql += f" LIMIT {int(limit)}"
+        with self._lock:
+            return [r["summary_id"] for r in self._conn.execute(sql).fetchall()]
+
+    def get_summary_payload(self, summary_id: int) -> Optional[str]:
+        """The sealable text of one session summary (a string), or None if absent."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT summary FROM session_summaries WHERE summary_id = ?",
+                (int(summary_id),)).fetchone()
+        return row["summary"] if row else None
 
     # ── E6 re-encryption audit (the persisted §7.2 trail) ─────────────────────────
     def record_reencrypt_event(self, cycle: int, query_token: str, k: int) -> None:

@@ -148,18 +148,22 @@ extended to mirror ALL of it. Store stays plaintext-authoritative; suite +
 substrate checks prove the mirror is complete and opaque. Migration stays
 idempotent.
 
-> STATUS 2026-07-12 - §5-1 CONTENT surface LANDED (the anchor); episodes/triples/
-> summaries are the fast-follow §5-1b. Delivered: `semantic_he_content` (AEAD
-> `{content, category, source_quote, source_ref}`, random-nonce opaque),
-> `semantic_facts.content_hmac` (keyed HMAC dedup identity, 3e) + partial index,
-> `crypto_keys.encrypt_sealed`/`decrypt_sealed`/`derive_sealed_key`(domain-parametrized
-> for all four surfaces)/`content_hmac`, `retrieval.BlindContentStore`, and the
-> `BlindTier.reconcile` content-mirror + hmac-backfill worklists (idempotent).
-> DESIGN NOTE: "keystore v3" is realized as HKDF SIBLING keys derived on demand (like
-> the entity key), NOT a keystore-sidecar version bump - the sidecar format is
-> unchanged, so existing keystores keep working and `keystore_is_secret_free` still
-> holds. 3 new tests, suite 130 -> 133 green; Windows-substrate-validated (pure
-> AEAD/HMAC, no openfhe - same faithfulness bar as the E7 entity AEAD). NOT deployed.
+> STATUS 2026-07-12 - §5-1 COMPLETE (all four surfaces). §5-1a CONTENT (the anchor):
+> `semantic_he_content` (AEAD `{content, category, source_quote, source_ref}`,
+> random-nonce opaque), `semantic_facts.content_hmac` (keyed HMAC dedup identity, 3e)
+> + partial index, `retrieval.BlindContentStore`, content-mirror + hmac-backfill
+> reconcile. §5-1b TEXT surfaces: `semantic_he_episodes` ({role,content} <- episodes),
+> `semantic_he_triples` ({subject,relation,object} <- fact_relations),
+> `semantic_he_summaries` (summary text <- session_summaries), each keyed by its SOURCE
+> row (CASCADE-FK) with its own idempotent LEFT-JOIN worklist + payload reader in
+> BlindMixin, mirrored via `retrieval.BlindSealedStore`. Shared crypto:
+> `encrypt_sealed`/`decrypt_sealed` (domain-parametrized AEAD), `derive_sealed_keys`
+> (ALL keys in one Argon2id pass), `content_hmac`. DESIGN NOTE: "keystore v3" is
+> realized as HKDF SIBLING keys derived on demand (like the entity key), NOT a
+> keystore-sidecar version bump - the sidecar format is unchanged, so existing keystores
+> keep working and `keystore_is_secret_free` still holds. 4 new tests, suite 130 -> 134
+> green; Windows-substrate-validated (pure AEAD/HMAC, no openfhe - same bar as the E7
+> entity AEAD); migration idempotency confirmed on re-open. NOT deployed.
 
 **§5-2 - Client-visitor dream cycle (the big code motion).**
 Behind the existing mode flag, dream-cycle passes route through a BlindTier
