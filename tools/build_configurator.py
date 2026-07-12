@@ -104,6 +104,8 @@ KEY_GROUP = {
     "encryption_mode": "encryption", "encryption_keystore_path": "encryption",
     "blind_he_keystore_path": "encryption", "blind_reconcile_batch": "encryption",
     "blind_scan_batch": "encryption", "blind_scan_concurrency": "encryption",
+    "blind_gpu_recall": "encryption", "blind_gpu_socket": "encryption",
+    "blind_gpu_binary": "encryption",
 }
 
 SELECT_OPTIONS = {
