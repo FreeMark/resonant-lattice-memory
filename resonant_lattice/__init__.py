@@ -19,7 +19,7 @@ and the `LatticeStore` mixins (see MODULE_MAP.md / README.md):
 
 from __future__ import annotations
 
-__version__ = "1.4.1"  # A1: bounded-RAM streaming blind-recall scan (auto-tuned batch, parity-exact)
+__version__ = "1.4.2"  # GPU blind-recall accelerator seam (off by default) atop A1 streaming scan
 
 import json
 import logging
