@@ -1130,7 +1130,10 @@ def test_blind_visitor_parity():
     for fid, (content_txt, cat, ents) in zip(fids, specs):
         view = v.fact_view(fid)
         assert view["content"] == content_txt and view["category"] == cat
-        assert set(view["entities"]) == {e.lower() for e in ents}
+        # Parity is blind-mirror == PLAINTEXT STORE (which may auto-extract extra
+        # content-derived entities via the optional entity_extractor), not == the
+        # manually-linked input. Case-insensitive; robust with or without the extractor.
+        assert {x.lower() for x in view["entities"]} == {x.lower() for x in s.get_entities_for_fact(fid)}
     # PARITY: triples as sets (sans structural confidence), and non-empty
     plain_t = {(t["subject"], t["relation"], t["object"]) for t in s.get_fact_relations(fids[0])}
     blind_t = {(t["subject"], t["relation"], t["object"]) for t in v.triples(fids[0])}
