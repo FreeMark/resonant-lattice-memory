@@ -204,6 +204,12 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         # Applied in _compute_prefetch; the explicit search tool stays ungated.
         self._recall_relevance_margin = float(
             self._config.get("recall_relevance_margin", DEFAULTS["recall_relevance_margin"]))
+        # Procedural-prefetch cap (A6 sibling, default -1 = off): keep at most N
+        # procedural (tool-use) facts in the injected recall block so they can't
+        # swamp the on-topic content cluster. Applied in _compute_prefetch; the
+        # explicit search tool stays ungated.
+        self._recall_procedural_cap = int(
+            self._config.get("recall_procedural_cap", DEFAULTS["recall_procedural_cap"]))
 
         # Near-identity gate for silently merging a new fact into an existing one.
         # The 0.78–0.95 band is left to conflict detection so contradictory updates

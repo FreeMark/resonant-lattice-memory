@@ -167,6 +167,28 @@ class RecallMixin:
                 logger.debug("Recall reinforcement failed: %s", e)
 
 
+    @staticmethod
+    def _cap_procedural(results: List[Dict], cap: int, limit: int):
+        """Keep at most ``cap`` procedural-category facts — the most relevant, since
+        ``results`` is relevance-ordered — pass every non-procedural fact through,
+        preserve order, and truncate to ``limit``. cap=0 drops procedural from the
+        prefetch entirely. The explicit search tool is unaffected (ungated). Returns
+        ``(kept, proc_dropped)`` so the caller can surface a visible-boundary
+        breadcrumb: trimmed procedural knowledge is held back, not silently hidden."""
+        kept: List[Dict] = []
+        proc_kept = 0
+        proc_dropped = 0
+        for r in results:
+            is_proc = (r.get("category") or "").strip().lower() == "procedural"
+            if is_proc and proc_kept >= cap:
+                proc_dropped += 1
+                continue
+            if len(kept) < limit:
+                if is_proc:
+                    proc_kept += 1
+                kept.append(r)
+        return kept, proc_dropped
+
     def _compute_prefetch(self, query: str, sid: str) -> str:
         """Run the hybrid search and format the resonant-memory block."""
         # A6 precision gate (default ON): inject only the on-topic cluster, not
@@ -174,16 +196,29 @@ class RecallMixin:
         # stays ungated. The blind/HE retriever's search() takes no relevance_margin
         # (vector-only), so fall back gracefully there.
         margin = getattr(self, "_recall_relevance_margin", 0.0) or None
+        # Procedural-prefetch cap (default -1 = OFF/legacy). Procedural (tool-use)
+        # facts are numerous and, when embedding-similar to the query, can crowd the
+        # on-topic CONTENT cluster out of the injected block and burn attention budget.
+        # When capping, over-fetch candidates so content facts backfill the slots freed
+        # by dropped procedural facts. Prefetch ONLY — the explicit search tool stays
+        # ungated, so the agent can still pull full tool-use procedures on demand.
+        cap = getattr(self, "_recall_procedural_cap", -1)
+        capping = cap is not None and cap >= 0
+        fetch_limit = (self._recall_limit * 2) if capping else self._recall_limit
         if margin:
             try:
-                results = self._retriever.search(query, limit=self._recall_limit,
+                results = self._retriever.search(query, limit=fetch_limit,
                                                  relevance_margin=margin)
             except TypeError:
-                results = self._retriever.search(query, limit=self._recall_limit)
+                results = self._retriever.search(query, limit=fetch_limit)
         else:
-            results = self._retriever.search(query, limit=self._recall_limit)
+            results = self._retriever.search(query, limit=fetch_limit)
         if not results:
             return ""
+        if capping:
+            results, proc_dropped = self._cap_procedural(results, cap, self._recall_limit)
+        else:
+            proc_dropped = 0
 
         # Conflict CONTAINMENT (quarantine, default OFF; ON in recommended config):
         # an UNRESOLVED conflict in a HIGH-STAKES category is a hazard, not just
@@ -271,6 +306,16 @@ class RecallMixin:
 
         if not lines:
             return ""
+        # Visible-boundary breadcrumb: when the procedural cap held facts back, SAY so
+        # rather than silently truncating — the agent should know deeper tool-use
+        # procedures exist and can be pulled with an explicit search (which is ungated).
+        if proc_dropped > 0:
+            lines.append(
+                "  - [note] " + str(proc_dropped) + " tool-use/procedural "
+                + ("memory" if proc_dropped == 1 else "memories")
+                + " held back to keep this recall focused — call lattice_store "
+                "search for deeper tool/search procedures if a task needs them."
+            )
         formatted_facts = "\n".join(lines)
         # Frame these as fallible candidates, not ground truth (anti-confabulation).
         # Text only — the line structure and [ID | Tier | Res] metadata are unchanged.

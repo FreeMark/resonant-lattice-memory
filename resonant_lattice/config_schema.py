@@ -421,6 +421,16 @@ CONFIG_SCHEMA = [
     # above (Hebbian block) — do NOT re-add them here or they double-list in the
     # `hermes memory setup` wizard. Only genuinely-new keys belong below.
     {"key": "recall_limit", "description": "Max facts considered per recall", "default": 300},
+    {"key": "recall_procedural_cap",
+     "description": "Procedural-prefetch cap: keep at most N procedural (tool-use) facts in the "
+                    "injected recall block, choosing the most relevant (candidates are over-fetched "
+                    "so content facts backfill the freed slots). Procedural facts are numerous and, "
+                    "when embedding-similar to a query, can crowd the on-topic CONTENT cluster out of "
+                    "context and burn attention budget (observed: a model answering 'not in memory' "
+                    "while surfacing only how-to-search tips). Prefetch ONLY — the explicit search "
+                    "tool stays ungated, so the agent can still pull full tool-use procedures on "
+                    "demand. -1 = off (no cap, legacy); 0 = no procedural in prefetch; N = keep top-N.",
+     "default": -1},
     {"key": "recall_relevance_margin",
      "description": "Prefetch precision gate (A6): drop recalled facts scoring more than this below the "
                     "top relevance, so only the on-topic cluster is injected into context (cleaner context, "
