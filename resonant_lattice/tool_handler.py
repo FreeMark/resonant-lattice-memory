@@ -313,6 +313,7 @@ class ToolHandlerMixin:
                 stats["memory_cycles"] = self._memory_cycle
                 stats["dream_cycles"] = self._dream_cycle_count
                 stats["feature_status"] = self.get_feature_status()
+                stats["effective_config"] = self.get_effective_config()
                 stats["status"] = "healthy"
                 return json.dumps(stats)
 
@@ -323,6 +324,7 @@ class ToolHandlerMixin:
                 health["memory_cycle"] = self._memory_cycle
                 health["dream_cycle"] = self._dream_cycle_count
                 health["feature_status"] = self.get_feature_status()
+                health["effective_config"] = self.get_effective_config()
                 # Phase 7: expose blind tier status if active (more diagnostics for encrypted setups)
                 if getattr(self, '_blind_tier', None):
                     bt = self._blind_tier
@@ -435,7 +437,7 @@ class ToolHandlerMixin:
                 if not subject:
                     return tool_error("infer requires a subject (the start node)")
                 obj = args.get("object")
-                hops = int(args.get("hops", self._max_inference_hops))
+                hops = max(1, int(args.get("hops", self._max_inference_hops)))
                 limit = int(args.get("limit", 10))
                 inferences = self._store.infer_relations(
                     subject=subject, object=obj, max_hops=hops, max_results=limit,

@@ -523,9 +523,11 @@ class FactsMixin:
         """Seed durable procedural / guardrail facts (e.g. tool-usage rules and 'how NOT to use it'
         guardrails) so the agent is grounded from DAY ONE — before it has failed enough to learn them
         (P3e). ``items`` = [{"content", "embedding", "entities"?}], pre-embedded by the caller (the
-        store calls no Ollama). Inserted as category='procedural', tier='long', high resonance so a
-        guardrail does NOT decay away before it is learned; idempotent (skips a content already
-        present), so re-seeding on every startup is safe. Returns the count newly inserted.
+        store calls no Ollama). Inserted as category='procedural', tier='long', high resonance, and
+        **pinned** (identity-level never-forget + authority presentation) so a guardrail does NOT
+        decay, prune, or long-cap-evict and surfaces as a binding [PRIORITY RULE]. Idempotent
+        (skips a content already present), so re-seeding on every startup is safe. Returns the
+        count newly inserted.
 
         Phrase guardrails POSITIVELY where possible ('always require human approval') rather than
         naming the forbidden capability ('never auto_approve') — the P3f judge showed the negative
@@ -542,8 +544,9 @@ class FactsMixin:
                     continue   # idempotent: already seeded / known
                 cur = self._conn.execute(
                     "INSERT OR IGNORE INTO semantic_facts (content, category, tier, resonance_count, "
-                    "source_session, learned_at_cycle, last_confirmed_cycle, max_resonance_seen) "
-                    "VALUES (?, 'procedural', 'long', ?, 'seed', ?, ?, ?)",
+                    "source_session, learned_at_cycle, last_confirmed_cycle, max_resonance_seen, "
+                    "pinned) "
+                    "VALUES (?, 'procedural', 'long', ?, 'seed', ?, ?, ?, 1)",
                     (content, float(durable_resonance), current_cycle, current_cycle,
                      float(durable_resonance)))
                 fid = cur.lastrowid

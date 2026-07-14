@@ -624,15 +624,19 @@ class RelationsMixin:
             chains get relation=None and are surfaced as a path for the agent to
             interpret — we never invent a relation the data doesn't support.
 
-        Only paths of ≥2 hops are returned (a 1-hop path is just a stored fact). If
-        `object` is given, only chains terminating at it are returned. Cycles are
-        prevented (a node is never revisited within a path); fanout and result count
-        are bounded. Superseded history is excluded by default.
+        Only multi-hop paths (len ≥ 2 edges) are returned — a 1-edge path is just a
+        stored fact (use ``relational`` for those). ``max_hops`` is the maximum path
+        length in edges: 1 disables multi-hop (returns []); 2+ allows derived chains
+        up to that length. If ``object`` is given, only chains terminating at it are
+        returned. Cycles are prevented (a node is never revisited within a path);
+        fanout and result count are bounded. Superseded history is excluded by default.
         """
         start = subject.strip().lower() if subject else None
         if not start:
             return []
-        max_hops = max(2, int(max_hops))
+        # Floor at 1 (not 2): max_hops=1 is the explicit "no multi-hop" setting and
+        # returns [] because the loop below only emits paths of length ≥ 2.
+        max_hops = max(1, int(max_hops))
         target = object.strip().lower() if object else None
 
         def _out_edges(node: str) -> List[Dict]:

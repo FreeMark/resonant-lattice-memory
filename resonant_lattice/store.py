@@ -151,7 +151,16 @@ class LatticeStore(SchemaMixin, FactsMixin, DreamCycleMixin, AbstractionMixin,
         # near-identity. The 0.78–0.95 band (close but not identical) often holds
         # contradictory updates ("prefers dark" vs "prefers light"), which must be
         # stored separately so conflict detection can see them — not dropped.
-        self.reinforce_threshold = max(float(reinforce_threshold), float(similarity_threshold))
+        # Effective threshold is max(configured, similarity_threshold) so a mis-set
+        # low reinforce cannot reopen silent-merge of mid-band updates.
+        _req_reinforce = float(reinforce_threshold)
+        self.reinforce_threshold = max(_req_reinforce, float(similarity_threshold))
+        if self.reinforce_threshold > _req_reinforce:
+            logger.warning(
+                "reinforce_threshold %.4f raised to %.4f (must be >= similarity_threshold %.4f); "
+                "mid-band near-matches stay separate for conflict detection.",
+                _req_reinforce, self.reinforce_threshold, float(similarity_threshold),
+            )
         self.embed_model = embed_model
         self.hrr_dim = int(hrr_dim)                        # HRR phase-vector dim (distinct from embedding vector_dim)
         self.degraded = False                              # set True on embedding-dim mismatch (observable via stats)

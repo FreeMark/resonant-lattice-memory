@@ -3,7 +3,29 @@ config_schema.py — static config field list for `hermes memory setup`.
 
 Text/data only. Extracted verbatim from LatticeMemoryProvider.get_config_schema,
 which now returns CONFIG_SCHEMA. All fields are local (no secrets/credentials).
+
+Prompt-string defaults are imported from prompts.py so wizard, DEFAULTS, provider,
+and the web configurator share one source of truth.
 """
+
+from prompts import (
+    DEFAULT_CONSOLIDATION_PROMPT,
+    DEFAULT_EXTRACTION_PROMPT,
+    DEFAULT_GIST_PROMPT,
+    DEFAULT_NARRATIVE_PROMPT,
+    DEFAULT_PROCEDURAL_PROMPT,
+    DEFAULT_RELATION_PROMPT,
+)
+
+# Keys whose UI control is a multi-line prompt editor (configurator + docs).
+PROMPT_CONFIG_KEYS = (
+    "extraction_prompt",
+    "consolidation_prompt",
+    "gist_prompt",
+    "procedural_prompt",
+    "relation_prompt",
+    "narrative_prompt",
+)
 
 CONFIG_SCHEMA = [
     {"key": "ollama_endpoint_embed", "description": "Ollama endpoint for embeddings",
@@ -102,7 +124,12 @@ CONFIG_SCHEMA = [
      "default": 0.34},
     {"key": "reinforce_threshold",
      "description": "Cosine >= this folds a new fact into an existing one "
-                    "(near-identity; below it, store separately)",
+                    "(near-identity; below it, store separately). EFFECTIVE value is "
+                    "max(configured, similarity_threshold): the store raises a too-low "
+                    "setting so the mid-band between similarity and near-identity stays "
+                    "available for separate rows + conflict detection (value updates must "
+                    "not silently merge into the stale row). Prefer raising similarity_threshold "
+                    "if you want broader merge behavior, not lowering reinforce alone.",
      "default": 0.95},
     {"key": "conflict_decay_floor",
      "description": "Resonance floor during conflict bleed (0.0 = lethal duel; "
@@ -202,6 +229,15 @@ CONFIG_SCHEMA = [
                     "cycle so the agent can disambiguate via the pending_conflicts / "
                     "resolve_conflict tool actions, instead of leaving it all to the duel.",
      "default": True},
+    {"key": "surface_authority_block",
+     "description": "When True (default), pinned priority RULES (policy/compliance/procedural "
+                    "guardrails and imperative language) that appear in autonomous prefetch "
+                    "are lifted into a separate <authority_rules> block ABOVE fallible "
+                    "<resonant_memory> — so binding rules are not peer candidates next to "
+                    "poison/noise. Marker A/B validated that presentation steers obedience; "
+                    "structural separation strengthens that signal. False = legacy (rules "
+                    "stay inside <resonant_memory> with [PRIORITY RULE] tags only).",
+     "default": True},
     {"key": "conflict_surface_min_group_age_cycles",
      "description": "How many cycles a conflict must persist before the recall nudge mentions "
                     "it (let the duel run first; don't nag the instant a conflict is detected).",
@@ -241,10 +277,14 @@ CONFIG_SCHEMA = [
                     "keeps strong partial-structure matches and drops single-slot noise.",
      "default": 0.4},
     {"key": "max_inference_hops",
-     "description": "Phase 5c: default max chain length for the `infer` action (bounded "
-                    "transitive reasoning over the triple graph). Inferences are DERIVED, "
-                    "labelled, confidence-decayed per hop, and NEVER stored as facts. Kept "
-                    "small — both combinatorial growth and inference uncertainty rise with hops.",
+     "description": "Phase 5c: max path length in edges for the `infer` action (bounded "
+                    "transitive reasoning over the triple graph). Only multi-hop DERIVED "
+                    "chains are returned (a single stored triple is not an inference — use "
+                    "relational for those). 1 = multi-hop inference DISABLED (returns no "
+                    "inferences — safest for constrained agents). 2 = allow 2-edge chains "
+                    "(default). Raise carefully — combinatorial growth and uncertainty both "
+                    "rise with hops. Inferences are labelled, confidence-decayed per hop, "
+                    "and NEVER stored as facts. Values below 1 are raised to 1.",
      "default": 2},
     {"key": "enable_self_model",
      "description": "Phase 7 (default OFF): maintain a deliberate self-model — a separate, "
@@ -508,18 +548,16 @@ CONFIG_SCHEMA = [
                     "per dream cycle. Set False for pure-heuristic detection.",
      "default": True},
     {"key": "quarantine_high_stakes_conflicts",
-     "description": "Conflict CONTAINMENT (default ON, fail-closed; set False for an explicit 'unsafe mode'). "
-                    "When a "
-                    "fact is in an UNRESOLVED conflict (conflict_group_id set) AND its category is "
-                    "high-stakes (see importance_categories) AND it is NOT pinned, withhold it from the "
-                    "autonomous recall block and surface a [WITHHELD] notice instead of ranking it. Turns "
-                    "'the right value is somewhere in top-k' into 'the agent cannot silently act on a "
-                    "contested high-stakes value before it is resolved'. A PINNED member is the user-declared "
-                    "authority and is never withheld; non-high-stakes conflicts are untouched (still ranked + "
-                    "[CONFLICT LOCK]-tagged). Recall-path only (the explicit search action is unaffected); "
-                    "the facts stay in the store and are still flagged for resolve_conflict. Applies to the "
-                    "autonomous recall block AND the explicit `search` action (the contained agent surfaces); "
-                    "get_fact by exact ID is never gated.",
+     "description": "Conflict CONTAINMENT (default ON, fail-closed; set False only for an explicit "
+                    "'unsafe mode'). When a fact is in an UNRESOLVED conflict (conflict_group_id set) "
+                    "AND its category is high-stakes (see importance_categories) AND it is NOT pinned, "
+                    "withhold it from the autonomous recall block AND the explicit lattice_store "
+                    "`search` action, and surface a [WITHHELD] notice instead of ranking the contested "
+                    "value. Turns 'the right value is somewhere in top-k' into 'the agent cannot silently "
+                    "act on a contested high-stakes value before it is resolved'. A PINNED member is the "
+                    "user-declared authority and is never withheld; non-high-stakes conflicts are untouched "
+                    "(still ranked + [CONFLICT LOCK]-tagged). Facts stay in the store and remain flagged "
+                    "for resolve_conflict. get_fact by exact ID is never gated.",
      "default": True},
     {"key": "prefetch_proxy_min_overlap",
      "description": "Topic-shift guard for the latency-hiding prefetch proxy. The background recall computed "
@@ -544,6 +582,36 @@ CONFIG_SCHEMA = [
                     "lives in a real timezone; 'now' should mean the user's wall clock, not the "
                     "server's. Unknown names fall back to system-local rather than failing.",
      "default": ""},
+    # ── Prompt overrides (same strings as prompts.py; config wins when set) ──
+    {"key": "extraction_prompt",
+     "description": "Reason-model prompt for consolidation fact extraction from a dialogue log. "
+                    "Must instruct JSON array output with content/category/source_quote (and optional "
+                    "source_ref). Override to change domain focus, scaffolding exclusions, or "
+                    "category vocabulary. Empty is not recommended — omit the key to use the default.",
+     "default": DEFAULT_EXTRACTION_PROMPT},
+    {"key": "consolidation_prompt",
+     "description": "Reason-model prompt for the abstraction pass (cluster of related long-tier "
+                    "facts → higher-level abstract facts). Override for domain-specific "
+                    "contextualization rules (e.g. preserve API signatures / money amounts).",
+     "default": DEFAULT_CONSOLIDATION_PROMPT},
+    {"key": "gist_prompt",
+     "description": "Reason-model prompt for gist-before-prune: compress dying-but-once-important "
+                    "facts into one category='gist' fact. Override to tighten numeric/ID preservation.",
+     "default": DEFAULT_GIST_PROMPT},
+    {"key": "procedural_prompt",
+     "description": "Reason-model prompt for distilling raw tool episodes into reusable "
+                    "category='procedural' facts. Override for stricter multi-occurrence rules "
+                    "or domain tool vocabulary.",
+     "default": DEFAULT_PROCEDURAL_PROMPT},
+    {"key": "relation_prompt",
+     "description": "Reason-model prompt for optional LLM triple extraction (enable_relations + "
+                    "relation_extract_llm). Few-shot examples help small local relation_model tags. "
+                    "Override to match domain relation vocabulary.",
+     "default": DEFAULT_RELATION_PROMPT},
+    {"key": "narrative_prompt",
+     "description": "Reason-model prompt for end-of-session autobiographical narrative (enable_narrative). "
+                    "Override to change summary style or what counts as durable session memory.",
+     "default": DEFAULT_NARRATIVE_PROMPT},
 ]
 
 # Central source of truth for all runtime defaults.

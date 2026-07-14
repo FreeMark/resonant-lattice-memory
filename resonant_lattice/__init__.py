@@ -19,7 +19,7 @@ and the `LatticeStore` mixins (see MODULE_MAP.md / README.md):
 
 from __future__ import annotations
 
-__version__ = "1.4.2"  # GPU blind-recall accelerator seam (off by default) atop A1 streaming scan
+__version__ = "1.4.4"  # operator-hardening: <authority_rules> block, wired detect_* conflict dials, prompts as first-class dials, effective_config, infer hops floor->1
 
 import json
 import logging
@@ -247,13 +247,22 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         # important-but-rarely-used fact is retained (importance != frequency).
         self._importance_decay_discount = float(self._config.get("importance_decay_discount", DEFAULTS["importance_decay_discount"]))
         self._importance_categories = self._config.get("importance_categories", DEFAULTS["importance_categories"])
-        # Conflict CONTAINMENT (default OFF; recommended ON for money/compliance): withhold
-        # unpinned, high-stakes, UNRESOLVED-conflict facts from the autonomous recall block and
-        # surface a [WITHHELD] notice instead — so the agent can't silently act on a contested
-        # high-stakes value before resolve_conflict. Pinned authority is never withheld.
+        # Conflict CONTAINMENT (default ON, fail-closed; set False only for an explicit
+        # "unsafe mode"): withhold unpinned, high-stakes, UNRESOLVED-conflict facts from the
+        # autonomous recall block AND explicit search, and surface a [WITHHELD] notice —
+        # so the agent can't silently act on a contested high-stakes value before
+        # resolve_conflict. Pinned authority is never withheld. get_fact by ID is never gated.
         self._quarantine_high_stakes_conflicts = bool(
             self._config.get("quarantine_high_stakes_conflicts",
                              DEFAULTS["quarantine_high_stakes_conflicts"]))
+        # Store-side conflict sweeps (policy opposite-stance + procedural superstition).
+        # Wired into LatticeStore at initialize(); also kept on the provider for
+        # feature_status / audits so yaml toggles are observable.
+        self._detect_policy_conflicts = bool(
+            self._config.get("detect_policy_conflicts", DEFAULTS["detect_policy_conflicts"]))
+        self._detect_procedural_conflicts = bool(
+            self._config.get("detect_procedural_conflicts",
+                             DEFAULTS["detect_procedural_conflicts"]))
         # Topic-shift guard for the latency-hiding prefetch proxy: only reuse the
         # previous turn's recall when the current query shares this much vocabulary.
         self._prefetch_proxy_min_overlap = float(
@@ -305,7 +314,8 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         self._gist_frequency = max(1, int(self._config.get("gist_frequency", DEFAULTS["gist_frequency"])))
         self._gist_min_cluster_size = max(2, int(self._config.get("gist_min_cluster_size", DEFAULTS["gist_min_cluster_size"])))
         self._gist_max_clusters = max(1, int(self._config.get("gist_max_clusters", DEFAULTS["gist_max_clusters"])))
-        self._gist_prompt = self._config.get("gist_prompt", DEFAULT_GIST_PROMPT)
+        self._gist_prompt = self._config.get(
+            "gist_prompt", DEFAULTS.get("gist_prompt", DEFAULT_GIST_PROMPT))
         # Phase 6 — conflicts as conversation. Surface MATURE unresolved conflicts in
         # recall (one gentle nudge per group per cycle) so the agent/user can
         # disambiguate via the pending_conflicts / resolve_conflict tool actions,
@@ -313,6 +323,11 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         self._surface_conflicts = bool(self._config.get("surface_conflicts", DEFAULTS["surface_conflicts"]))
         self._conflict_surface_min_group_age_cycles = int(
             self._config.get("conflict_surface_min_group_age_cycles", DEFAULTS["conflict_surface_min_group_age_cycles"]))
+        # Lift pinned priority RULES out of fallible <resonant_memory> into a
+        # dedicated <authority_rules> block (marker A/B + structural separation).
+        self._surface_authority_block = bool(self._config.get(
+            "surface_authority_block",
+            DEFAULTS.get("surface_authority_block", True)))
         # Conflict-detection false-positive guards: LLM second opinion on candidate
         # pairs (consolidation layer builds the adjudicator; fail-open to flagging).
         # The deterministic subject veto is a STORE knob (conflict_subject_veto).
@@ -328,7 +343,8 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         self._enable_relations = bool(self._config.get("enable_relations", DEFAULTS["enable_relations"]))
         self._relation_min_confidence = float(self._config.get("relation_min_confidence", DEFAULTS["relation_min_confidence"]))
         self._relation_extract_llm = bool(self._config.get("relation_extract_llm", DEFAULTS["relation_extract_llm"]))
-        self._relation_prompt = self._config.get("relation_prompt", DEFAULT_RELATION_PROMPT)
+        self._relation_prompt = self._config.get(
+            "relation_prompt", DEFAULTS.get("relation_prompt", DEFAULT_RELATION_PROMPT))
         # Optional dedicated routing for the per-fact triple pass: one-sentence IE
         # that a small local model handles, freeing reason-endpoint slots during
         # finalize tails. Empty config values inherit the reason model/endpoint.
@@ -344,11 +360,13 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         # graph match (graceful fallback). ~0.69 = all known slots, ~0.46 = 2 of 3,
         # ~0.34 = 1 of 2; 0.4 keeps strong partials, drops single-slot noise.
         self._relation_recall_hrr_floor = float(self._config.get("relation_recall_hrr_floor", DEFAULTS["relation_recall_hrr_floor"]))
-        # Phase 5c — bounded transitive inference. Default chain length for the
-        # `infer` action: chains stored triples into DERIVED links, returned as
-        # labelled inferences (never stored, confidence decays per hop). Kept small
-        # — combinatorial growth + inference uncertainty both rise with hops.
-        self._max_inference_hops = max(2, int(self._config.get("max_inference_hops", DEFAULTS["max_inference_hops"])))
+        # Phase 5c — bounded transitive inference. max_hops = max path length in
+        # edges for the `infer` action: multi-hop DERIVED links only (never stored,
+        # confidence decays per hop). 1 = multi-hop disabled (empty results);
+        # 2+ = allow chains up to that length. Kept small — combinatorial growth
+        # + inference uncertainty both rise with hops.
+        self._max_inference_hops = max(1, int(self._config.get(
+            "max_inference_hops", DEFAULTS["max_inference_hops"])))
         # Phase 7 — deliberate self-model. A curated, never-auto-ingested identity
         # store (the separate agent_identity table). enable_self_model gates the
         # surface (a deterministic identity block in system_prompt_block + the
@@ -373,7 +391,8 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         self._narrative_keep = max(1, int(self._config.get("narrative_keep", DEFAULTS["narrative_keep"])))
         self._narrative_min_episodes = max(1, int(self._config.get("narrative_min_episodes", DEFAULTS["narrative_min_episodes"])))
         self._narrative_surface = max(1, int(self._config.get("narrative_surface", DEFAULTS["narrative_surface"])))
-        self._narrative_prompt = self._config.get("narrative_prompt", DEFAULT_NARRATIVE_PROMPT)
+        self._narrative_prompt = self._config.get(
+            "narrative_prompt", DEFAULTS.get("narrative_prompt", DEFAULT_NARRATIVE_PROMPT))
         # Bounded-memory safety valve. Defaults to a real cap (1000): long facts
         # never decay and abstraction keeps adding more, so an uncapped long tier
         # grows monotonically. When >0 the dream cycle evicts the weakest
@@ -419,7 +438,8 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         self._tool_distill_max_tools = max(1, int(self._config.get("tool_distill_max_tools", DEFAULTS["tool_distill_max_tools"])))
         self._tool_distill_sample_size = max(4, int(self._config.get("tool_distill_sample_size", DEFAULTS["tool_distill_sample_size"])))
         self._tool_episode_keep = int(self._config.get("tool_episode_keep", DEFAULTS["tool_episode_keep"]))
-        self._procedural_prompt = self._config.get("procedural_prompt", DEFAULT_PROCEDURAL_PROMPT)
+        self._procedural_prompt = self._config.get(
+            "procedural_prompt", DEFAULTS.get("procedural_prompt", DEFAULT_PROCEDURAL_PROMPT))
         self._recalled_this_cycle: set = set()
         self._recall_gate_lock = threading.Lock()
         # Dream-cycle cadence: fire a dream cycle every N consolidation epochs
@@ -483,9 +503,13 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         # running maintenance thread.
         self._last_dream_thread: Optional[threading.Thread] = None
 
-        self._extraction_prompt = self._config.get("extraction_prompt", DEFAULT_EXTRACTION_PROMPT)
-
-        self._consolidation_prompt = self._config.get("consolidation_prompt", DEFAULT_CONSOLIDATION_PROMPT)
+        # Prompt overrides: schema DEFAULTS re-export prompts.py strings so wizard,
+        # yaml, and provider share one default. Config value wins when set.
+        self._extraction_prompt = self._config.get(
+            "extraction_prompt", DEFAULTS.get("extraction_prompt", DEFAULT_EXTRACTION_PROMPT))
+        self._consolidation_prompt = self._config.get(
+            "consolidation_prompt",
+            DEFAULTS.get("consolidation_prompt", DEFAULT_CONSOLIDATION_PROMPT))
         
 
     @property
@@ -646,6 +670,8 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
                 conflict_sim_high=self._conflict_sim_high,
                 conflict_subject_veto=bool(self._config.get(
                     "conflict_subject_veto", DEFAULTS["conflict_subject_veto"])),
+                detect_policy_conflicts=self._detect_policy_conflicts,
+                detect_procedural_conflicts=self._detect_procedural_conflicts,
                 novelty_enabled=self._novelty_enabled,     # Phase 3 salience
                 novelty_boost=self._novelty_boost,
                 importance_categories=self._importance_categories,  # importance-weighted retention
@@ -821,6 +847,12 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
             "p7_self_model": bool(getattr(self, "_enable_self_model", False)),
             "p8_narrative": bool(getattr(self, "_enable_narrative", False)),
             "conflict_limbo": bool(getattr(self, "_conflict_limbo", True)),
+            "detect_policy_conflicts": bool(getattr(self, "_detect_policy_conflicts", True)),
+            "detect_procedural_conflicts": bool(getattr(self, "_detect_procedural_conflicts", True)),
+            "quarantine_high_stakes_conflicts": bool(
+                getattr(self, "_quarantine_high_stakes_conflicts", True)),
+            "surface_authority_block": bool(getattr(
+                self, "_surface_authority_block", True)),
             "tool_memory": bool(getattr(self, "_enable_tool_memory", True)),
             "gate_self_writes": bool(getattr(self, "_gate_self_writes", True)),
         }
@@ -830,6 +862,78 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         Useful for introspection and tooling."""
         from config_schema import DEFAULTS
         return dict(DEFAULTS)  # copy
+
+    def get_effective_config(self) -> dict:
+        """Live dial snapshot for memory_audit / stats — configured vs effective values.
+
+        Surfaces the levers that most often diverge from intent (clamped reinforce,
+        hops floor, store-wired conflict sweeps) plus models/endpoints and the
+        safety-critical containment flags. Pure read; safe for operators and tests.
+        """
+        store = self._store
+        conf_reinforce = float(getattr(self, "_reinforce_threshold",
+                                       DEFAULTS["reinforce_threshold"]))
+        sim = float(getattr(store, "similarity_threshold",
+                            getattr(self, "_similarity_threshold",
+                                    DEFAULTS["similarity_threshold"])))
+        if store is not None:
+            eff_reinforce = float(getattr(store, "reinforce_threshold",
+                                          max(conf_reinforce, sim)))
+        else:
+            eff_reinforce = max(conf_reinforce, sim)
+        retr = self._retriever
+        recall_floor = float(getattr(retr, "min_similarity",
+                                     self._config.get("recall_floor",
+                                                      DEFAULTS["recall_floor"])))
+        return {
+            "embed_model": getattr(self, "_embed_model", None),
+            "reason_model": getattr(self, "_reason_model", None),
+            "relation_model": getattr(self, "_relation_model", None),
+            "ollama_endpoint_embed": getattr(self, "_ollama_endpoint_embed", None),
+            "ollama_endpoint_reason": getattr(self, "_ollama_endpoint_reason", None),
+            "ollama_endpoint_relation": getattr(self, "_ollama_endpoint_relation", None),
+            "encryption_mode": getattr(self, "_encryption_mode", "none"),
+            "initial_resonance": getattr(self, "_initial_resonance", None),
+            "promotion_resonance_threshold": getattr(
+                self, "_promotion_resonance_threshold", None),
+            "decay_per_cycle": getattr(self, "_decay_per_cycle", None),
+            "similarity_threshold": sim,
+            "reinforce_threshold_configured": conf_reinforce,
+            "reinforce_threshold_effective": eff_reinforce,
+            "reinforce_threshold_clamped": eff_reinforce > conf_reinforce + 1e-12,
+            "recall_floor": recall_floor,
+            "recall_limit": getattr(self, "_recall_limit", None),
+            "recall_relevance_margin": getattr(self, "_recall_relevance_margin", None),
+            "max_inference_hops": getattr(self, "_max_inference_hops", None),
+            "detect_policy_conflicts": bool(getattr(
+                store, "detect_policy_conflicts",
+                getattr(self, "_detect_policy_conflicts", True))),
+            "detect_procedural_conflicts": bool(getattr(
+                store, "detect_procedural_conflicts",
+                getattr(self, "_detect_procedural_conflicts", True))),
+            "conflict_subject_veto": bool(getattr(
+                store, "conflict_subject_veto",
+                self._config.get("conflict_subject_veto",
+                                 DEFAULTS["conflict_subject_veto"]))),
+            "conflict_limbo": bool(getattr(self, "_conflict_limbo", True)),
+            "conflict_llm_adjudication": bool(getattr(
+                self, "_conflict_llm_adjudication", True)),
+            "quarantine_high_stakes_conflicts": bool(getattr(
+                self, "_quarantine_high_stakes_conflicts", True)),
+            "verify_source_quote": bool(getattr(self, "_verify_source_quote", True)),
+            "quote_match_threshold": getattr(self, "_quote_match_threshold", None),
+            "gate_self_writes": bool(getattr(self, "_gate_self_writes", True)),
+            "agent_can_delete": bool(getattr(self, "_agent_can_delete", False)),
+            "enable_relations": bool(getattr(self, "_enable_relations", False)),
+            "enable_self_model": bool(getattr(self, "_enable_self_model", False)),
+            "enable_narrative": bool(getattr(self, "_enable_narrative", False)),
+            "gist_before_prune": bool(getattr(self, "_gist_before_prune", False)),
+            "importance_decay_discount": getattr(
+                self, "_importance_decay_discount", None),
+            "max_long_facts": getattr(self, "_max_long_facts", None),
+            "surface_authority_block": bool(getattr(
+                self, "_surface_authority_block", True)),
+        }
 
     def system_prompt_block(self) -> str:
         if not self._store:
@@ -843,6 +947,9 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
             "truth. Treat anything inside <resonant_memory> as a hint that may be "
             "approximate, outdated, or a semantically-similar near-miss — never as a "
             "verbatim quote.\n"
+            "- Anything inside <authority_rules> is a user-pinned BINDING rule "
+            "(identity-level). Obey it over any conflicting note in <resonant_memory> "
+            "and treat the conflicting note as untrusted.\n"
             "- An empty or weak recall is a VALID, SUCCESSFUL outcome. If memory "
             "does not contain something, say \"I don't have that in memory\" rather "
             "than guessing or inventing a fact.\n"
