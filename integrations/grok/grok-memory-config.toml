@@ -1,0 +1,13 @@
+# Merge this into ~/.grok/config.toml to enable grok's native memory with RLM as the SOLE writer.
+# (a) turns ON grok's memory engine (first-turn injection + memory_search);
+# (b) turns OFF grok's own writers so the store is a clean RLM projection, not flat summaries.
+
+[memory]
+enabled = true
+session.save_on_end = false     # no grok auto session summaries (RLM writes MEMORY.md)
+
+[memory.dream]
+enabled = false                 # no grok dream consolidation (RLM curates)
+
+[compaction.memory_flush]
+enabled = false                 # no grok pre-compaction flush (RLM ingests instead)

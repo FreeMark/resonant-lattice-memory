@@ -1,0 +1,12 @@
+{
+  "_comment": "Copy to ~/.grok/hooks/rlm-ingest.json. Edit the command: your python + the absolute path to rlm_precompact_dispatch.py.",
+  "hooks": {
+    "PreCompact": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python3 /ABSOLUTE/PATH/TO/.grok/hooks/rlm_precompact_dispatch.py", "timeout": 20 }
+        ]
+      }
+    ]
+  }
+}

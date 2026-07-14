@@ -1,0 +1,12 @@
+{
+  "_comment": "Copy to ~/.grok/hooks/rlm-memory.json. Edit the command: your python + the absolute path to rlm_sessionstart_memory.py.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python3 /ABSOLUTE/PATH/TO/.grok/hooks/rlm_sessionstart_memory.py", "timeout": 30 }
+        ]
+      }
+    ]
+  }
+}

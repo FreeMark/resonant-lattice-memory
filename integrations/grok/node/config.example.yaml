@@ -1,0 +1,36 @@
+# RLM instance config (flat RLM plugin keys). Copy to config.yaml in your instance dir and fill in.
+# Endpoints are BASE urls (NO /v1) - RLM appends /api/generate and /api/embeddings.
+
+reason_model: your-reason-model             # extraction/consolidation (favor quality; local or cloud)
+ollama_endpoint_reason: http://YOUR_OLLAMA_HOST:11434
+relation_model: your-relation-model         # triple extraction; leave empty to reuse reason_model
+ollama_endpoint_relation: http://YOUR_OLLAMA_HOST:11434
+embed_model: nomic-embed-text:latest
+ollama_endpoint_embed: http://YOUR_OLLAMA_HOST:11434
+reason_timeout: 300.0
+embed_timeout: 30.0
+
+# Lab-scoped extraction prompt: anti-fabrication grounding + source_quote + a category enum.
+# Retarget the domain sentence and the category list to whatever this agent operates on.
+extraction_prompt: |
+  Analyze this dialogue log and extract the NEW, durable facts that are EXPLICITLY supported by
+  the log. This agent is an expert operator of its system and lab. Capture operational knowledge:
+  configuration and dials and their effects; decisions and the stated reason; host and network
+  topology (machines, endpoints, models, paths); evaluation results; failed probes and their root
+  causes; and concrete procedures or commands that worked.
+
+  GROUNDING RULES (critical - violating them corrupts memory):
+  - Do NOT invent or infer specifics (paths, hostnames, ports, model names, versions, config keys,
+    numbers, flags) that are not literally present in the log. If a detail is not in the log, omit it.
+  - For EVERY fact, include "source_quote": the shortest snippet copied VERBATIM from the log.
+  - If a candidate fact has no exact supporting snippet, DROP it rather than guessing.
+  - Do NOT record secrets, API keys, tokens, or passwords as facts; skip them.
+  - Do NOT extract chat pleasantries, self-praise, meta-commentary, or raw tool-output dumps.
+
+  For "category", choose the SINGLE best fit from exactly this list: decision, dial, config,
+  host_topology, model_spec, path_ref, procedure, eval_result, training_run, failed_probe,
+  constraint, concept.
+
+  Return ONLY a JSON array; each element: {"content": <atomic fact>, "category": <one from list>,
+  "source_quote": <verbatim snippet>, "source_ref": <url/id if the snippet carried one, else null>}.
+  If nothing durable is supported, return [].
