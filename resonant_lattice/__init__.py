@@ -19,7 +19,7 @@ and the `LatticeStore` mixins (see MODULE_MAP.md / README.md):
 
 from __future__ import annotations
 
-__version__ = "1.4.4"  # operator-hardening: <authority_rules> block, wired detect_* conflict dials, prompts as first-class dials, effective_config, infer hops floor->1
+__version__ = "1.4.5"  # grok CLI agent integration (integrations/grok): out-of-loop RLM memory via grok's native memory, RLM sole writer; README refresh (agent-general, de-contest)
 
 import json
 import logging
