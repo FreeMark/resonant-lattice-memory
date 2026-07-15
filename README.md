@@ -27,6 +27,11 @@ ready-made preset profiles (Scholar, Sovereign Vault, Overnight, Low-VRAM, and m
 
 ## What's new
 
+- **v1.4.7 (2026-07-14): grok memory scope (per-repo or global).** The grok integration's
+  SessionStart projection now takes an `RLM_MEMORY_SCOPE` lever: `workspace` (default, per-repo
+  memory keyed by git origin) or `global` (project the lattice into grok's global memory so it
+  surfaces in every repo, written as a preserved managed block). The integration README gains a
+  "Memory scope" section explaining the origin-keyed model and the trade-offs.
 - **v1.4.6 (2026-07-14): grok can write to the lattice.** The grok integration gains durable
   memory-write tools, `rlm_pin` (write + pin as `[PRIORITY]` authority) and `rlm_remember` (write a
   durable fact), through a small dependency-free MCP server that routes the agent's writes into the

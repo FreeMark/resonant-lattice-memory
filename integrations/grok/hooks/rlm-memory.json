@@ -1,10 +1,10 @@
 {
-  "_comment": "Copy to ~/.grok/hooks/rlm-memory.json. Edit the command: your python + the absolute path to rlm_sessionstart_memory.py.",
+  "_comment": "Copy to ~/.grok/hooks/rlm-memory.json. Edit the command path. RLM_MEMORY_SCOPE = 'workspace' (default: per-repo memory, bootstrap each repo) or 'global' (project the lattice into grok's global memory so it surfaces in EVERY repo, no per-repo bootstrap).",
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
-          { "type": "command", "command": "python3 /ABSOLUTE/PATH/TO/.grok/hooks/rlm_sessionstart_memory.py", "timeout": 30 }
+          { "type": "command", "command": "python3 /ABSOLUTE/PATH/TO/.grok/hooks/rlm_sessionstart_memory.py", "timeout": 30, "env": { "RLM_MEMORY_SCOPE": "workspace" } }
         ]
       }
     ]

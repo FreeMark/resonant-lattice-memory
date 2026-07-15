@@ -44,6 +44,22 @@ the store stays a clean projection of the lattice; the write tools route the age
 > Trigger note: `PreCompact` is used because grok does **not** fire `SessionEnd` on a normal
 > interactive exit. The convention is to run a compaction before exiting a session.
 
+## Memory scope: per-repo or global
+
+There is **one lattice** (the node "brain"); the SessionStart hook projects it into grok's memory.
+Where it lands depends on `RLM_MEMORY_SCOPE` (set in the hook JSON's `env`):
+
+- **`workspace`** (default): the projection is written into the **per-repo** grok memory. Grok keys
+  workspace memory by the **git `origin` remote**, not the folder, so it is shared across all
+  clones, worktrees, and locations of the same repo (a non-git folder is keyed by its path). Each
+  repo you want the lattice in must be **bootstrapped once** (`bootstrap.sh`). Model: *one brain,
+  surfaced in whatever repos you bootstrap.*
+- **`global`**: the projection is written as a preserved managed block into grok's **global**
+  memory (`~/.grok/memory/MEMORY.md`), which grok searches in **every** session of **every** repo.
+  No per-repo bootstrap. Use this when this agent is primarily your RLM operator and you want the
+  lattice everywhere. Trade-off: it also injects into unrelated projects, so prefer `workspace` if
+  you use grok across many different codebases.
+
 ## Layout
 
 | Path | Runs on | What |
