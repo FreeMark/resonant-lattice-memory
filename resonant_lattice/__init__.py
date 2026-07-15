@@ -19,7 +19,7 @@ and the `LatticeStore` mixins (see MODULE_MAP.md / README.md):
 
 from __future__ import annotations
 
-__version__ = "1.5.0"  # grok memory lifecycle complete: inverse tools (rlm_forget / rlm_unpin), post-ingest dream cycle, rolling narrative layer, plus the explicit-UTF-8 write path fix
+__version__ = "1.5.1"  # grok ingest parser reads the ACP session-update transcript format (was silently parsing 0 turns from the new format, so consolidation/dream/narrative never ran on real conversation)
 
 import json
 import logging

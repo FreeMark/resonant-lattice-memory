@@ -27,6 +27,13 @@ ready-made preset profiles (Scholar, Sovereign Vault, Overnight, Low-VRAM, and m
 
 ## What's new
 
+- **v1.5.1 (2026-07-15): grok ingest reads the current transcript format.** The grok ingest parser
+  was still reading the old flat `type` / `role` / `content` transcript shape, but grok now writes an
+  ACP (Agent Client Protocol) session-update stream (the message text is nested under
+  `params.update.content`). The parser silently matched nothing, so every ingest processed zero turns
+  and the passive learning path (extraction, dreaming, narrative) never ran on real conversation; only
+  the direct `rlm_pin` / `rlm_remember` writes landed. The parser now reads the ACP envelope, merges
+  streaming message chunks into whole turns, and keeps backward compatibility with the flat format.
 - **v1.5.0 (2026-07-15): the grok memory lifecycle is complete.** The out-of-loop grok integration
   now runs the whole loop, not just read and write:
   - **Curation.** Two inverse write tools: `rlm_unpin` (drop a fact's `[PRIORITY]` authority while

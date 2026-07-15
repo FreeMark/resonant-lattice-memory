@@ -14,7 +14,11 @@ import argparse, json, os, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from rlm_common import build_provider, fact_count  # noqa: E402
 
-INCLUDE = {"user": "user", "assistant": "assistant"}  # skip system / reasoning / tool_result
+INCLUDE = {"user": "user", "assistant": "assistant"}  # legacy flat format: skip system/reasoning/tool
+# Current grok transcripts are an ACP (Agent Client Protocol) session-update stream: the role is in
+# params.update.sessionUpdate and the text in params.update.content. Everything else
+# (agent_thought_chunk, tool_call, tool_call_update, plan, turn_completed, ...) is skipped.
+ACP_ROLE = {"user_message_chunk": "user", "agent_message_chunk": "assistant"}
 
 
 def coerce_text(content):
@@ -36,7 +40,7 @@ def coerce_text(content):
 
 
 def parse_turns(path):
-    turns = []
+    raw = []
     with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
             line = line.strip()
@@ -46,12 +50,30 @@ def parse_turns(path):
                 o = json.loads(line)
             except Exception:
                 continue
-            t = o.get("type") or o.get("role")
-            if t not in INCLUDE:
+            # ACP session/update envelope: role in params.update.sessionUpdate, text in .content
+            params = o.get("params")
+            upd = params.get("update") if isinstance(params, dict) else None
+            if isinstance(upd, dict) and "sessionUpdate" in upd:
+                role = ACP_ROLE.get(upd.get("sessionUpdate"))
+                if not role:
+                    continue
+                text = coerce_text(upd.get("content")).strip()
+                if text:
+                    raw.append((role, text))
                 continue
-            text = coerce_text(o.get("content")).strip()
-            if text:
-                turns.append((INCLUDE[t], text))
+            # legacy flat transcript: top-level type/role + content
+            t = o.get("type") or o.get("role")
+            if t in INCLUDE:
+                text = coerce_text(o.get("content")).strip()
+                if text:
+                    raw.append((INCLUDE[t], text))
+    # merge consecutive same-role chunks (streaming) into one logical turn
+    turns = []
+    for role, text in raw:
+        if turns and turns[-1][0] == role:
+            turns[-1] = (role, turns[-1][1] + text)
+        else:
+            turns.append((role, text))
     return turns
 
 
