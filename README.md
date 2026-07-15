@@ -27,6 +27,26 @@ ready-made preset profiles (Scholar, Sovereign Vault, Overnight, Low-VRAM, and m
 
 ## What's new
 
+- **v1.5.0 (2026-07-15): the grok memory lifecycle is complete.** The out-of-loop grok integration
+  now runs the whole loop, not just read and write:
+  - **Curation.** Two inverse write tools: `rlm_unpin` (drop a fact's `[PRIORITY]` authority while
+    keeping the fact, the inverse of `rlm_pin`) and `rlm_forget` (prune a fact, the inverse of
+    `rlm_remember`). Together they let the agent supersede and curate its own memory, not just
+    accumulate it. A fact is targeted by its content or its id; an ambiguous match returns candidate
+    ids without acting, so a destructive edit is never a fuzzy guess.
+  - **Dreaming.** The ingest driver now runs one full dream cycle after each ingest (per-window
+    consolidation stays fast, then a single post-ingest dream), so the temporal dynamics (decay,
+    tier promotion, prune, conflict detection) actually fire for a grok-only lattice. Pinned
+    authority facts stay exempt from decay and prune.
+  - **Narrative.** A rolling autobiographical paragraph is written per ingest so the agent wakes up
+    with continuity. It runs on a configurable model (`narrative_model` / `narrative_endpoint`), so
+    summarization can be offloaded to a small local model while the reasoning lane stays free.
+  - **Unicode write fix.** Writes are sent as explicit UTF-8, so em-dashes and other non-ASCII
+    characters survive the Windows-to-node hop instead of failing.
+
+  The config template also gains the retention and layer dials, including a note that a read-only
+  recall path needs `initial_resonance` above the promotion threshold for facts to passively reach
+  the long tier.
 - **v1.4.8 (2026-07-15): open-ended extraction categories.** The grok integration's config
   template (`integrations/grok/node/config.example.yaml`) replaces the fixed category enum in the
   extraction prompt with an open-ended rule: pick a self-evident, plain-language category, let

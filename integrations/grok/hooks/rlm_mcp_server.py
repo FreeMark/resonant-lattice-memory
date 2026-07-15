@@ -25,6 +25,11 @@ CATS = ("decision, constraint, dial, config, host_topology, model_spec, path_ref
         "procedure, eval_result, training_run, failed_probe, concept")
 
 
+def norm_cat(category):
+    """Open-ended label -> safe token. Categories are samples, not a closed enum."""
+    return re.sub(r"[^a-z0-9_]", "", re.sub(r"[\s-]+", "_", (category or "").strip().lower())) or "concept"
+
+
 def log(m):
     try:
         os.makedirs(os.path.dirname(LOG), exist_ok=True)
@@ -39,8 +44,20 @@ def _schema():
             "properties": {
                 "content": {"type": "string",
                             "description": "the atomic fact or decision, self-contained and quotable"},
-                "category": {"type": "string", "description": f"one of: {CATS}"}},
+                "category": {"type": "string",
+                             "description": f"a short lowercase label (spaces/dashes become underscores). "
+                                            f"Examples: {CATS}. Any label is allowed; these are samples, not a closed set."}},
             "required": ["content", "category"]}
+
+
+def _manage_schema():
+    return {"type": "object",
+            "properties": {
+                "id": {"type": "integer",
+                       "description": "the fact id to target (from a prior candidate list); preferred when known"},
+                "content": {"type": "string",
+                            "description": "the fact text as it appears in your memory; used to locate the fact when you have no id"}},
+            "required": []}
 
 
 TOOLS = [
@@ -54,17 +71,49 @@ TOOLS = [
                      "facts worth remembering across sessions that are not hard rules. Deduplicates "
                      "against existing memory automatically."),
      "inputSchema": _schema()},
+    {"name": "rlm_forget",
+     "description": ("Prune a fact from your Resonant Lattice Memory (the inverse of rlm_remember). "
+                     "Pass the fact's `id` if you have it, else its `content` as shown in your memory. "
+                     "Ambiguous text returns candidate ids to retry with; a delete is never done on a "
+                     "fuzzy match. Effect is immediate in the lattice; your projected memory updates "
+                     "next session."),
+     "inputSchema": _manage_schema()},
+    {"name": "rlm_unpin",
+     "description": ("Remove the [PRIORITY] authority from a pinned fact but keep the fact (the "
+                     "inverse of rlm_pin). Pass the fact's `id` or its `content`. Use when a standing "
+                     "rule no longer applies but the fact itself is still true and worth keeping."),
+     "inputSchema": _manage_schema()},
 ]
 
 
 def do_write(content, category, pin):
-    cat = re.sub(r"[^a-z_]", "", (category or "").lower()) or "concept"
+    cat = norm_cat(category)
     cmd = f"{C.REMOTE_PY} {C.REMOTE_DIR}/rlm_write.py --category {cat}" + (" --pin" if pin else "")
     try:
-        r = subprocess.run(["ssh", *C.SSH_OPTS, C.SSH_HOST, cmd], input=content,
-                           capture_output=True, text=True, timeout=90)
-        out = (r.stdout or "").strip()
-        return json.loads(out.splitlines()[-1]) if out else {"ok": False, "error": (r.stderr or "no output")[:200]}
+        # send stdin as explicit UTF-8 bytes; text=True would use the Windows locale (cp1252)
+        # and mangle non-ASCII (e.g. an em-dash -> 0x97) into invalid UTF-8 on the node.
+        r = subprocess.run(["ssh", *C.SSH_OPTS, C.SSH_HOST, cmd], input=content.encode("utf-8"),
+                           capture_output=True, timeout=90)
+        out = (r.stdout or b"").decode("utf-8", "replace").strip()
+        err = (r.stderr or b"").decode("utf-8", "replace")
+        return json.loads(out.splitlines()[-1]) if out else {"ok": False, "error": (err or "no output")[:200]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+
+
+def do_manage(op, fid, content):
+    cmd = f"{C.REMOTE_PY} {C.REMOTE_DIR}/rlm_manage.py --op {op}"
+    inp = b""
+    if fid:
+        cmd += f" --id {int(fid)}"
+    else:
+        inp = (content or "").encode("utf-8")
+    try:
+        r = subprocess.run(["ssh", *C.SSH_OPTS, C.SSH_HOST, cmd], input=inp,
+                           capture_output=True, timeout=90)
+        out = (r.stdout or b"").decode("utf-8", "replace").strip()
+        err = (r.stderr or b"").decode("utf-8", "replace")
+        return json.loads(out.splitlines()[-1]) if out else {"ok": False, "error": (err or "no output")[:200]}
     except Exception as e:
         return {"ok": False, "error": str(e)[:200]}
 
@@ -72,6 +121,11 @@ def do_write(content, category, pin):
 def send(msg):
     sys.stdout.write(json.dumps(msg) + "\n")
     sys.stdout.flush()
+
+
+def send_tool(mid, text, is_error):
+    send({"jsonrpc": "2.0", "id": mid, "result": {
+        "content": [{"type": "text", "text": text}], "isError": is_error}})
 
 
 def main():
@@ -96,26 +150,52 @@ def main():
         elif method == "tools/call":
             p = msg.get("params") or {}
             name, a = p.get("name"), (p.get("arguments") or {})
-            content = (a.get("content") or "").strip()
-            pin = (name == "rlm_pin")
-            if not content:
-                send({"jsonrpc": "2.0", "id": mid, "result": {
-                    "content": [{"type": "text", "text": "error: empty content"}], "isError": True}})
-                continue
+
             if not C.configured():
-                send({"jsonrpc": "2.0", "id": mid, "result": {
-                    "content": [{"type": "text", "text": "error: rlm-grok.conf not configured"}], "isError": True}})
+                send_tool(mid, "error: rlm-grok.conf not configured", True)
                 continue
-            res = do_write(content, a.get("category") or "concept", pin)
-            if res.get("ok"):
-                txt = (f"{'Pinned' if pin else 'Wrote'} fact #{res.get('id')} ({res.get('action')}) "
-                       f"[{res.get('category')}]" + (" as [PRIORITY]" if res.get("pinned") else "")
-                       + f": {content[:80]}")
+
+            if name in ("rlm_pin", "rlm_remember"):
+                content = (a.get("content") or "").strip()
+                pin = (name == "rlm_pin")
+                if not content:
+                    send_tool(mid, "error: empty content", True)
+                    continue
+                res = do_write(content, a.get("category") or "concept", pin)
+                if res.get("ok"):
+                    txt = (f"{'Pinned' if pin else 'Wrote'} fact #{res.get('id')} ({res.get('action')}) "
+                           f"[{res.get('category')}]" + (" as [PRIORITY]" if res.get("pinned") else "")
+                           + f": {content[:80]}")
+                else:
+                    txt = f"write failed: {res.get('error')}"
+                log(f"tools/call {name} -> {res}")
+                send_tool(mid, txt, not res.get("ok"))
+            elif name in ("rlm_forget", "rlm_unpin"):
+                op = "forget" if name == "rlm_forget" else "unpin"
+                fid = a.get("id")
+                content = (a.get("content") or "").strip()
+                if not fid and not content:
+                    send_tool(mid, "error: provide id or content to target a fact", True)
+                    continue
+                res = do_manage(op, fid, content)
+                if res.get("ok"):
+                    if op == "forget":
+                        txt = (f"Forgot fact #{res.get('id')}"
+                               + (" (was [PRIORITY])" if res.get("was_pinned") else "")
+                               + f": {res.get('content', '')}")
+                    else:
+                        txt = ((f"Fact #{res.get('id')} was already unpinned" if res.get("already")
+                                else f"Unpinned fact #{res.get('id')}")
+                               + f": {res.get('content', '')}")
+                elif res.get("candidates"):
+                    lines = "; ".join(f"#{c['id']} {c['content']}" for c in res["candidates"])
+                    txt = f"{res.get('error')}. Candidates: {lines}"
+                else:
+                    txt = f"{op} failed: {res.get('error')}"
+                log(f"tools/call {name} -> {res}")
+                send_tool(mid, txt, not res.get("ok"))
             else:
-                txt = f"write failed: {res.get('error')}"
-            log(f"tools/call {name} -> {res}")
-            send({"jsonrpc": "2.0", "id": mid, "result": {
-                "content": [{"type": "text", "text": txt}], "isError": not res.get("ok")}})
+                send_tool(mid, f"error: unknown tool {name}", True)
         elif method == "ping":
             send({"jsonrpc": "2.0", "id": mid, "result": {}})
         elif method and method.startswith("notifications/"):

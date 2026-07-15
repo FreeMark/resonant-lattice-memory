@@ -9,6 +9,30 @@ embed_model: nomic-embed-text:latest
 ollama_endpoint_embed: http://YOUR_OLLAMA_HOST:11434
 reason_timeout: 300.0
 embed_timeout: 30.0
+memory_reason_max_concurrency: 1            # serialize reason/LLM calls into one lane
+
+# --- dream + retention -----------------------------------------------------------------------
+# The ingest driver runs per-window consolidation (fast) then ONE dream cycle post-ingest, so the
+# temporal dynamics (decay / tier promotion / prune / conflict-detect) fire once per ingest and
+# these dials are live. IMPORTANT: if the agent's recall path does NOT reinforce RLM resonance
+# (e.g. a read-only projection, as in the grok bridge), set initial_resonance ABOVE
+# promotion_resonance_threshold so durable facts can passively promote to the long tier instead of
+# decaying out before they ever get there.
+initial_resonance: 6
+promotion_resonance_threshold: 4
+decay_per_cycle: 0.5
+forget_after_dormant_cycles: 100
+max_long_facts: 5000                        # 0 = unbounded long tier
+
+# --- roadmap layers (LLM-driven; each costs reason-model calls in/after the dream) -----------
+gist_before_prune: true
+enable_self_model: true
+enable_narrative: true                      # one rolling autobiographical paragraph per ingest
+narrative_keep: 40
+# Narrative is a summarization task -> point it at a small local model to keep the reason lane
+# free. Leave both unset to reuse relation_model and its endpoint.
+narrative_model: your-relation-model
+narrative_endpoint: http://YOUR_OLLAMA_HOST:11434
 
 # Lab-scoped extraction prompt: anti-fabrication grounding + source_quote + an OPEN category rule.
 # Retarget the domain sentence to whatever this agent operates on. The category is deliberately

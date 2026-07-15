@@ -111,6 +111,46 @@ def main():
         print(f"[ingest] window {i+1:02d}/{len(windows)} sid={wsid} "
               f"turns={len(win)} born={b1-b0} facts={b1} ({time.time()-ws:.0f}s)")
 
+    # Post-ingest dream pass: ONE full Hebbian maintenance cycle over everything just ingested
+    # (tier-dwell, decay [unpinned only; pinned facts exempt], promotion, conflict detection,
+    # prune, and any enabled abstraction / gist / self-model). The per-window epochs above use
+    # suppress_dream=True (fast extract + relations); the dream runs ONCE here so the temporal
+    # dynamics fire per ingest session, not per window.
+    if windows:
+        ds = time.time()
+        try:
+            prov._run_dream_cycle(wait_lock=True)
+            print(f"[ingest] dream cycle {getattr(prov, '_dream_cycle_count', '?')} ran "
+                  f"({time.time()-ds:.0f}s)")
+        except Exception as e:
+            print(f"[ingest] dream cycle FAILED (non-fatal): {e}")
+
+    # Rolling narrative pass: ONE autobiographical paragraph over this whole ingest, so the agent
+    # wakes up with continuity. summarize_session is session-scoped and caps at ~40 episodes, so we
+    # stage the transcript under a throwaway narrative session, summarize it (narrative_model /
+    # narrative_endpoint if set, else the relation model), then delete those episodes. It runs AFTER
+    # the dream, so the staged episodes never trigger consolidation-debt. Non-fatal.
+    if turns and getattr(prov, "_enable_narrative", False):
+        nmodel = prov._config.get("narrative_model") or prov._relation_model
+        nep = prov._config.get("narrative_endpoint") or prov._ollama_endpoint_relation
+        nsid = f"{base_sid}-narrative"
+        ns = time.time()
+        try:
+            for role, text in turns:
+                store.add_episode(nsid, role, text)
+            sid = store.summarize_session(
+                nmodel, nep, nsid,
+                prompt=getattr(prov, "_narrative_prompt", None),
+                ended_cycle=prov._memory_cycle, created_cycle=prov._memory_cycle,
+                keep=getattr(prov, "_narrative_keep", 40),
+                min_episodes=getattr(prov, "_narrative_min_episodes", 2))
+            store._conn.execute("DELETE FROM episodes WHERE session_id = ?", (nsid,))
+            store._conn.commit()
+            tag = f"written #{sid}" if sid else "skipped (too thin)"
+            print(f"[ingest] narrative {tag} via {nmodel} ({time.time()-ns:.0f}s)")
+        except Exception as e:
+            print(f"[ingest] narrative FAILED (non-fatal): {e}")
+
     after_total = fact_count(store)
     print(f"\n[ingest] === DONE facts {before_total} -> {after_total}  "
           f"born={after_total-before_total}  ({time.time()-t0:.0f}s) ===")

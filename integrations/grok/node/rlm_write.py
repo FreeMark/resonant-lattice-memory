@@ -7,13 +7,15 @@ embedded, deduped/reinforced against existing facts, and provenance-tagged as a 
 (source_ref grok:direct-write) so recall can tell it apart from transcript-grounded facts.
 Prints a JSON result line.
 """
-import sys, os, json, argparse, urllib.request
+import sys, os, re, json, argparse, urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from rlm_common import build_provider  # noqa: E402
 
-VALID = {"decision", "constraint", "dial", "config", "host_topology", "model_spec",
-         "path_ref", "procedure", "eval_result", "training_run", "failed_probe", "concept"}
+
+def norm_cat(category):
+    """Open-ended label -> safe token. Categories are samples, not a closed enum."""
+    return re.sub(r"[^a-z0-9_]", "", re.sub(r"[\s-]+", "_", (category or "").strip().lower())) or "concept"
 
 
 def embed(text, endpoint, model):
@@ -33,11 +35,13 @@ def main():
     ap.add_argument("--session", default="grok-direct-write")
     args = ap.parse_args()
 
-    content = sys.stdin.read().strip()
+    # read raw bytes and decode UTF-8 explicitly, so arbitrary Unicode survives regardless of
+    # the SSH session locale (a C/POSIX locale would otherwise make sys.stdin.read() choke).
+    content = sys.stdin.buffer.read().decode("utf-8", "replace").strip()
     if not content:
         print(json.dumps({"ok": False, "error": "empty content"}))
         return
-    cat = args.category if args.category in VALID else "concept"
+    cat = norm_cat(args.category)
 
     try:
         prov = build_provider(session_id=args.session)

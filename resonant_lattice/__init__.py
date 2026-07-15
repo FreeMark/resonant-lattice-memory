@@ -19,7 +19,7 @@ and the `LatticeStore` mixins (see MODULE_MAP.md / README.md):
 
 from __future__ import annotations
 
-__version__ = "1.4.8"  # grok integration: open-ended extraction category rule in the config template (self-evident labels, natural overlap, a fixed list never excludes a fact)
+__version__ = "1.5.0"  # grok memory lifecycle complete: inverse tools (rlm_forget / rlm_unpin), post-ingest dream cycle, rolling narrative layer, plus the explicit-UTF-8 write path fix
 
 import json
 import logging

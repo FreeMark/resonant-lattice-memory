@@ -20,3 +20,10 @@ You have a **Resonant Lattice Memory (RLM)** available through grok's memory sys
   When you and the user lock a decision or a standing rule, `rlm_pin` it. Do NOT hand-edit grok's
   own memory files (a native `remember` / direct `MEMORY.md` edit is transient and gets overwritten
   by the lattice each session). The session ingest also captures whatever you clearly state.
+- **Pruning and superseding memory:** you can also curate the lattice, not just add to it.
+  `rlm_forget` prunes a fact (inverse of `rlm_remember`) and `rlm_unpin` drops a fact's `[PRIORITY]`
+  authority while keeping the fact (inverse of `rlm_pin`). Target a fact by its `content` (as shown
+  in your memory) or by its `id`; if the text is ambiguous you get candidate ids back and nothing is
+  deleted, so a destructive edit is never a fuzzy guess. To **supersede** a stale fact, `rlm_forget`
+  it and `rlm_remember` the corrected version. Edits hit the lattice immediately; your projected
+  memory reflects them next session.
