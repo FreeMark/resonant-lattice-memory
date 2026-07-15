@@ -39,19 +39,21 @@ class EntitiesMixin:
 
 
     # ====================== FAST ENTITY EXTRACTION ======================
-    @staticmethod
-    def _extract_entities(text: str) -> List[str]:
+    def _extract_entities(self, text: str) -> List[str]:
         """Entity extraction — delegates to the enhanced EntityExtractor.
 
         Primary: spaCy NER (lazy) + 14-pattern high-precision regex with
         confidence scoring, tech-vocab boosting, and compound rejection.
+        Passes the store's optional DOMAIN vocabulary (self._entity_vocabulary,
+        from config entity_vocabulary) so domain tool/config/concept names the
+        generic patterns miss (rlm_pin, relational, dream cycle) are recognized.
         Fallback (only if entity_extractor.py failed to import at startup):
         A minimal safe regex set (quoted terms + capitalized phrases).
         This keeps the store self-contained even if the companion module
         is accidentally missing, while eliminating duplicate maintenance.
         """
         if _ENTITY_EXTRACTOR_AVAILABLE and _extract_entities_fn is not None:
-            return _extract_entities_fn(text)
+            return _extract_entities_fn(text, domain_vocab=getattr(self, "_entity_vocabulary", None))
 
         # Minimal safe fallback (only reached if import failed at module load)
         seen: set = set()

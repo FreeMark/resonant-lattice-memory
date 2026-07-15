@@ -19,7 +19,7 @@ and the `LatticeStore` mixins (see MODULE_MAP.md / README.md):
 
 from __future__ import annotations
 
-__version__ = "1.6.1"  # Phase 4: relation_extract_from_transcript (default off) also mines relations from the RAW ingest window (conversational dependency/decision/usage edges the per-fact pass loses), strict-bound to control speech-fragment noise, attached to born facts + merged with per-fact relations. Builds on v1.6.0 domain-configurable relation graph.
+__version__ = "1.6.2"  # entity_vocabulary: high-precision domain allowlist (tool/config/concept names the generic patterns miss) recognized as entities -> graph nodes + survive strict relation binding; snake_case pattern widened for leading/double-underscore identifiers (_run_dream_cycle, rlm_memory__rlm_pin). Lifts strict transcript recall (grok uses rlm_pin, get_fact uses fact_history now survive) with precision held (no prose over-generation). Builds on v1.6.0/1.6.1 relation graph.
 
 import json
 import logging
@@ -375,6 +375,13 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         # driver reads this and calls store.extract_transcript_relations per window. Default off.
         self._relation_extract_from_transcript = bool(
             self._config.get("relation_extract_from_transcript", False))
+        # Domain entity vocabulary: an explicit high-precision allowlist of tool/config/
+        # concept names the generic entity patterns miss (rlm_pin, relational, dream cycle).
+        # Recognized as entities -> they become graph nodes AND survive strict relation
+        # binding. Set on the store after construction. Empty = patterns only.
+        self._entity_vocabulary = frozenset(
+            str(t).strip().lower() for t in (self._config.get("entity_vocabulary") or [])
+            if str(t).strip()) or None
         # Optional dedicated routing for the per-fact triple pass: one-sentence IE
         # that a small local model handles, freeing reason-endpoint slots during
         # finalize tails. Empty config values inherit the reason model/endpoint.
@@ -716,6 +723,9 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
             self._store = None
             self._retriever = None
             return
+        # Domain entity vocabulary onto the store (read by _extract_entities so domain
+        # tool/config/concept names are recognized as entities + graph nodes).
+        self._store._entity_vocabulary = self._entity_vocabulary
         mc, dc = self._store.get_cycle_counts()
         self._memory_cycle = mc
         self._dream_cycle_count = dc

@@ -106,9 +106,12 @@ _PATTERNS = [
     #    Paths are often referenced in technical memory about the user's setup
     (re.compile(r'((?:~|\.{1,2})?/[\w./\-_]{4,60})'), 1),
 
-    # 8. Python/package identifiers: sqlite_vec, pysqlite3, numpy, sentence_transformers
-    #    Pattern: snake_case names that are clearly library/module identifiers
-    (re.compile(r'\b([a-z][a-z0-9]*(?:_[a-z][a-z0-9]+){1,4})\b'), 1),
+    # 8. Python/package/tool/config identifiers: sqlite_vec, rlm_pin, initial_resonance,
+    #    relation_extract_llm, _run_dream_cycle, rlm_memory__rlm_pin
+    #    snake_case, now allowing an OPTIONAL leading underscore (internals) and DOUBLE
+    #    underscores (MCP-namespaced tool ids) so tool/config names are captured; scoring
+    #    (see _score_noisy_candidate) then keeps the identifier-like ones and drops prose.
+    (re.compile(r'\b(_?[a-z][a-z0-9]*(?:_{1,2}[a-z0-9]+){1,5})\b'), 1),
 
     # 9. Network endpoints: 192.0.2.10:11434, localhost:8174
     #    Captures IP:port and hostname:port patterns
@@ -240,16 +243,32 @@ def _in_vocab(token: str) -> bool:
     return bool(head) and head in vocab
 
 
-def _score_noisy_candidate(candidate: str, base: float) -> float:
+def _in_domain(token: str, domain_vocab: "frozenset") -> bool:
+    """True if the token matches a supplied DOMAIN vocabulary term (whole value, or a
+    hyphen/underscore-normalized form)."""
+    t = token.lower()
+    return bool(domain_vocab) and (
+        t in domain_vocab or t.replace("-", "_") in domain_vocab
+        or t.replace("_", "-") in domain_vocab)
+
+
+def _score_noisy_candidate(candidate: str, base: float,
+                           domain_vocab: Optional["frozenset"] = None) -> float:
     """Confidence for a hyphen/dot/snake candidate (patterns 4 & 8).
 
     Boost to high confidence when there's a real signal:
-      - the token (or its head) is a known module/package name (vocab), or
-      - it contains a digit (model/version strings: granite-4.1-30b, granite-16k), or
-      - it has internal uppercase (GitHub-Actions, faster-Whisper).
-    Otherwise it is almost certainly an ordinary English compound
-    (well-being, state-of-the-art, long-term) → push below threshold so it's dropped.
+      - the token is in the DOMAIN vocabulary (Phase B allowlist), or
+      - a LEADING or DOUBLE underscore (_run_dream_cycle, rlm_memory__rlm_pin) — an
+        unambiguous identifier shape that never occurs in prose, or
+      - the token (or its head) is a known module/package name (tech vocab), or
+      - it contains a digit (granite-4.1-30b), or has internal uppercase (faster-Whisper).
+    Otherwise it is almost certainly an ordinary English compound (well-being,
+    state-of-the-art) → push below threshold so it's dropped.
     """
+    if domain_vocab and _in_domain(candidate, domain_vocab):
+        return 0.90
+    if candidate.startswith("_") or "__" in candidate:
+        return 0.80
     if _in_vocab(candidate):
         return 0.85
     if any(ch.isdigit() for ch in candidate):
@@ -307,7 +326,7 @@ class EntityExtractor:
                 "Install with: pip install spacy && python -m spacy download en_core_web_sm"
             )
 
-    def extract(self, text: str) -> List[str]:
+    def extract(self, text: str, domain_vocab: Optional["frozenset"] = None) -> List[str]:
         """Extract named entities from text.
 
         Two layers (spaCy NER + 14-pattern regex) feed a confidence model.
@@ -377,9 +396,20 @@ class EntityExtractor:
                         _consider(candidate, base)
                 else:
                     # Noisy identifier patterns (4 hyphen/dot, 8 snake_case)
-                    if kind == "snake" and "_" in candidate and len(candidate) < 6:
+                    if kind == "snake" and "_" in candidate and len(candidate) < 6 \
+                            and not (domain_vocab and _in_domain(candidate, domain_vocab)):
                         continue  # tiny snake_case is usually a loop var (i_j, x_y)
-                    _consider(candidate, _score_noisy_candidate(candidate, base))
+                    _consider(candidate, _score_noisy_candidate(candidate, base, domain_vocab))
+
+        # ── Layer 3: DOMAIN vocabulary sweep (Phase B) ────────────────
+        # High-precision allowlist of domain terms that no generic pattern matches:
+        # single lowercase words (resonance, lattice, relational, infer, tier) and
+        # multi-word phrases (dream cycle, promotion threshold). Whole-word/phrase,
+        # case-insensitive. Explicit, so it never over-generates on prose.
+        if domain_vocab:
+            for term in domain_vocab:
+                if term and re.search(rf"(?<!\w){re.escape(term)}(?!\w)", text, re.IGNORECASE):
+                    _consider(term, 0.88)
 
         # Highest-confidence first, lowercased for consistent entity-graph keys
         return [name for name, _ in sorted(best.items(), key=lambda kv: kv[1], reverse=True)]
@@ -401,15 +431,19 @@ class EntityExtractor:
 _extractor = EntityExtractor()
 
 
-def extract_entities(text: str) -> List[str]:
+def extract_entities(text: str, domain_vocab: Optional["frozenset"] = None) -> List[str]:
     """
     Public interface — module-level function wrapping the singleton.
     Drop-in replacement for LatticeStore._extract_entities().
 
     Args:
         text: Raw fact content string.
+        domain_vocab: optional frozenset of domain terms (an explicit high-precision
+            allowlist) that boost matching identifiers and are swept whole-word from
+            the text — so single-word / multi-word domain names the generic patterns
+            miss (resonance, dream cycle, rlm_pin, relational) become entities.
 
     Returns:
         Deduplicated, lowercased list of entity strings.
     """
-    return _extractor.extract(text)
+    return _extractor.extract(text, domain_vocab=domain_vocab)

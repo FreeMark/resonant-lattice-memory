@@ -69,9 +69,17 @@ relation_examples: |
   Note: "initial_resonance was raised to 6 to clear the promotion threshold."
   -> [{"subject":"initial_resonance","relation":"set_to","object":"6"}]
   Note: "My job is to notice problems rather than paper over them." -> []
+# High-precision allowlist of DOMAIN terms the generic patterns miss (single words like
+# 'resonance'/'relational' and tool/config names like 'rlm_pin'). Recognized as entities, so they
+# become graph nodes AND survive strict relation binding. Explicit, so it never over-generates.
+entity_vocabulary:
+  [rlm_pin, rlm_remember, rlm_forget, rlm_search, rlm_relational, rlm_infer, get_fact, fact_history,
+   initial_resonance, relation_extract_llm, resonance, lattice, dream cycle, consolidation, relational, infer]
 entity_aliases:                              # unify surface forms -> one canonical node (examples)
   "the node": "build node"
   "reason-model:cloud": "reason model"
+  "rlm_memory__rlm_pin": "rlm_pin"           # MCP-namespaced tool id -> one node (per-tool)
+  "rlm-pin": "rlm_pin"
 
 # Lab-scoped extraction prompt: anti-fabrication grounding + source_quote + an OPEN category rule.
 # Retarget the domain sentence to whatever this agent operates on. The category is deliberately

@@ -285,6 +285,15 @@ CONFIG_SCHEMA = [
                     "share nodes and multi-hop chains form (relational/infer). Matched whole-value "
                     "or whole-word, case-insensitive. Empty = no aliasing.",
      "default": {}},
+    {"key": "entity_vocabulary",
+     "description": "An explicit high-precision allowlist of DOMAIN terms (a list) the generic "
+                    "entity patterns miss -- single lowercase words (resonance, lattice, relational, "
+                    "infer, tier) and tool/config names (rlm_pin, initial_resonance). Recognized as "
+                    "entities, so they become graph NODES and survive strict relation binding "
+                    "(entity_require_entity). Swept whole-word/phrase, case-insensitive; because it "
+                    "is an explicit allowlist it never over-generates on prose. Empty = patterns only. "
+                    "Pairs with entity_aliases (canonicalizes the recognized names).",
+     "default": []},
     {"key": "relation_require_entity",
      "description": "Phase-2 strict binding (default OFF). When on, a component<->component triple "
                     "is kept only if BOTH args resolve to a known entity (the fact's entities + "
