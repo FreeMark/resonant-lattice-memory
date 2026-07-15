@@ -94,11 +94,11 @@ else:
     target = os.path.join(memdir, "MEMORY.md")
 
 try:
-    r = subprocess.run(["ssh", *C.SSH_OPTS, C.SSH_HOST, f"{C.REMOTE_PY} {REMOTE} 2>/dev/null"],
-                       capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
+    r = C.run(f"{C.REMOTE_PY} {REMOTE} 2>/dev/null", timeout=30, text=True,
+              encoding="utf-8", errors="replace")     # local or ssh, per transport
     projection = (r.stdout or "").strip()
 except Exception as e:
-    log(f"export ssh error: {e} (kept existing)")
+    log(f"export error: {e} (kept existing)")
     sys.exit(0)
 if not projection or "# Project Memory" not in projection:
     log("export empty/invalid (kept existing)")

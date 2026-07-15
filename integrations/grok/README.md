@@ -32,8 +32,14 @@ this file and stand the whole thing up on a fresh grok install.
  |                                  |              |   embed model   (nomic-embed-text)    |
  | grok native memory engine        |  inject + memory_search                              |
  +----------------------------------+              +---------------------------------------+
-        connection: ~/.grok/rlm-grok.conf  (SSH_KEY / SSH_HOST / REMOTE_DIR / REMOTE_PY)
+        connection: ~/.grok/rlm-grok.conf  (RLM_DIR / RLM_PY; + SSH_HOST / SSH_KEY for a remote node)
 ```
+
+**Transport is local by default.** When grok runs on the **same machine** as the RLM instance (the
+common case, and simplest), the hooks run the node scripts **directly** - no ssh, no key. Only when
+grok is on a **different** machine than the node do you set `SSH_HOST` (+ `SSH_KEY`) and the hooks
+switch to ssh/scp. Everything below works identically either way; the `scp+ssh` / `ssh` arrows in the
+diagram are direct local calls when co-located.
 
 Three planes, one lattice:
 
@@ -104,15 +110,17 @@ ollama + the RLM package; the **client** is the machine running grok (may be the
 
 ## Prerequisites
 
-- **Node**, reachable from the client by SSH, running **ollama** with three models pulled:
+- A **node** (the machine that runs the RLM instance) with **ollama** and three models pulled. This
+  can be the **same machine grok runs on** (local, the default) or a separate box (remote, over SSH).
   - a **reason model** (extraction/consolidation) - favour quality; a mid-size local or cloud model.
   - a **relation model** (triple slot-filling) - a **small LOCAL** model (granite-class) is ideal
     and cheap; it runs once per fact/window.
   - an **embed model** - `nomic-embed-text`.
 - The **RLM package** (this repo's `resonant_lattice/`) on the node, importable by a Python that has
   its deps (`sqlite_vec`, `numpy`, `pyyaml`, and the `agent` MemoryProvider ABC). A venv is fine.
-- **grok CLI** on the client (`grok --version`).
-- An **SSH private key** on the client that can log in to the node (`ssh -i KEYPATH user@NODE true`).
+- **grok CLI** on the client machine (`grok --version`).
+- **Only for a remote node:** an **SSH private key** on the client that logs in to the node
+  (`ssh -i KEYPATH user@NODE true`). Not needed when grok and the node are the same machine.
 
 ## Part 1 - Node (the brain)
 
@@ -143,15 +151,22 @@ ollama + the RLM package; the **client** is the machine running grok (may be the
    memory engine ON (injection + `memory_search`) and grok's own writers OFF (so the store stays a
    clean RLM projection).
 2. **Connection file** - copy [`hooks/rlm-grok.conf.example`](hooks/rlm-grok.conf.example) to
-   `~/.grok/rlm-grok.conf` and fill in:
+   `~/.grok/rlm-grok.conf`. **Local (default, grok on the RLM machine)** - just the instance dir and
+   its Python, no ssh:
    ```
-   SSH_KEY=~/.ssh/your_key       # the private key that logs in to the node
-   SSH_HOST=user@NODE            # user@host (or a host your ssh config resolves)
-   REMOTE_DIR=/home/user/grok-agent-rlm
-   REMOTE_PY=/home/user/venv/bin/python3   # the RLM-package Python on the node
+   RLM_DIR=/home/user/grok-agent-rlm
+   RLM_PY=/home/user/venv/bin/python3   # the Python that imports the RLM package
    ```
-   **Every hook and the MCP server read this one file** - connection settings live here, never
-   hardcoded in a script, so an update is a plain copy of the published file.
+   **Remote node (over SSH)** - additionally set the host and key; then `RLM_DIR`/`RLM_PY` are paths
+   *on the node*:
+   ```
+   SSH_HOST=user@NODE            # setting this switches the transport to ssh/scp
+   SSH_KEY=~/.ssh/your_key
+   ```
+   Transport is chosen automatically: **no `SSH_HOST` = local**, `SSH_HOST` set = ssh. Every hook and
+   the MCP server read this one file, so switching transport is a one-line change and an update is a
+   plain copy of the published file. (`REMOTE_DIR`/`REMOTE_PY` are accepted as aliases for
+   `RLM_DIR`/`RLM_PY` for older confs.)
 3. **Hooks** - copy the config loader + hook scripts + the two hook JSONs into `~/.grok/hooks/`:
    ```bash
    cp integrations/grok/hooks/rlm_grok_conf.py        ~/.grok/hooks/
@@ -304,13 +319,19 @@ The integration, end to end:
 - **Recall reinforcement + curation** - `rlm_search` strengthens what it recalls; `rlm_feedback` is
   the soft lever between pin/forget; `initial_resonance > promotion_threshold` lets durable facts
   passively promote under a read-only projection.
+- **Local-or-remote transport** - the hooks + MCP server run the node scripts **directly** when grok
+  is on the RLM machine (default, no ssh), or over ssh/scp when `SSH_HOST` is set. Transport is
+  centralized in `rlm_grok_conf.py` (`run` / `push`), chosen by config, so nothing is hardcoded.
 - **Transform-free deploy** - every hook and the MCP server take their connection from one
   `~/.grok/rlm-grok.conf`, so updating any piece is a plain copy of the published file.
 
 # Troubleshooting
 
-- **`configured: False`** - `~/.grok/rlm-grok.conf` is missing a key (`SSH_KEY`/`SSH_HOST`/
-  `REMOTE_DIR`/`REMOTE_PY`) or the file is not at `~/.grok/rlm-grok.conf`.
+- **`configured: False`** - local mode needs `RLM_DIR` + `RLM_PY`; remote (ssh) mode additionally
+  needs `SSH_HOST` + `SSH_KEY`. Check the file is at `~/.grok/rlm-grok.conf`.
+- **Local mode: `sh: not found` / commands do nothing** - local transport uses `sh -c`, so it targets
+  a POSIX host (the normal case when grok runs on the Linux RLM node). On a Windows-only box, run the
+  node over SSH instead, or provide a POSIX `sh` (e.g. Git Bash) on PATH.
 - **MCP server errors / no tools** - run it by hand (Part 2 verify); a Python import error means the
   server can't find `rlm_grok_conf.py` (it must sit beside it in `~/.grok/hooks/`).
 - **`ModuleNotFoundError` on the node** - `REMOTE_PY` is not the Python that has the RLM package +

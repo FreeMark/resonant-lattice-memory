@@ -1,15 +1,21 @@
 # RLM<->grok connection config. Copy to ~/.grok/rlm-grok.conf and edit.
 # Read by rlm_grok_conf.py (env vars of the same name override these).
-# The grok hooks (Windows/macOS/Linux) use these to reach the RLM node over SSH.
+#
+# TRANSPORT is chosen automatically from what you set:
+#   LOCAL (default) - grok runs on the SAME machine as the RLM instance. No ssh; the hooks run the
+#                     node scripts directly. You only need RLM_DIR + RLM_PY.
+#   SSH  (optional) - grok runs on a DIFFERENT machine than the RLM node. Set SSH_HOST (+ SSH_KEY)
+#                     and the hooks reach the node over ssh/scp.
 
-# Path to the SSH private key that can log in to the RLM node.
-SSH_KEY=~/.ssh/id_ed25519
+# The RLM instance directory (holds config.yaml + the lattice db + the node scripts).
+RLM_DIR=/home/user/grok-agent-rlm
 
-# The RLM node, as user@host (or host if your ssh config resolves the user).
-SSH_HOST=user@your-node.example
+# The Python that can import the RLM package (e.g. a venv with sqlite_vec, numpy, pyyaml).
+RLM_PY=/home/user/.venv/bin/python3
 
-# The RLM instance directory on the node (holds config.yaml + lattice.db + the node scripts).
-REMOTE_DIR=/home/user/grok-agent-rlm
-
-# The Python on the node that can import the RLM package (e.g. a venv with sqlite_vec, numpy).
-REMOTE_PY=/home/user/.venv/bin/python3
+# --- Remote node over SSH (OPTIONAL) -------------------------------------------------------------
+# Uncomment + set these ONLY if grok runs on a DIFFERENT machine than the RLM node. When SSH_HOST
+# is set, RLM_DIR / RLM_PY are paths ON THE NODE and every hook uses ssh/scp. (REMOTE_DIR / REMOTE_PY
+# are still accepted as aliases for RLM_DIR / RLM_PY, for older confs.)
+#SSH_HOST=user@your-node.example
+#SSH_KEY=~/.ssh/id_ed25519

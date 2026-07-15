@@ -226,7 +226,7 @@ def do_write(content, category, pin):
     try:
         # send stdin as explicit UTF-8 bytes; text=True would use the Windows locale (cp1252)
         # and mangle non-ASCII (e.g. an em-dash -> 0x97) into invalid UTF-8 on the node.
-        r = subprocess.run(["ssh", *C.SSH_OPTS, C.SSH_HOST, cmd], input=content.encode("utf-8"),
+        r = C.run(cmd,input=content.encode("utf-8"),
                            capture_output=True, timeout=90)
         out = (r.stdout or b"").decode("utf-8", "replace").strip()
         err = (r.stderr or b"").decode("utf-8", "replace")
@@ -243,7 +243,7 @@ def do_manage(op, fid, content):
     else:
         inp = (content or "").encode("utf-8")
     try:
-        r = subprocess.run(["ssh", *C.SSH_OPTS, C.SSH_HOST, cmd], input=inp,
+        r = C.run(cmd,input=inp,
                            capture_output=True, timeout=90)
         out = (r.stdout or b"").decode("utf-8", "replace").strip()
         err = (r.stderr or b"").decode("utf-8", "replace")
@@ -261,7 +261,7 @@ def do_search(query, k, db_rel):
     db_arg = f" --db {C.REMOTE_DIR}/{db_rel}" if db_rel else ""
     cmd = f"{C.REMOTE_PY} {C.REMOTE_DIR}/rlm_search.py --k {int(k)}{db_arg}"
     try:
-        r = subprocess.run(["ssh", *C.SSH_OPTS, C.SSH_HOST, cmd], input=query.encode("utf-8"),
+        r = C.run(cmd,input=query.encode("utf-8"),
                            capture_output=True, timeout=120)
         out = (r.stdout or b"").decode("utf-8", "replace").strip()
         err = (r.stderr or b"").decode("utf-8", "replace")
@@ -273,7 +273,7 @@ def do_search(query, k, db_rel):
 def list_lattices():
     cmd = f"ls -1 {C.REMOTE_DIR}/lattices/*.db 2>/dev/null || true"
     try:
-        r = subprocess.run(["ssh", *C.SSH_OPTS, C.SSH_HOST, cmd], capture_output=True, timeout=30)
+        r = C.run(cmd,capture_output=True, timeout=30)
         out = (r.stdout or b"").decode("utf-8", "replace")
         return [os.path.basename(x)[:-3] for x in out.splitlines() if x.strip().endswith(".db")]
     except Exception:
@@ -285,7 +285,7 @@ def do_import(lattice, ids):
     cmd = (f"{C.REMOTE_PY} {C.REMOTE_DIR}/rlm_import.py "
            f"--lattice-db {C.REMOTE_DIR}/lattices/{lattice}.db --lattice-name {lattice} --ids '{ids_str}'")
     try:
-        r = subprocess.run(["ssh", *C.SSH_OPTS, C.SSH_HOST, cmd], capture_output=True, timeout=180)
+        r = C.run(cmd,capture_output=True, timeout=180)
         out = (r.stdout or b"").decode("utf-8", "replace").strip()
         err = (r.stderr or b"").decode("utf-8", "replace")
         return json.loads(out.splitlines()[-1]) if out else {"ok": False, "error": (err or "no output")[:200]}
@@ -296,7 +296,7 @@ def do_import(lattice, ids):
 def do_stats():
     cmd = f"{C.REMOTE_PY} {C.REMOTE_DIR}/rlm_stats.py"
     try:
-        r = subprocess.run(["ssh", *C.SSH_OPTS, C.SSH_HOST, cmd], capture_output=True, timeout=90)
+        r = C.run(cmd,capture_output=True, timeout=90)
         out = (r.stdout or b"").decode("utf-8", "replace").strip()
         err = (r.stderr or b"").decode("utf-8", "replace")
         return json.loads(out.splitlines()[-1]) if out else {"ok": False, "error": (err or "no output")[:200]}
@@ -313,7 +313,7 @@ def do_conflict(op, winner_id, group_id):
         if gid:
             cmd += f" --group-id {gid}"
     try:
-        r = subprocess.run(["ssh", *C.SSH_OPTS, C.SSH_HOST, cmd], capture_output=True, timeout=90)
+        r = C.run(cmd,capture_output=True, timeout=90)
         out = (r.stdout or b"").decode("utf-8", "replace").strip()
         err = (r.stderr or b"").decode("utf-8", "replace")
         return json.loads(out.splitlines()[-1]) if out else {"ok": False, "error": (err or "no output")[:200]}
@@ -324,7 +324,7 @@ def do_conflict(op, winner_id, group_id):
 def _run(cmd, inp=b"", timeout=90):
     """SSH the node command; parse its last stdout line as JSON. Shared shape for the read verbs."""
     try:
-        r = subprocess.run(["ssh", *C.SSH_OPTS, C.SSH_HOST, cmd], input=inp,
+        r = C.run(cmd,input=inp,
                            capture_output=True, timeout=timeout)
         out = (r.stdout or b"").decode("utf-8", "replace").strip()
         err = (r.stderr or b"").decode("utf-8", "replace")

@@ -23,7 +23,8 @@ if len(sys.argv) < 3:
     log("worker: missing args (snap, sid)")
     sys.exit(1)
 if not C.configured():
-    log("worker: rlm-grok.conf not configured (SSH_KEY/SSH_HOST/REMOTE_DIR/REMOTE_PY) -- snapshot kept")
+    log("worker: rlm-grok.conf not configured (need RLM_DIR + RLM_PY; add SSH_HOST/SSH_KEY for a "
+        "remote node) -- snapshot kept")
     sys.exit(1)
 
 snap, sid = sys.argv[1], sys.argv[2]
@@ -32,17 +33,16 @@ remote = f"{C.REMOTE_DIR}/incoming/{name}"
 ingest_sid = f"{sid}_{time.strftime('%H%M%S')}"
 
 try:
-    r = subprocess.run(["scp", *C.SSH_OPTS, snap, f"{C.SSH_HOST}:{remote}"],
-                       capture_output=True, text=True, timeout=120)
-    if r.returncode != 0:
-        log(f"scp FAILED rc={r.returncode}: {r.stderr[:200].strip()} (snapshot kept in queue)")
+    ok, err = C.push(snap, f"incoming/{name}")        # local copy or scp, per transport
+    if not ok:
+        log(f"ship FAILED: {err} (snapshot kept in queue)")
         sys.exit(1)
-    log(f"scp ok -> {remote}")
+    log(f"ship ok -> {remote} ({'local' if C.LOCAL else 'scp'})")
 
     cmd = (f"nohup {C.REMOTE_PY} {C.REMOTE_DIR}/rlm_ingest.py {remote} "
            f"--session-id {ingest_sid} >> {C.REMOTE_DIR}/ingest.log 2>&1 &")
-    r = subprocess.run(["ssh", *C.SSH_OPTS, C.SSH_HOST, cmd],
-                       capture_output=True, text=True, timeout=60)
-    log(f"ingest launched sid={ingest_sid} rc={r.returncode} {r.stderr[:150].strip()}")
+    r = C.run(cmd, timeout=60, text=True)             # backgrounded locally or over ssh
+    log(f"ingest launched sid={ingest_sid} ({'local' if C.LOCAL else 'ssh'}) rc={r.returncode} "
+        f"{(r.stderr or '')[:150].strip()}")
 except Exception as e:
     log(f"worker error: {e}")

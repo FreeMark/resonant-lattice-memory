@@ -19,7 +19,7 @@ and the `LatticeStore` mixins (see MODULE_MAP.md / README.md):
 
 from __future__ import annotations
 
-__version__ = "1.6.2"  # entity_vocabulary: high-precision domain allowlist (tool/config/concept names the generic patterns miss) recognized as entities -> graph nodes + survive strict relation binding; snake_case pattern widened for leading/double-underscore identifiers (_run_dream_cycle, rlm_memory__rlm_pin). Lifts strict transcript recall (grok uses rlm_pin, get_fact uses fact_history now survive) with precision held (no prose over-generation). Builds on v1.6.0/1.6.1 relation graph.
+__version__ = "1.6.3"  # grok integration: LOCAL transport is now the default (grok on the same machine as the RLM instance runs node scripts directly, no ssh); SSH is opt-in (set SSH_HOST). Transport centralized in rlm_grok_conf (run/push); hooks + MCP server no longer build ssh themselves. Back-compat (REMOTE_DIR/REMOTE_PY aliases; existing ssh confs unchanged). Builds on the v1.6.x relation graph.
 
 import json
 import logging
