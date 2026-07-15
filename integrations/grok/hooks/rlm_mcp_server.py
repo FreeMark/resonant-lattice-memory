@@ -14,7 +14,7 @@ Speaks newline-delimited JSON-RPC 2.0. Connection settings come from rlm_grok_co
   identity       : rlm_self_model (read / allowlisted-key write)
   health         : rlm_stats, rlm_conflict (list / resolve / dismiss)
 """
-import sys, os, json, re, subprocess, time
+import sys, os, json, re, subprocess, time, threading
 
 # avoid Windows \r\n corrupting the JSON-RPC framing
 try:
@@ -29,6 +29,13 @@ import rlm_grok_conf as C  # noqa: E402
 LOG = os.path.join(os.path.expanduser("~/.grok/rlm-queue"), "mcp.log")
 CATS = ("decision, constraint, dial, config, host_topology, model_spec, path_ref, "
         "procedure, eval_result, training_run, failed_probe, concept")
+
+# Concurrency: each tools/call runs in its own thread so a blocking node call (ssh or local
+# subprocess) never stalls the read loop or the other in-flight calls. Without this, a stdio
+# server processes requests SERIALLY, so one slow/hung call head-of-line-blocks a whole parallel
+# tool turn into 120s timeouts. _SEM caps simultaneous node calls; _SEND_LOCK serializes stdout.
+_SEND_LOCK = threading.Lock()
+_SEM = threading.Semaphore(6)
 
 
 def norm_cat(category):
@@ -497,8 +504,9 @@ def fmt_hits(res, source):
 
 
 def send(msg):
-    sys.stdout.write(json.dumps(msg) + "\n")
-    sys.stdout.flush()
+    with _SEND_LOCK:                       # atomic across worker threads
+        sys.stdout.write(json.dumps(msg) + "\n")
+        sys.stdout.flush()
 
 
 def send_tool(mid, text, is_error):
@@ -506,39 +514,20 @@ def send_tool(mid, text, is_error):
         "content": [{"type": "text", "text": text}], "isError": is_error}})
 
 
-def main():
-    log("mcp server started")
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            continue
+def dispatch_call(mid, name, a):
+    """Handle one tools/call in a worker thread (bounded by _SEM). Every branch ends the call with
+    send_tool; a crash is reported rather than silently killing the thread."""
+    with _SEM:
         try:
-            msg = json.loads(line)
-        except Exception:
-            continue
-        method, mid = msg.get("method"), msg.get("id")
-
-        if method == "initialize":
-            pv = (msg.get("params") or {}).get("protocolVersion") or "2025-06-18"
-            send({"jsonrpc": "2.0", "id": mid, "result": {
-                "protocolVersion": pv, "capabilities": {"tools": {}},
-                "serverInfo": {"name": "rlm-memory", "version": "1.0.0"}}})
-        elif method == "tools/list":
-            send({"jsonrpc": "2.0", "id": mid, "result": {"tools": TOOLS}})
-        elif method == "tools/call":
-            p = msg.get("params") or {}
-            name, a = p.get("name"), (p.get("arguments") or {})
-
             if not C.configured():
                 send_tool(mid, "error: rlm-grok.conf not configured", True)
-                continue
-
+                return
             if name in ("rlm_pin", "rlm_remember"):
                 content = (a.get("content") or "").strip()
                 pin = (name == "rlm_pin")
                 if not content:
                     send_tool(mid, "error: empty content", True)
-                    continue
+                    return
                 res = do_write(content, a.get("category") or "concept", pin)
                 if res.get("ok"):
                     txt = (f"{'Pinned' if pin else 'Wrote'} fact #{res.get('id')} ({res.get('action')}) "
@@ -554,7 +543,7 @@ def main():
                 content = (a.get("content") or "").strip()
                 if not fid and not content:
                     send_tool(mid, "error: provide id or content to target a fact", True)
-                    continue
+                    return
                 res = do_manage(op, fid, content)
                 if res.get("ok"):
                     if op == "forget":
@@ -576,7 +565,7 @@ def main():
                 query = (a.get("query") or "").strip()
                 if not query:
                     send_tool(mid, "error: empty query", True)
-                    continue
+                    return
                 res = do_search(query, int(a.get("k") or 8), None)
                 log(f"tools/call rlm_search -> ok={res.get('ok')} n={res.get('count')}")
                 send_tool(mid, fmt_hits(res, "your memory"), not res.get("ok"))
@@ -590,7 +579,7 @@ def main():
                            if names else
                            "no external lattices available yet (drop domain .db files in the lattices dir).")
                     send_tool(mid, txt, False)
-                    continue
+                    return
                 res = do_search(query, int(a.get("k") or 8), f"lattices/{lattice}.db")
                 log(f"tools/call external_rlm_search[{lattice}] -> ok={res.get('ok')} n={res.get('count')}")
                 send_tool(mid, fmt_hits(res, f"lattice '{lattice}'"), not res.get("ok"))
@@ -599,7 +588,7 @@ def main():
                 ids = a.get("ids") or []
                 if not lattice or not ids:
                     send_tool(mid, "error: provide lattice + ids (find ids with external_rlm_search)", True)
-                    continue
+                    return
                 res = do_import(lattice, ids)
                 if res.get("ok"):
                     imp = res.get("imported") or []
@@ -620,7 +609,7 @@ def main():
                 action = (a.get("action") or "").strip()
                 if action not in ("list", "resolve", "dismiss"):
                     send_tool(mid, "error: action must be list, resolve, or dismiss", True)
-                    continue
+                    return
                 res = do_conflict(action, a.get("id"), a.get("group_id"))
                 if res.get("ok"):
                     if action == "list":
@@ -638,7 +627,7 @@ def main():
                 fb = (a.get("feedback") or "").strip()
                 if not fid or fb not in ("helpful", "unhelpful"):
                     send_tool(mid, "error: provide id and feedback=helpful|unhelpful", True)
-                    continue
+                    return
                 res = do_feedback(fid, fb)
                 if res.get("ok"):
                     txt = (f"feedback '{fb}' on #{res.get('id')}: resonance "
@@ -654,7 +643,7 @@ def main():
                 fid = a.get("id")
                 if not fid:
                     send_tool(mid, "error: provide a fact id", True)
-                    continue
+                    return
                 res = do_inspect(fid)
                 log(f"tools/call rlm_inspect[{fid}] -> {res.get('ok')}")
                 send_tool(mid, fmt_inspect(res), not res.get("ok"))
@@ -663,7 +652,7 @@ def main():
                 fact_id = a.get("fact_id")
                 if not entity and not fact_id:
                     send_tool(mid, "error: provide entity or fact_id", True)
-                    continue
+                    return
                 res = do_entity(entity, fact_id, int(a.get("k") or 15))
                 log(f"tools/call rlm_entity -> {res.get('ok')}")
                 send_tool(mid, fmt_entity(res), not res.get("ok"))
@@ -671,10 +660,10 @@ def main():
                 op = (a.get("op") or "").strip()
                 if op not in ("get", "set"):
                     send_tool(mid, "error: op must be get or set", True)
-                    continue
+                    return
                 if op == "set" and not (a.get("key") and (a.get("value") or "").strip()):
                     send_tool(mid, "error: set requires key and value", True)
-                    continue
+                    return
                 res = do_self_model(op, a.get("key"), (a.get("value") or "").strip())
                 log(f"tools/call rlm_self_model[{op}] -> {res.get('ok')}")
                 send_tool(mid, fmt_self_model(res), not res.get("ok"))
@@ -682,7 +671,7 @@ def main():
                 query = (a.get("query") or "").strip()
                 if not query:
                     send_tool(mid, "error: provide a query (what to recall about how things connect)", True)
-                    continue
+                    return
                 res = do_relational(query, int(a.get("k") or 10))
                 log(f"tools/call rlm_relational -> ok={res.get('ok')} n={res.get('count')}")
                 send_tool(mid, fmt_relational(res), not res.get("ok"))
@@ -690,12 +679,49 @@ def main():
                 subject = (a.get("subject") or "").strip()
                 if not subject:
                     send_tool(mid, "error: provide a subject to chain from", True)
-                    continue
+                    return
                 res = do_infer(subject, a.get("object"), int(a.get("max_hops") or 2))
                 log(f"tools/call rlm_infer -> ok={res.get('ok')} n={res.get('count')}")
                 send_tool(mid, fmt_infer(res), not res.get("ok"))
             else:
                 send_tool(mid, f"error: unknown tool {name}", True)
+        except Exception as e:
+            log(f"tools/call {name} crashed: {e}")
+            try:
+                send_tool(mid, f"error: {str(e)[:200]}", True)
+            except Exception:
+                pass
+
+
+def main():
+    log("mcp server started")
+    workers = []
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            msg = json.loads(line)
+        except Exception:
+            continue
+        method, mid = msg.get("method"), msg.get("id")
+
+        if method == "initialize":
+            pv = (msg.get("params") or {}).get("protocolVersion") or "2025-06-18"
+            send({"jsonrpc": "2.0", "id": mid, "result": {
+                "protocolVersion": pv, "capabilities": {"tools": {}},
+                "serverInfo": {"name": "rlm-memory", "version": "1.0.0"}}})
+        elif method == "tools/list":
+            send({"jsonrpc": "2.0", "id": mid, "result": {"tools": TOOLS}})
+        elif method == "tools/call":
+            p = msg.get("params") or {}
+            # Dispatch in a worker thread so a blocking node call can't stall the read loop or the
+            # other in-flight calls -- parallel tool turns run concurrently, not head-of-line.
+            t = threading.Thread(target=dispatch_call,
+                                 args=(mid, p.get("name"), p.get("arguments") or {}),
+                                 daemon=True)
+            t.start()
+            workers = [w for w in workers if w.is_alive()] + [t]
         elif method == "ping":
             send({"jsonrpc": "2.0", "id": mid, "result": {}})
         elif method and method.startswith("notifications/"):
@@ -704,6 +730,10 @@ def main():
             if mid is not None:
                 send({"jsonrpc": "2.0", "id": mid,
                       "error": {"code": -32601, "message": f"method not found: {method}"}})
+    # stdin closed (session end): let any in-flight calls finish + respond before exiting.
+    for w in workers:
+        if w.is_alive():
+            w.join(timeout=125)
 
 
 if __name__ == "__main__":

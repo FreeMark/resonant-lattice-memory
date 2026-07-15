@@ -19,7 +19,7 @@ and the `LatticeStore` mixins (see MODULE_MAP.md / README.md):
 
 from __future__ import annotations
 
-__version__ = "1.6.3"  # grok integration: LOCAL transport is now the default (grok on the same machine as the RLM instance runs node scripts directly, no ssh); SSH is opt-in (set SSH_HOST). Transport centralized in rlm_grok_conf (run/push); hooks + MCP server no longer build ssh themselves. Back-compat (REMOTE_DIR/REMOTE_PY aliases; existing ssh confs unchanged). Builds on the v1.6.x relation graph.
+__version__ = "1.6.4"  # grok MCP server: concurrent dispatch. Each tools/call runs in a worker thread (bounded by a semaphore; stdout serialized by a lock), so a blocking node call no longer head-of-line-blocks a parallel tool turn -- fixes 120s timeouts when grok fires several memory tools at once. In-flight calls are joined on stdin EOF. Builds on v1.6.3 local transport.
 
 import json
 import logging
