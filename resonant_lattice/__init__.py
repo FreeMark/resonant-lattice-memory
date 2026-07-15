@@ -19,7 +19,7 @@ and the `LatticeStore` mixins (see MODULE_MAP.md / README.md):
 
 from __future__ import annotations
 
-__version__ = "1.6.4"  # grok MCP server: concurrent dispatch. Each tools/call runs in a worker thread (bounded by a semaphore; stdout serialized by a lock), so a blocking node call no longer head-of-line-blocks a parallel tool turn -- fixes 120s timeouts when grok fires several memory tools at once. In-flight calls are joined on stdin EOF. Builds on v1.6.3 local transport.
+__version__ = "1.6.5"  # grok per-turn prefetch bridge. Closes the last hermes<->grok gap: hermes recalls memory on EVERY turn (autonomous prefetch), grok only injected on first-turn + post-compaction. New UserPromptSubmit hook detaches a worker that recalls (no-reinforce) against the user's actual message and writes a <resonant_memory> block; a new rlm_prefetch MCP tool (16 total) serves it instantly and reinforces on consumption. Export reshaped into <=1400-char chunk-aligned sections so grok's own indexer injects whole topics, not fragments. Builds on v1.6.4 concurrent dispatch.
 
 import json
 import logging

@@ -27,6 +27,22 @@ ready-made preset profiles (Scholar, Sovereign Vault, Overnight, Low-VRAM, and m
 
 ## What's new
 
+- **v1.6.5 (2026-07-15): grok's per-turn prefetch.** Closes the last gap between the reference
+  in-loop agent (which recalls memory on every turn) and grok (which auto-injects only on the first
+  turn and after compaction). A new `UserPromptSubmit` hook detaches a worker that recalls against
+  the user's actual message and stages a `<resonant_memory>` block; a new `rlm_prefetch` MCP tool
+  (16 total) serves it instantly with no query to formulate, and reinforces the recalled facts only
+  when the agent actually reads it (precompute does not reinforce, use does). The projection is also
+  reshaped into chunk-aligned sections (<=1400 chars, each under its own heading) so grok's own
+  indexer injects and searches whole topics instead of headingless fragments. grok-integration only.
+- **v1.6.4 (2026-07-15): concurrent MCP dispatch.** The grok MCP server now handles each `tools/call`
+  in its own worker thread (bounded by a semaphore, with stdout serialized by a lock), so a blocking
+  node call no longer head-of-line-blocks a parallel tool turn. Fixes the 120s timeouts grok hit when
+  it fired several memory tools at once; in-flight calls are joined on stdin EOF. grok-integration only.
+- **v1.6.3 (2026-07-15): local transport by default.** The grok hooks and MCP server run the node
+  scripts directly when grok is on the RLM machine (the common case, no ssh, no key), and switch to
+  ssh/scp only when `SSH_HOST` is set. Transport is centralized in `rlm_grok_conf.py` (`run` / `push`)
+  so nothing is hardcoded and updating any piece is a plain copy of the published file. grok-integration only.
 - **v1.6.2 (2026-07-15): domain terms become entities.** A new `entity_vocabulary` config key is a
   high-precision allowlist of domain tool/config/concept names the generic entity patterns miss
   (single words like `resonance` / `relational`, and identifiers like `rlm_pin`). They are recognized

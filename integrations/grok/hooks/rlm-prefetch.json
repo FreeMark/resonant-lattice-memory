@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "C:/Python313/python.exe C:/Users/Free/.grok/hooks/rlm_prefetch_dispatch.py", "timeout": 10 }
+        ]
+      }
+    ]
+  }
+}

@@ -2,10 +2,16 @@
 
 > Installed by the RLM<->grok integration. This is NOT your `AGENTS.md` project kit; it only
 > tells grok how to use its Resonant Lattice Memory. `AGENTS.md` loads after this file and wins.
-> Copy this to your grok repo root as `AGENT.md`.
+> Copy this to your grok repo root as `AGENT.md`, or to `~/.grok/AGENT.md` to apply it globally
+> (grok loads home-level rules for every project; matches the global memory scope).
 
 You have a **Resonant Lattice Memory (RLM)** available through grok's memory system.
 
+- **Prefetch first.** `rlm_prefetch` (no arguments) returns memory recall PRECOMPUTED for the
+  CURRENT user message - instant and local. Call it FIRST at the start of any turn that touches
+  prior work, files, decisions, hosts, or concepts, before you analyze or act; it is the lattice
+  acting as a semantic lens on what the user just asked. Reading it also reinforces the recalled
+  facts, so the memories you actually use grow stronger.
 - **Search before assuming.** When you encounter an unfamiliar file, symbol, concept, host, path,
   or prior decision, call `memory_search` on it BEFORE analyzing or acting. Prior sessions have
   likely grounded it - the lattice turns exploration into an informed audit rather than a guess.

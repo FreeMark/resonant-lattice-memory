@@ -110,6 +110,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default=DEFAULT_DB)
     ap.add_argument("--k", type=int, default=8)
+    # precompute callers (the prefetch worker) recall WITHOUT reinforcing; the consumption side
+    # (rlm_prefetch serving the block) reinforces via rlm_reinforce.py, so resonance tracks USE.
+    ap.add_argument("--no-reinforce", action="store_true")
     args = ap.parse_args()
     query = sys.stdin.buffer.read().decode("utf-8", "replace").strip()
     if not query:
@@ -124,7 +127,8 @@ def main():
         # reinforce-on-read: SELF lattice only (never external), gated by config
         reinforced = 0
         is_self = os.path.abspath(args.db) == os.path.abspath(DEFAULT_DB)
-        if is_self and hits and cfg.get("reinforce_on_recall") and float(cfg.get("recall_bump", 0)) > 0:
+        if is_self and hits and not args.no_reinforce \
+                and cfg.get("reinforce_on_recall") and float(cfg.get("recall_bump", 0)) > 0:
             reinforced = reinforce(args.db, [h["id"] for h in hits], float(cfg.get("recall_bump")))
         print(json.dumps({"ok": True, "count": len(hits), "reinforced": reinforced, "hits": hits}))
     except Exception as e:

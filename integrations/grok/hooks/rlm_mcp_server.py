@@ -7,14 +7,15 @@ Speaks newline-delimited JSON-RPC 2.0. Connection settings come from rlm_grok_co
 (~/.grok/rlm-grok.conf).
 
   write / curate : rlm_remember, rlm_pin, rlm_forget, rlm_unpin
-  recall         : rlm_search (own), external_rlm_search + transfer_knowledge (domain lattices)
+  recall         : rlm_prefetch (per-turn precomputed block), rlm_search (own),
+                   external_rlm_search + transfer_knowledge (domain lattices)
   feedback       : rlm_feedback (soft resonance nudge, helpful/unhelpful)
   inspect        : rlm_inspect (one fact + its belief history), rlm_entity (entity-graph walk)
   relations      : rlm_relational (typed graph query), rlm_infer (multi-hop inference)
   identity       : rlm_self_model (read / allowlisted-key write)
   health         : rlm_stats, rlm_conflict (list / resolve / dismiss)
 """
-import sys, os, json, re, subprocess, time, threading
+import sys, os, json, re, subprocess, time, threading, hashlib
 
 # avoid Windows \r\n corrupting the JSON-RPC framing
 try:
@@ -96,6 +97,21 @@ TOOLS = [
                      "inverse of rlm_pin). Pass the fact's `id` or its `content`. Use when a standing "
                      "rule no longer applies but the fact itself is still true and worth keeping."),
      "inputSchema": _manage_schema()},
+    {"name": "rlm_prefetch",
+     "description": ("Your per-turn memory prefetch: returns the <resonant_memory> block "
+                     "PRECOMPUTED for the CURRENT user message (recall conditioned on what the "
+                     "user just said). Instant and local, no arguments needed. Call this FIRST at "
+                     "the start of any turn that touches prior work, files, decisions, hosts, or "
+                     "concepts; then use rlm_search for deeper follow-ups. Reading the block "
+                     "reinforces the recalled facts, so memories you actually use grow stronger. "
+                     "Pass `query` only to force a live recall on something other than the "
+                     "current message."),
+     "inputSchema": {"type": "object",
+                     "properties": {
+                         "query": {"type": "string",
+                                   "description": "optional: force a live recall for this text instead of serving the precomputed block"},
+                         "k": {"type": "integer", "description": "max results for a live recall (default 8)"}},
+                     "required": []}},
     {"name": "rlm_search",
      "description": ("Semantic search over YOUR OWN Resonant Lattice Memory: live hybrid vector + "
                      "keyword recall, deeper and more relevant than the top-N projection you wake up "
@@ -262,6 +278,44 @@ def do_manage(op, fid, content):
 def _latt(name):
     """Sanitize a lattice name to a safe filename token (no path traversal / shell metachars)."""
     return re.sub(r"[^A-Za-z0-9_.-]", "", (name or "")).strip(".")
+
+
+PREFETCH_DIR = os.path.join(os.path.expanduser("~/.grok/rlm-queue"), "prefetch")
+PREFETCH_FRESH_SECS = 1800  # a block older than this is a leftover, not the current turn's recall
+
+
+def _ws_hash(path):
+    """Same normalization as rlm_prefetch_dispatch.py so both sides key the same file."""
+    norm = os.path.normcase(os.path.normpath(path or "unknown")).replace("\\", "/")
+    return hashlib.sha256(norm.encode("utf-8", "replace")).hexdigest()[:12]
+
+
+def _prefetch_path(suffix=".md"):
+    """This workspace's prefetch file; falls back to the newest one (single-session normal case)."""
+    try:
+        own = os.path.join(PREFETCH_DIR, f"{_ws_hash(os.getcwd())}{suffix}")
+        if os.path.exists(own):
+            return own
+        cands = [os.path.join(PREFETCH_DIR, n) for n in os.listdir(PREFETCH_DIR)
+                 if n.endswith(suffix)]
+        return max(cands, key=os.path.getmtime) if cands else None
+    except Exception:
+        return None
+
+
+def _reinforce_async(ids_csv):
+    """Consumption-time reinforcement, fire-and-forget: the agent READ the block, so the recalled
+    facts strengthen (the precompute itself deliberately does not reinforce)."""
+    if not ids_csv:
+        return
+    def _bg():
+        try:
+            C.run(f"{C.REMOTE_PY} {C.REMOTE_DIR}/rlm_reinforce.py --ids {ids_csv}", timeout=60)
+        except Exception:
+            pass
+    # non-daemon: the interpreter waits for an in-flight bump at exit, so a session ending right
+    # after a prefetch read cannot drop the reinforcement (the thread is bounded by the 60s timeout).
+    threading.Thread(target=_bg, daemon=False).start()
 
 
 def do_search(query, k, db_rel):
@@ -561,6 +615,34 @@ def dispatch_call(mid, name, a):
                     txt = f"{op} failed: {res.get('error')}"
                 log(f"tools/call {name} -> {res}")
                 send_tool(mid, txt, not res.get("ok"))
+            elif name == "rlm_prefetch":
+                query = (a.get("query") or "").strip()
+                if query:  # explicit override: live recall, same path as rlm_search
+                    res = do_search(query, int(a.get("k") or 8), None)
+                    log(f"tools/call rlm_prefetch[live] -> ok={res.get('ok')} n={res.get('count')}")
+                    send_tool(mid, fmt_hits(res, "your memory (live recall)"), not res.get("ok"))
+                    return
+                path = _prefetch_path(".md")
+                if path and (time.time() - os.path.getmtime(path)) < PREFETCH_FRESH_SECS:
+                    text = open(path, encoding="utf-8", errors="replace").read()
+                    m = re.search(r"\bids=([\d,]+)", text)
+                    _reinforce_async(m.group(1) if m else "")
+                    age = int(time.time() - os.path.getmtime(path))
+                    body = re.sub(r"^<!--.*?-->\n", "", text, count=1).strip()
+                    log(f"tools/call rlm_prefetch -> served block age={age}s")
+                    send_tool(mid, f"(precomputed {age}s ago for the current message)\n{body}", False)
+                    return
+                # cache miss (hook not installed / worker still running / stale): fall back to a
+                # live recall on the captured prompt, mirroring hermes prefetch()'s sync path.
+                qpath = _prefetch_path(".query.txt")
+                if qpath and (time.time() - os.path.getmtime(qpath)) < PREFETCH_FRESH_SECS:
+                    q = open(qpath, encoding="utf-8", errors="replace").read().strip()
+                    res = do_search(q[:2000], 8, None) if q else {"ok": False, "error": "empty query"}
+                    log(f"tools/call rlm_prefetch[fallback] -> ok={res.get('ok')} n={res.get('count')}")
+                    send_tool(mid, fmt_hits(res, "your memory (live fallback)"), not res.get("ok"))
+                    return
+                send_tool(mid, "prefetch not primed (no fresh block; is the UserPromptSubmit hook "
+                               "installed?). Use rlm_search with an explicit query instead.", False)
             elif name == "rlm_search":
                 query = (a.get("query") or "").strip()
                 if not query:

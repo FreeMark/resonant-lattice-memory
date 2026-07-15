@@ -12,7 +12,8 @@ this file and stand the whole thing up on a fresh grok install.
 **Contents:** [Architecture](#architecture) · [Tool surface](#the-tool-surface) ·
 [Memory scope](#memory-scope-per-repo-or-global) · [**Setup**](#setup) ·
 [Config reference](#configuration-reference) · [Relation graph](#the-relation-graph) ·
-[What's implemented](#whats-implemented) · [Troubleshooting](#troubleshooting) · [Privacy](#privacy)
+[Per-turn prefetch](#per-turn-prefetch) · [What's implemented](#whats-implemented) ·
+[Troubleshooting](#troubleshooting) · [Privacy](#privacy)
 
 ## Architecture
 
@@ -25,9 +26,14 @@ this file and stand the whole thing up on a fresh grok install.
  |                                  |              |     -> facts + entities + RELATIONS   |
  | SessionStart hook  (read path)   |   ssh        |     -> dream cycle + narrative        |
  |   pull projection <--------------|<-------------|   rlm_export_memory.py   project      |
- |   write ~/.grok/memory/MEMORY.md |              |   rlm_*.py  (the 15 tool back-ends)   |
+ |   write ~/.grok/memory/MEMORY.md |              |   rlm_*.py  (the 16 tool back-ends)   |
  |                                  |              |                                       |
- | MCP server  (active tools)       |   ssh (15)   |   reason model  (extraction)          |
+ | UserPromptSubmit hook (prefetch) |   ssh        |   rlm_search.py --no-reinforce        |
+ |   -> detached worker; recall on  |------------->|     -> <resonant_memory> block        |
+ |   the user's message -> local    |              |                                       |
+ |   block; rlm_prefetch serves it  |              |                                       |
+ |                                  |              |                                       |
+ | MCP server  (active tools)       |   ssh (16)   |   reason model  (extraction)          |
  |   rlm_mcp_server.py <------------|------------->|   relation model (triple slot-fill)   |
  |                                  |              |   embed model   (nomic-embed-text)    |
  | grok native memory engine        |  inject + memory_search                              |
@@ -41,7 +47,7 @@ grok is on a **different** machine than the node do you set `SSH_HOST` (+ `SSH_K
 switch to ssh/scp. Everything below works identically either way; the `scp+ssh` / `ssh` arrows in the
 diagram are direct local calls when co-located.
 
-Three planes, one lattice:
+Four planes, one lattice:
 
 1. **Passive write (PreCompact):** compacting a session snapshots the transcript *before*
    compaction collapses it, ships it to the node, and RLM consolidates it - extracting grounded,
@@ -49,11 +55,18 @@ Three planes, one lattice:
    tier-promotion / conflict-detect) and a rolling narrative. grok does **not** fire `SessionEnd`
    on a normal exit, so the convention is: **compact before you exit**.
 2. **Passive read (SessionStart):** a hook pulls a Markdown projection of the lattice into grok's
-   native `MEMORY.md`. grok's engine indexes it and injects it first-turn (prefetch) and answers
-   `memory_search` on demand (postfetch). The projection leads with the self-model, hoists pinned
+   native `MEMORY.md`. grok's engine indexes it and injects it first-turn and answers
+   `memory_search` on demand. The projection leads with the self-model, hoists pinned
    facts into an **authority** block, quarantines unresolved conflicts into a **contested** block,
-   and ends with the recent narrative.
-3. **Active tools (MCP):** a small stdio MCP server exposes the lattice as 15 tools so the agent
+   and ends with the recent narrative. Its sections are packed to grok's chunk window (see
+   [Per-turn prefetch](#per-turn-prefetch) below) so the indexer injects whole topics, not fragments.
+3. **Per-turn prefetch (UserPromptSubmit):** grok's engine only auto-injects memory on the *first*
+   turn and after compaction; every turn in between is pull-only. This hook closes that gap. On each
+   submitted prompt it detaches a worker that recalls against the user's **actual message** and
+   writes a `<resonant_memory>` block to a local file; the `rlm_prefetch` MCP tool serves that block
+   instantly (no node round-trip). It gives grok hermes-style per-turn recall for the cost of one
+   argument-free tool call. See [Per-turn prefetch](#per-turn-prefetch).
+4. **Active tools (MCP):** a small stdio MCP server exposes the lattice as 16 tools so the agent
    can operate its memory mid-session, not just wake up with a projection.
 
 RLM is the **sole writer** of grok's memory (grok's own auto-save / dream / compaction-flush are
@@ -63,7 +76,7 @@ drop rather than guess).
 
 ## The tool surface
 
-The MCP server (`hooks/rlm_mcp_server.py`) exposes **15 tools**. Each SSHes to a node script that
+The MCP server (`hooks/rlm_mcp_server.py`) exposes **16 tools**. Each SSHes to a node script that
 runs against the agent's own lattice.
 
 | Group | Tool | What it does |
@@ -72,7 +85,8 @@ runs against the agent's own lattice.
 | | `rlm_pin` | write **and** pin as `[PRIORITY]` authority (never forgotten, surfaced first) |
 | | `rlm_forget` | prune a fact (by id or exact content; ambiguous text returns candidates, never fuzzy-deletes) |
 | | `rlm_unpin` | drop `[PRIORITY]` but keep the fact |
-| **recall** | `rlm_search` | hybrid vector + keyword search over the OWN lattice; a recall reinforces the fact |
+| **recall** | `rlm_prefetch` | serve the per-turn `<resonant_memory>` block precomputed for the current message (instant, no args); reinforces on read |
+| | `rlm_search` | hybrid vector + keyword search over the OWN lattice; a recall reinforces the fact |
 | | `external_rlm_search` | read-only search of DOMAIN lattices (reference corpora dropped in `lattices/`) |
 | | `transfer_knowledge` | import specific facts from a domain lattice by id (deduped, tagged `import:<lattice>:<id>`) |
 | **feedback** | `rlm_feedback` | soft resonance nudge (`helpful` / `unhelpful`) - steer strength without pin/forget |
@@ -167,18 +181,22 @@ ollama + the RLM package; the **client** is the machine running grok (may be the
    the MCP server read this one file, so switching transport is a one-line change and an update is a
    plain copy of the published file. (`REMOTE_DIR`/`REMOTE_PY` are accepted as aliases for
    `RLM_DIR`/`RLM_PY` for older confs.)
-3. **Hooks** - copy the config loader + hook scripts + the two hook JSONs into `~/.grok/hooks/`:
+3. **Hooks** - copy the config loader + hook scripts + the three hook JSONs into `~/.grok/hooks/`:
    ```bash
    cp integrations/grok/hooks/rlm_grok_conf.py        ~/.grok/hooks/
    cp integrations/grok/hooks/rlm_precompact_dispatch.py ~/.grok/hooks/
    cp integrations/grok/hooks/rlm_ingest_worker.py    ~/.grok/hooks/
    cp integrations/grok/hooks/rlm_sessionstart_memory.py ~/.grok/hooks/
+   cp integrations/grok/hooks/rlm_prefetch_dispatch.py ~/.grok/hooks/  # per-turn prefetch
+   cp integrations/grok/hooks/rlm_prefetch_worker.py  ~/.grok/hooks/
    cp integrations/grok/hooks/rlm-ingest.json         ~/.grok/hooks/   # PreCompact -> dispatch
    cp integrations/grok/hooks/rlm-memory.json         ~/.grok/hooks/   # SessionStart -> project
+   cp integrations/grok/hooks/rlm-prefetch.json       ~/.grok/hooks/   # UserPromptSubmit -> prefetch
    ```
    **Edit the `command` in each `*.json`** to your Python and the absolute path to the hook script
    (they are launched by grok, so use an absolute interpreter path, e.g. the system python). For
-   **global scope**, set `"env": { "RLM_MEMORY_SCOPE": "global" }` in `rlm-memory.json`.
+   **global scope**, set `"env": { "RLM_MEMORY_SCOPE": "global" }` in `rlm-memory.json`. The prefetch
+   hook needs no env; it keys its block file by the workspace path so concurrent repos don't collide.
 4. **Active MCP tools** - copy the server and register it:
    ```bash
    cp integrations/grok/hooks/rlm_mcp_server.py ~/.grok/hooks/
@@ -194,11 +212,20 @@ ollama + the RLM package; the **client** is the machine running grok (may be the
    cd ~/.grok/hooks && python -c "import rlm_grok_conf as C; print('configured:', C.configured())"
    # -> configured: True
 
-   # (b) MCP server lists 15 tools and reaches the node
+   # (b) MCP server lists 16 tools and reaches the node
    printf '%s\n%s\n' \
      '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
      '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | python ~/.grok/hooks/rlm_mcp_server.py
-   # -> a result listing 15 tools (rlm_pin ... rlm_infer)
+   # -> a result listing 16 tools (rlm_pin ... rlm_infer)
+
+   # (c) per-turn prefetch: feed a fake prompt through the hook, then serve the block
+   echo '{"sessionId":"t","cwd":"'$PWD'","workspaceRoot":"'$PWD'","prompt":"what do we know about the node setup"}' \
+     | python ~/.grok/hooks/rlm_prefetch_dispatch.py && sleep 3
+   printf '%s\n%s\n' \
+     '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+     '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"rlm_prefetch","arguments":{}}}' \
+     | python ~/.grok/hooks/rlm_mcp_server.py
+   # -> a <resonant_memory> block "precomputed Ns ago for the current message"
    ```
 
 ## Part 3 - Scope + bootstrap
@@ -297,6 +324,38 @@ and the [configurator page](https://freemark.github.io/resonant-lattice-memory/)
 and improves as the lattice does. A diagnostic, `node/rlm_triple_diag.py`, measures where triples die
 in your own corpus.
 
+# Per-turn prefetch
+
+grok's native engine auto-injects memory on the **first turn** and after **compaction** - and
+nowhere else. Every turn in between, memory is *pull-only*: it surfaces only if grok volunteers a
+`memory_search`. A reference in-loop agent (hermes) instead recalls on **every** turn, so the right
+memories arrive as a lens on what the user just said, whether or not the model thought to ask. This
+integration brings grok as close to that as its out-of-loop seams allow, in two moves:
+
+**1. The prefetch bridge (per-turn recall).** grok ignores passive-hook stdout, so a hook cannot
+inject context directly - but it *can* have side effects. On every submitted prompt, the
+`UserPromptSubmit` hook (`rlm_prefetch_dispatch.py`) detaches a worker that recalls against the
+user's **actual message** (`rlm_search.py --no-reinforce`, ~0.5-3s, no LLM) and writes a
+`<resonant_memory>` block to `~/.grok/rlm-queue/prefetch/<workspace-hash>.md`. The `rlm_prefetch`
+MCP tool then serves that block **instantly** (a local file read, no node round-trip) with no query
+for the model to formulate - its biggest failure mode. Reading the block reinforces the recalled
+facts (`rlm_reinforce.py`), so the split is honest: **precompute does not reinforce, use does**.
+Guards mirror the hermes prefetch: a trivial-ack skip (`yes`, `continue`), a same-topic overlap gate
+that reuses a fresh block instead of recomputing, and a cache-miss fallback to a live recall on the
+captured prompt. The operating rule in [`rules/AGENT.md`](rules/AGENT.md) tells grok to call
+`rlm_prefetch` **first** on any turn that touches prior work.
+
+*Why a tool call at all?* No grok seam can force context into the model mid-session (only
+`PreToolUse` may return data, and only to allow/deny a call). So the block is *staged* by the hook
+and *served* by one argument-free, instant tool call - as close to autonomous per-turn recall as the
+wrapper permits.
+
+**2. Chunk-aligned projection.** grok's indexer chunks memory files at ~1600 chars and ranks
+*chunks* for both its native injections and `memory_search`. A long category emitted as one list gets
+split mid-list into headingless fragments that rank poorly. `rlm_export_memory.py` now packs every
+section to <=1400 chars under its own heading (continuations get `(cont.)`), so each indexed chunk is
+a coherent, self-contained topic - what grok injects and finds is whole topics, not fragments.
+
 # What's implemented
 
 The integration, end to end:
@@ -306,11 +365,15 @@ The integration, end to end:
   cycle → rolling narrative; SessionStart projection with a self-model header, a pinned
   **authority** block, a **contested** (unresolved-conflict) quarantine, and the recent narrative.
   UTF-8-clean write path.
-- **15 MCP tools** - write/curate (`rlm_remember`, `rlm_pin`, `rlm_forget`, `rlm_unpin`), recall
-  (`rlm_search` with recall-reinforcement; `external_rlm_search` + `transfer_knowledge` for domain
-  lattices), feedback (`rlm_feedback`), inspect (`rlm_inspect`, `rlm_entity`), relations
-  (`rlm_relational`, `rlm_infer`), identity (`rlm_self_model`, allowlist-gated), health
-  (`rlm_stats`, `rlm_conflict`).
+- **Per-turn prefetch** - a `UserPromptSubmit` hook precomputes a `<resonant_memory>` block for the
+  current message; the `rlm_prefetch` tool serves it instantly and reinforces on read. Plus a
+  chunk-aligned projection so grok's native first-turn / post-compaction injection surfaces whole
+  topics, not fragments. Closes the last hermes<->grok recall gap the wrapper allows.
+- **16 MCP tools** - write/curate (`rlm_remember`, `rlm_pin`, `rlm_forget`, `rlm_unpin`), recall
+  (`rlm_prefetch` per-turn block; `rlm_search` with recall-reinforcement; `external_rlm_search` +
+  `transfer_knowledge` for domain lattices), feedback (`rlm_feedback`), inspect (`rlm_inspect`,
+  `rlm_entity`), relations (`rlm_relational`, `rlm_infer`), identity (`rlm_self_model`,
+  allowlist-gated), health (`rlm_stats`, `rlm_conflict`).
 - **Domain-configurable relation graph** - closed `relation_vocabulary` + constrained slot-filling
   (relations recur), `entity_aliases` node canonicalization (chains form), `entity_vocabulary`
   (domain tool/config/concept names become graph nodes and survive strict binding), and
@@ -340,6 +403,10 @@ The integration, end to end:
   scope) the repo was not bootstrapped. Check `rlm_stats.py` and `bootstrap.sh`.
 - **No relations appearing** - `enable_relations` + `relation_extract_llm` must be on and a
   `relation_vocabulary` set; run `node/rlm_triple_diag.py` to see where triples are dropped.
+- **`rlm_prefetch` says "not primed"** - the `UserPromptSubmit` hook (`rlm-prefetch.json`) is not
+  installed or has not fired yet; check `~/.grok/rlm-queue/prefetch.log` and that a `<hash>.md` block
+  exists under `~/.grok/rlm-queue/prefetch/`. Until then, `rlm_prefetch` falls back to a live recall
+  on the captured prompt; `rlm_search` with an explicit query always works.
 - **grok wrote to `MEMORY.md` itself** - grok's own writers are still on; re-check
   `grok-memory-config.toml` is merged (RLM must be the sole writer).
 
