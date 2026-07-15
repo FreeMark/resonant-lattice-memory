@@ -292,6 +292,16 @@ CONFIG_SCHEMA = [
                     "Drops fragment/pronoun noise ('/consolidation', 'mid-session') for higher "
                     "precision at some recall cost. Pairs with entity_aliases.",
      "default": False},
+    {"key": "relation_extract_from_transcript",
+     "description": "Phase-4 (default OFF): ALSO mine relations from the RAW transcript window at "
+                    "ingest, not only from consolidated facts. The transcript states conversational "
+                    "DEPENDENCY / DECISION / USAGE edges that per-fact extraction compresses away "
+                    "('grok uses rlm_pin', 'infer depends_on relational', 'set X because Y'). Forces "
+                    "STRICT entity binding to control disfluent-speech noise; each triple is attached "
+                    "to the born fact it best matches. Requires an ingest path that calls "
+                    "store.extract_transcript_relations (the grok ingest driver does); merges with, "
+                    "does not replace, per-fact relations. Adds one relation-model call per window.",
+     "default": False},
     {"key": "relation_model",
      "description": "Optional dedicated model for the per-fact LLM relation (triple) pass. "
                     "Triple extraction is single-sentence IE — a small LOCAL model handles "

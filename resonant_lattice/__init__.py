@@ -19,7 +19,7 @@ and the `LatticeStore` mixins (see MODULE_MAP.md / README.md):
 
 from __future__ import annotations
 
-__version__ = "1.6.0"  # domain-configurable relation graph: closed relation_vocabulary (constrained slot-filling, relations recur) + entity_aliases node canonicalization (chains form) -> traversable typed graph for any domain; grok gains rlm_relational + rlm_infer (15 tools). personal/operational/technical presets.
+__version__ = "1.6.1"  # Phase 4: relation_extract_from_transcript (default off) also mines relations from the RAW ingest window (conversational dependency/decision/usage edges the per-fact pass loses), strict-bound to control speech-fragment noise, attached to born facts + merged with per-fact relations. Builds on v1.6.0 domain-configurable relation graph.
 
 import json
 import logging
@@ -369,6 +369,12 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         # args are not named entities (fragment/pronoun noise). Both default off/empty.
         self._entity_aliases = self._config.get("entity_aliases") or None
         self._relation_require_entity = bool(self._config.get("relation_require_entity", False))
+        # Phase-4: also mine relations from the RAW transcript window at ingest (captures
+        # conversational dependency/decision/usage edges that per-fact extraction loses),
+        # with strict entity binding to control the higher speech-fragment noise. The ingest
+        # driver reads this and calls store.extract_transcript_relations per window. Default off.
+        self._relation_extract_from_transcript = bool(
+            self._config.get("relation_extract_from_transcript", False))
         # Optional dedicated routing for the per-fact triple pass: one-sentence IE
         # that a small local model handles, freeing reason-endpoint slots during
         # finalize tails. Empty config values inherit the reason model/endpoint.

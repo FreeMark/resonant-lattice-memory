@@ -132,6 +132,28 @@ def main():
         b1 = fact_count(store)
         print(f"[ingest] window {i+1:02d}/{len(windows)} sid={wsid} "
               f"turns={len(win)} born={b1-b0} facts={b1} ({time.time()-ws:.0f}s)")
+        # Phase-4: mine the RAW window transcript for conversational relations (dependency /
+        # decision / usage edges the per-fact pass loses), strict-bound, attached to this
+        # window's born facts. Off unless relation_extract_from_transcript + a vocabulary are set.
+        if getattr(prov, "_relation_extract_from_transcript", False) and \
+                getattr(prov, "_relation_vocabulary", None):
+            born = store._conn.execute(
+                "SELECT id, content FROM semantic_facts WHERE source_session = ?", (wsid,)).fetchall()
+            if born:
+                win_text = "\n".join(f"{role}: {t}" for role, t in win)
+                try:
+                    nrel = store.extract_transcript_relations(
+                        win_text, [(r["id"], r["content"]) for r in born],
+                        min_confidence=prov._relation_min_confidence,
+                        reason_model=prov._relation_model,
+                        ollama_endpoint=prov._ollama_endpoint_relation,
+                        vocabulary=prov._relation_vocabulary,
+                        examples=getattr(prov, "_relation_examples", None),
+                        aliases=getattr(prov, "_entity_aliases", None),
+                        llm_prompt=getattr(prov, "_relation_llm_prompt", None))
+                    print(f"[ingest]   transcript-relations +{nrel}")
+                except Exception as e:
+                    print(f"[ingest]   transcript-relations FAILED (non-fatal): {e}")
 
     # Post-ingest dream pass: ONE full Hebbian maintenance cycle over everything just ingested
     # (tier-dwell, decay [unpinned only; pinned facts exempt], promotion, conflict detection,

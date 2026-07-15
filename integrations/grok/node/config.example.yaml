@@ -59,6 +59,8 @@ enable_relations: true
 relation_extract_llm: true                  # small local model slot-fills triples per new fact
 relation_min_confidence: 0.5
 relation_require_entity: false              # strict binding drops fragment noise at a recall cost
+relation_extract_from_transcript: true      # Phase 4: ALSO mine the raw window for dependency/decision
+                                            # edges facts lose (strict-bound; +1 relation call/window)
 relation_vocabulary: [runs_on, serves, uses, set_to, produces, supersedes, depends_on, part_of]
 relation_examples: |
   Examples:

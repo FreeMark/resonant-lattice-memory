@@ -533,6 +533,57 @@ class RelationsMixin:
         triples = self._canonicalize_triples(triples, content, entities, aliases, require_entity)
         return self.store_fact_relations(fact_id, triples, min_confidence)
 
+    def extract_transcript_relations(self, text: str, candidate_facts: List[Tuple[int, str]],
+                                     min_confidence: float = 0.5,
+                                     reason_model: Optional[str] = None,
+                                     ollama_endpoint: Optional[str] = None,
+                                     vocabulary: Optional[List[str]] = None,
+                                     examples: Optional[str] = None,
+                                     aliases: Optional[Dict[str, str]] = None,
+                                     llm_prompt: Optional[str] = None) -> int:
+        """Phase-4: extract relations from a RAW TRANSCRIPT window (before consolidation compresses
+        it) and attach each to the born fact it best matches.
+
+        The transcript states conversational DEPENDENCY / DECISION / USAGE relationships that
+        per-fact extraction loses ('grok uses rlm_pin', 'infer depends_on relational', 'we set X
+        because Y'). It is also noisier (disfluent speech fragments), so this path forces STRICT
+        entity binding (require_entity=True) -- the same strict mode that is too aggressive for
+        clean facts is exactly right here, dropping fragments like 'll' / 'can' / 'make it simpler'.
+
+        ``candidate_facts`` = [(fact_id, content)] the facts BORN from this window; each triple is
+        attached to the one whose content best overlaps its subject+object (the evidence anchor +
+        the fact_relations FK target), so relations tie to a plausible source fact and de-duplicate
+        (each triple lands once, not once per born fact). Returns the count stored. Non-fatal caller
+        expected. Merges with, does not replace, the per-fact relations."""
+        if not text or not text.strip() or not candidate_facts:
+            return 0
+        entities = self._extract_entities(text)
+        triples = self.extract_triples(text, entities, vocabulary=vocabulary)
+        if reason_model and ollama_endpoint:
+            have = {(t["subject"], t["relation"], t["object"]) for t in triples}
+            for t in self._llm_extract_triples(text, reason_model, ollama_endpoint,
+                                               entities=entities, prompt=llm_prompt,
+                                               vocabulary=vocabulary, examples=examples):
+                if (t["subject"], t["relation"], t["object"]) not in have:
+                    triples.append(t)
+        triples = self._canonicalize_triples(triples, text, entities, aliases, require_entity=True)
+        if not triples:
+            return 0
+
+        def _best_fact(triple: Dict) -> int:
+            toks = set((triple["subject"] + " " + triple["object"]).lower().split())
+            best_id, best_score = candidate_facts[0][0], -1
+            for fid, content in candidate_facts:
+                score = len(toks & set((content or "").lower().split()))
+                if score > best_score:
+                    best_id, best_score = fid, score
+            return best_id
+
+        by_fact: Dict[int, List[Dict]] = {}
+        for t in triples:
+            by_fact.setdefault(_best_fact(t), []).append(t)
+        return sum(self.store_fact_relations(fid, ts, min_confidence) for fid, ts in by_fact.items())
+
     # ====================== READS (substrate / inspection) ======================
     def get_fact_relations(self, fact_id: int) -> List[Dict]:
         """All triples extracted from one fact, strongest first. Read-only."""
