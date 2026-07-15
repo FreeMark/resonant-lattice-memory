@@ -27,6 +27,32 @@ ready-made preset profiles (Scholar, Sovereign Vault, Overnight, Low-VRAM, and m
 
 ## What's new
 
+- **v1.6.2 (2026-07-15): domain terms become entities.** A new `entity_vocabulary` config key is a
+  high-precision allowlist of domain tool/config/concept names the generic entity patterns miss
+  (single words like `resonance` / `relational`, and identifiers like `rlm_pin`). They are recognized
+  as entities, so they become graph nodes and survive strict relation binding. The snake_case pattern
+  was widened for leading and double underscores (`_run_dream_cycle`, MCP-namespaced tool ids), and
+  those shapes score as unambiguous identifiers. Validated to lift strict recall (edges like
+  `grok uses rlm_pin` and `get_fact uses fact_history` now survive) with zero prose over-generation.
+  Domain-agnostic and backward-compatible (empty vocabulary = prior behaviour).
+- **v1.6.1 (2026-07-15): transcript-source relations.** `relation_extract_from_transcript` (default
+  off) also mines relations from the raw ingest window, not only from consolidated facts, capturing
+  the conversational dependency / decision / usage edges compression flattens away. Raw dialogue is
+  noisier, so this path forces strict entity binding (the mode too aggressive for clean facts is
+  exactly right for noisy transcripts); each triple attaches to the born fact it best matches and
+  merges with the per-fact relations.
+- **v1.6.0 (2026-07-15): domain-configurable relation graph.** The relation layer is fixed at the
+  core so it produces a traversable typed graph for any domain, not just the interpersonal one it
+  shipped with. A closed `relation_vocabulary` constrains both extraction paths (the LLM pass becomes
+  a validated slot-filler), so relations recur into a queryable graph instead of free-form one-offs;
+  `entity_aliases` canonicalizes surface forms into single nodes so multi-hop chains form. The grok
+  integration gains `rlm_relational` (typed graph query) and `rlm_infer` (bounded multi-hop
+  inference). Personal / operational / technical presets are documented. Backward-compatible.
+- **v1.5.4 (2026-07-15): grok's aperture batch.** Four MCP verbs round out the grok tool surface:
+  `rlm_feedback` (a soft resonance nudge between pin and forget), `rlm_inspect` (one fact plus its
+  belief history), `rlm_entity` (walk the entity graph), and `rlm_self_model` (read, or update an
+  allowlisted identity key). The projection also gains a pinned authority block and a contested
+  (unresolved-conflict) quarantine.
 - **v1.5.3 (2026-07-15): grok's read aperture widens.** Four improvements to how the grok agent
   perceives and maintains its own memory:
   - **Self-model and narrative in the projection.** The `MEMORY.md` the agent wakes up with now
