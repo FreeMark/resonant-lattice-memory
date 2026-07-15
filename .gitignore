@@ -21,3 +21,6 @@ demo_resilient_business_memory.py
 
 # test-run noise (the .md summaries + .jsonl metrics ARE committed; raw logs are not)
 results/*.log
+
+# local RLM<->grok connection config (LAN host/key stays off GitHub)
+rlm-grok.conf
