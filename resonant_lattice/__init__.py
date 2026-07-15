@@ -19,7 +19,7 @@ and the `LatticeStore` mixins (see MODULE_MAP.md / README.md):
 
 from __future__ import annotations
 
-__version__ = "1.5.1"  # grok ingest parser reads the ACP session-update transcript format (was silently parsing 0 turns from the new format, so consolidation/dream/narrative never ran on real conversation)
+__version__ = "1.5.2"  # grok cross-lattice knowledge: rlm_search (self), external_rlm_search (read-only domain lattices, auto-discovered), transfer_knowledge (import external facts into own lattice, provenance-tagged)
 
 import json
 import logging

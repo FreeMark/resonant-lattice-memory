@@ -83,6 +83,39 @@ TOOLS = [
                      "inverse of rlm_pin). Pass the fact's `id` or its `content`. Use when a standing "
                      "rule no longer applies but the fact itself is still true and worth keeping."),
      "inputSchema": _manage_schema()},
+    {"name": "rlm_search",
+     "description": ("Semantic search over YOUR OWN Resonant Lattice Memory: live hybrid vector + "
+                     "keyword recall, deeper and more relevant than the top-N projection you wake up "
+                     "with. Read-only. Returns ranked facts with ids, categories, and relevance "
+                     "scores. Use it to recall precisely on a topic instead of scanning the projection."),
+     "inputSchema": {"type": "object",
+                     "properties": {
+                         "query": {"type": "string", "description": "what to recall"},
+                         "k": {"type": "integer", "description": "max results (default 8)"}},
+                     "required": ["query"]}},
+    {"name": "external_rlm_search",
+     "description": ("Search an EXTERNAL domain lattice: read-only reference knowledge from another "
+                     "trained corpus (e.g. a web-dev fact base). Call with no query (or lattice='list') "
+                     "to see which domain lattices are available, then search a named one. These are "
+                     "reference corpora, NOT your own memory; results are labeled by source lattice."),
+     "inputSchema": {"type": "object",
+                     "properties": {
+                         "query": {"type": "string", "description": "what to look up (omit to just list lattices)"},
+                         "lattice": {"type": "string", "description": "domain lattice name, or 'list' to see available"},
+                         "k": {"type": "integer", "description": "max results (default 8)"}},
+                     "required": []}},
+    {"name": "transfer_knowledge",
+     "description": ("Import specific facts from an external domain lattice INTO your own memory, by "
+                     "id. Find ids with external_rlm_search first, then transfer the ones worth "
+                     "keeping. Each import is deduped against what you already know and tagged with its "
+                     "source (import:<lattice>:<id>), so borrowed knowledge stays distinct from what "
+                     "you learned firsthand. Facts start unpinned; pin later if one earns it."),
+     "inputSchema": {"type": "object",
+                     "properties": {
+                         "lattice": {"type": "string", "description": "source domain lattice name"},
+                         "ids": {"type": "array", "items": {"type": "integer"},
+                                 "description": "fact ids to import (from an external_rlm_search result)"}},
+                     "required": ["lattice", "ids"]}},
 ]
 
 
@@ -116,6 +149,60 @@ def do_manage(op, fid, content):
         return json.loads(out.splitlines()[-1]) if out else {"ok": False, "error": (err or "no output")[:200]}
     except Exception as e:
         return {"ok": False, "error": str(e)[:200]}
+
+
+def _latt(name):
+    """Sanitize a lattice name to a safe filename token (no path traversal / shell metachars)."""
+    return re.sub(r"[^A-Za-z0-9_.-]", "", (name or "")).strip(".")
+
+
+def do_search(query, k, db_rel):
+    db_arg = f" --db {C.REMOTE_DIR}/{db_rel}" if db_rel else ""
+    cmd = f"{C.REMOTE_PY} {C.REMOTE_DIR}/rlm_search.py --k {int(k)}{db_arg}"
+    try:
+        r = subprocess.run(["ssh", *C.SSH_OPTS, C.SSH_HOST, cmd], input=query.encode("utf-8"),
+                           capture_output=True, timeout=120)
+        out = (r.stdout or b"").decode("utf-8", "replace").strip()
+        err = (r.stderr or b"").decode("utf-8", "replace")
+        return json.loads(out.splitlines()[-1]) if out else {"ok": False, "error": (err or "no output")[:200]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+
+
+def list_lattices():
+    cmd = f"ls -1 {C.REMOTE_DIR}/lattices/*.db 2>/dev/null || true"
+    try:
+        r = subprocess.run(["ssh", *C.SSH_OPTS, C.SSH_HOST, cmd], capture_output=True, timeout=30)
+        out = (r.stdout or b"").decode("utf-8", "replace")
+        return [os.path.basename(x)[:-3] for x in out.splitlines() if x.strip().endswith(".db")]
+    except Exception:
+        return []
+
+
+def do_import(lattice, ids):
+    ids_str = ",".join(str(int(i)) for i in ids if str(i).lstrip("-").isdigit())
+    cmd = (f"{C.REMOTE_PY} {C.REMOTE_DIR}/rlm_import.py "
+           f"--lattice-db {C.REMOTE_DIR}/lattices/{lattice}.db --lattice-name {lattice} --ids '{ids_str}'")
+    try:
+        r = subprocess.run(["ssh", *C.SSH_OPTS, C.SSH_HOST, cmd], capture_output=True, timeout=180)
+        out = (r.stdout or b"").decode("utf-8", "replace").strip()
+        err = (r.stderr or b"").decode("utf-8", "replace")
+        return json.loads(out.splitlines()[-1]) if out else {"ok": False, "error": (err or "no output")[:200]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+
+
+def fmt_hits(res, source):
+    if not res.get("ok"):
+        return f"search failed: {res.get('error')}"
+    hits = res.get("hits") or []
+    if not hits:
+        return f"no results in {source}"
+    lines = [f"{len(hits)} results from {source}:"]
+    for h in hits:
+        pin = " [PRIORITY]" if h.get("pinned") else ""
+        lines.append(f"  #{h.get('id')} [{h.get('category')}] (score {h.get('score')}){pin}: {h.get('content', '')}")
+    return "\n".join(lines)
 
 
 def send(msg):
@@ -193,6 +280,46 @@ def main():
                 else:
                     txt = f"{op} failed: {res.get('error')}"
                 log(f"tools/call {name} -> {res}")
+                send_tool(mid, txt, not res.get("ok"))
+            elif name == "rlm_search":
+                query = (a.get("query") or "").strip()
+                if not query:
+                    send_tool(mid, "error: empty query", True)
+                    continue
+                res = do_search(query, int(a.get("k") or 8), None)
+                log(f"tools/call rlm_search -> ok={res.get('ok')} n={res.get('count')}")
+                send_tool(mid, fmt_hits(res, "your memory"), not res.get("ok"))
+            elif name == "external_rlm_search":
+                lattice = _latt(a.get("lattice"))
+                query = (a.get("query") or "").strip()
+                if not query or lattice in ("", "list"):
+                    names = list_lattices()
+                    txt = (("available external lattices: " + ", ".join(names)
+                            + ". Call external_rlm_search with lattice=<name> and a query.")
+                           if names else
+                           "no external lattices available yet (drop domain .db files in the lattices dir).")
+                    send_tool(mid, txt, False)
+                    continue
+                res = do_search(query, int(a.get("k") or 8), f"lattices/{lattice}.db")
+                log(f"tools/call external_rlm_search[{lattice}] -> ok={res.get('ok')} n={res.get('count')}")
+                send_tool(mid, fmt_hits(res, f"lattice '{lattice}'"), not res.get("ok"))
+            elif name == "transfer_knowledge":
+                lattice = _latt(a.get("lattice"))
+                ids = a.get("ids") or []
+                if not lattice or not ids:
+                    send_tool(mid, "error: provide lattice + ids (find ids with external_rlm_search)", True)
+                    continue
+                res = do_import(lattice, ids)
+                if res.get("ok"):
+                    imp = res.get("imported") or []
+                    added = sum(1 for x in imp if x.get("status") == "added")
+                    reinf = sum(1 for x in imp if "reinforced" in str(x.get("status")))
+                    miss = sum(1 for x in imp if x.get("status") == "not_found")
+                    txt = (f"imported {added} new, reinforced {reinf} existing"
+                           + (f", {miss} not found" if miss else "") + f" from '{lattice}'")
+                else:
+                    txt = f"transfer failed: {res.get('error')}"
+                log(f"tools/call transfer_knowledge[{lattice}] -> {res.get('ok')}")
                 send_tool(mid, txt, not res.get("ok"))
             else:
                 send_tool(mid, f"error: unknown tool {name}", True)

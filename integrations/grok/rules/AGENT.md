@@ -27,3 +27,12 @@ You have a **Resonant Lattice Memory (RLM)** available through grok's memory sys
   deleted, so a destructive edit is never a fuzzy guess. To **supersede** a stale fact, `rlm_forget`
   it and `rlm_remember` the corrected version. Edits hit the lattice immediately; your projected
   memory reflects them next session.
+- **Searching memory:** `rlm_search` runs a live semantic search over your OWN lattice (hybrid
+  vector + keyword), deeper and more relevant than the projection you wake up with. Use it to recall
+  precisely on a topic rather than scanning the injected top-N.
+- **External knowledge:** `external_rlm_search` searches read-only DOMAIN lattices (reference corpora
+  from other trained agents). Call it with no query (or `lattice='list'`) to see what is available,
+  then search a named one. These are references, not your memory, and you can never modify them.
+  `transfer_knowledge` imports specific facts from a domain lattice into your own memory by id (find
+  ids with `external_rlm_search` first). Imports are deduped and tagged `import:<lattice>:<id>` so
+  borrowed knowledge stays distinct from what you learned firsthand.

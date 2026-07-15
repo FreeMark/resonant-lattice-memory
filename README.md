@@ -27,6 +27,20 @@ ready-made preset profiles (Scholar, Sovereign Vault, Overnight, Low-VRAM, and m
 
 ## What's new
 
+- **v1.5.2 (2026-07-15): grok can search its own memory and read external domain lattices.** Three
+  new MCP tools extend the grok integration's read side:
+  - **`rlm_search`** runs a live hybrid (vector + keyword) search over the agent's *own* lattice,
+    which is deeper and more relevant than the static top-N projection it wakes up with.
+  - **`external_rlm_search`** searches read-only *domain* lattices (reference corpora from other
+    trained agents) dropped into a node-side folder beside the agent's own DB. Lattices are
+    auto-discovered by filename (no registry), so calling it with `lattice='list'` returns whatever
+    is available. External lattices are opened read-only and can never be modified.
+  - **`transfer_knowledge`** imports selected facts from a domain lattice into the agent's own memory
+    by id (deduped against existing knowledge, provenance-tagged `import:<lattice>:<id>` so borrowed
+    knowledge stays distinct from what the agent learned firsthand).
+
+  All three share one read-only search primitive; every lattice using the same embedder is directly
+  searchable with no re-embedding.
 - **v1.5.1 (2026-07-15): grok ingest reads the current transcript format.** The grok ingest parser
   was still reading the old flat `type` / `role` / `content` transcript shape, but grok now writes an
   ACP (Agent Client Protocol) session-update stream (the message text is nested under
