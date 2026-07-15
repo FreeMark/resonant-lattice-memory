@@ -19,7 +19,7 @@ and the `LatticeStore` mixins (see MODULE_MAP.md / README.md):
 
 from __future__ import annotations
 
-__version__ = "1.5.4"  # grok aperture batch: rlm_feedback (soft resonance nudge), rlm_inspect (fact + history), rlm_entity (entity-graph walk), rlm_self_model (allowlisted identity write), and authority/quarantine sections in the projection
+__version__ = "1.6.0"  # domain-configurable relation graph: closed relation_vocabulary (constrained slot-filling, relations recur) + entity_aliases node canonicalization (chains form) -> traversable typed graph for any domain; grok gains rlm_relational + rlm_infer (15 tools). personal/operational/technical presets.
 
 import json
 import logging
@@ -345,6 +345,30 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         self._relation_extract_llm = bool(self._config.get("relation_extract_llm", DEFAULTS["relation_extract_llm"]))
         self._relation_prompt = self._config.get(
             "relation_prompt", DEFAULTS.get("relation_prompt", DEFAULT_RELATION_PROMPT))
+        # A closed relation vocabulary for THIS agent's domain (e.g. operational:
+        # runs_on/serves/uses/set_to/... ; technical: uses/requires/returns/... ;
+        # personal: works_at/lives_in/prefers/...). When set, BOTH extraction paths
+        # are constrained to it: the deterministic path drops out-of-vocab is_a/has
+        # noise, and the LLM pass becomes a validated slot-filler whose relations
+        # therefore RECUR (a traversable graph) instead of being free-form one-offs.
+        # Empty = legacy free-form behaviour. relation_examples are optional domain
+        # few-shots appended to the built prompt. See config_schema for presets.
+        self._relation_vocabulary = self._config.get("relation_vocabulary") or None
+        self._relation_examples = self._config.get("relation_examples") or None
+        # Effective LLM prompt: when a vocabulary is set and the user has NOT explicitly
+        # overridden relation_prompt, pass None so _llm_extract_triples BUILDS the
+        # schema-constrained prompt from the vocabulary (the generic default would
+        # otherwise win and defeat the vocabulary). An explicit relation_prompt always wins.
+        _relation_prompt_overridden = "relation_prompt" in self._config
+        self._relation_llm_prompt = (
+            None if (self._relation_vocabulary and not _relation_prompt_overridden)
+            else self._relation_prompt)
+        # Phase-2 entity binding: entity_aliases unifies surface forms to ONE canonical
+        # node (e.g. '46'/'.46'/'node' -> 'node .46') so triples share nodes and chains
+        # form; relation_require_entity (strict) drops component<->component triples whose
+        # args are not named entities (fragment/pronoun noise). Both default off/empty.
+        self._entity_aliases = self._config.get("entity_aliases") or None
+        self._relation_require_entity = bool(self._config.get("relation_require_entity", False))
         # Optional dedicated routing for the per-fact triple pass: one-sentence IE
         # that a small local model handles, freeing reason-endpoint slots during
         # finalize tails. Empty config values inherit the reason model/endpoint.

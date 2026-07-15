@@ -183,10 +183,27 @@ def _resolve_arg(span: str, ent_set: set, side: str) -> Tuple[Optional[str], boo
     return " ".join(tokens), False
 
 
+def _canon_term(term: Optional[str], amap: dict) -> Optional[str]:
+    """Map a QUERY term to its canonical node via the alias map (whole-value or whole-word
+    match), so the query side matches the aliased stored graph (asking about 'the node' finds
+    'node .46'). Returns the term unchanged when no alias applies. Mirrors the storage-side
+    canonicalization in _canonicalize_triples."""
+    if not term or not amap:
+        return term
+    low = term.strip().lower()
+    if low in amap:
+        return amap[low]
+    for surf, canonical in amap.items():
+        if re.search(rf"\b{re.escape(surf)}\b", low):
+            return canonical
+    return term
+
+
 class RelationsMixin:
 
     # ====================== TRIPLE EXTRACTION ======================
-    def extract_triples(self, content: str, entities: Optional[List[str]] = None) -> List[Dict]:
+    def extract_triples(self, content: str, entities: Optional[List[str]] = None,
+                        vocabulary: Optional[List[str]] = None) -> List[Dict]:
         """Deterministic, entity-grounded (s, relation, o) extraction from content.
 
         LLM-free. Applies the relation lexicon high-priority-first with span-claiming
@@ -194,6 +211,13 @@ class RelationsMixin:
         is_a). Returns a list of {subject, relation, object, confidence} dicts,
         deduped and capped. Confidence reflects entity grounding; the caller gates
         on relation_min_confidence. Read-only / pure — does not touch the DB.
+
+        When ``vocabulary`` is given (a closed relation set for the agent's domain),
+        only patterns whose relation is IN the vocabulary are applied — so a domain
+        that supplies ["uses","part_of","runs_on",...] keeps the deterministic
+        uses/part_of matches but drops the generic is_a/has noise (the
+        "grok is_a bottleneck" / "memory has tidied" misparses). Empty/None = legacy
+        behaviour (all patterns).
         """
         if not content or not content.strip():
             return []
@@ -204,12 +228,15 @@ class RelationsMixin:
             except Exception:
                 entities = []
         ent_set = {e.lower() for e in (entities or []) if e}
+        vocab_set = {v.strip().lower() for v in vocabulary if v and v.strip()} if vocabulary else None
 
         claimed: List[Tuple[int, int]] = []
         seen: set = set()
         out: List[Dict] = []
 
         for pattern, relation, base in _REL_PATTERNS:
+            if vocab_set is not None and relation not in vocab_set:
+                continue  # domain denoise: skip patterns outside the closed vocabulary
             for m in pattern.finditer(text):
                 # Claim only the VERB region (between subject and object), not the
                 # whole match: this blocks the generic is_a from re-parsing a span a
@@ -247,16 +274,52 @@ class RelationsMixin:
                     return out
         return out
 
+    @staticmethod
+    def _build_relation_prompt(vocabulary: List[str], examples: Optional[str]) -> str:
+        """Schema-constrained slot-filling prompt built from a closed relation vocabulary.
+
+        Turns triple extraction from open generation ("invent a snake_case relation")
+        into classification ("pick a relation from THIS list, name real things, or
+        return []") — the task a small local model does reliably. Optional domain
+        ``examples`` are appended verbatim (few-shot). Validated at scale to yield a
+        near-100%-canonical, recurring relation set."""
+        vocab_line = ", ".join(vocabulary)
+        ex = ("\n" + examples) if examples else ""
+        return (
+            "You are building a KNOWLEDGE GRAPH of how a system is put together, from the note "
+            "below. Extract ONLY relationships between NAMED things (components, machines, models, "
+            "services, tools, settings, files, versions, people, places).\n"
+            f"Use ONLY these relation types (choose the closest; if none fit, omit the triple): "
+            f"{vocab_line}.\n"
+            "Rules:\n"
+            "- subject and object must be NAMED things copied from the text. NEVER use pronouns, "
+            "whole sentences, feelings, or vague nouns ('it', 'this', 'the system', 'my job').\n"
+            "- If the note has no two named things in one of these relations (it is introspection, "
+            "a plan, or a feeling), return [].\n"
+            "- Only what is literally stated; never infer.\n"
+            'Output ONLY a JSON array of {"subject","relation","object"} with relation from the '
+            f"list, or [].{ex}"
+        )
+
     def _llm_extract_triples(self, content: str, reason_model: str,
                              ollama_endpoint: str,
                              entities: Optional[List[str]] = None,
-                             prompt: Optional[str] = None) -> List[Dict]:
+                             prompt: Optional[str] = None,
+                             vocabulary: Optional[List[str]] = None,
+                             examples: Optional[str] = None) -> List[Dict]:
         """Optional LLM augmentation (default OFF). Conservative + non-fatal.
 
         Asks the reasoning model for explicit (subject, relation, object) triples,
         then runs each through the SAME grounding/normalization as the deterministic
         path so the LLM cannot inject ungrounded long spans. Returns [] on any error
         (network, parse) so a failed pass never blocks consolidation.
+
+        When ``vocabulary`` is given, the prompt is a schema-constrained slot-filler
+        over that closed set (unless an explicit ``prompt`` overrides it) AND every
+        extracted relation is validated to be IN the vocabulary — off-list relations
+        (the free-form run-on noise a generic prompt produces) are dropped. This is
+        what makes relations RECUR (a traversable graph) instead of each being a
+        one-off. Empty/None vocabulary = legacy free-form behaviour.
         """
         if not content or not content.strip():
             return []
@@ -266,13 +329,19 @@ class RelationsMixin:
             except Exception:
                 entities = []
         ent_set = {e.lower() for e in (entities or []) if e}
+        vocab_set = {v.strip().lower() for v in vocabulary if v and v.strip()} if vocabulary else None
 
-        base_prompt = prompt or (
-            "Extract explicit (subject, relation, object) triples STATED in the text "
-            "below. Only facts literally present — never infer or add world knowledge. "
-            "relation is a short snake_case verb phrase. Output ONLY a JSON array of "
-            'objects with keys "subject", "relation", "object", or [] if none.'
-        )
+        if prompt:
+            base_prompt = prompt                       # explicit override wins
+        elif vocab_set:
+            base_prompt = self._build_relation_prompt(list(vocabulary), examples)
+        else:
+            base_prompt = (
+                "Extract explicit (subject, relation, object) triples STATED in the text "
+                "below. Only facts literally present — never infer or add world knowledge. "
+                "relation is a short snake_case verb phrase. Output ONLY a JSON array of "
+                'objects with keys "subject", "relation", "object", or [] if none.'
+            )
         final_prompt = f"{base_prompt}\n\nTEXT:\n{content}\n\nJSON OUTPUT:"
         try:
             payload = {"model": reason_model, "prompt": final_prompt,
@@ -305,6 +374,8 @@ class RelationsMixin:
             relation = re.sub(r"[^a-z_]+", "_", rel_raw.strip().lower()).strip("_")
             if not relation:
                 continue
+            if vocab_set is not None and relation not in vocab_set:
+                continue  # drop off-vocabulary relations (the free-form one-off noise)
             subj, subj_g = _resolve_arg(str(item.get("subject", "")), ent_set, "subj")
             obj, obj_g = _resolve_arg(str(item.get("object", "")), ent_set, "obj")
             if not subj or not obj or subj == obj:
@@ -368,26 +439,98 @@ class RelationsMixin:
             self._conn.commit()
             return cur.rowcount or 0
 
+    # Relations whose OBJECT is a value/attribute (a number, a flag, a path), not a
+    # graph node — so the object is NOT required to resolve to a known entity.
+    _ATTRIBUTE_RELATIONS = frozenset({"set_to", "produces"})
+
+    def _canonicalize_triples(self, triples: List[Dict], content: str,
+                              entities: Optional[List[str]],
+                              aliases: Optional[Dict[str, str]],
+                              require_entity: bool) -> List[Dict]:
+        """Phase-2 entity binding: unify node names to canonical forms and (optionally)
+        drop triples whose graph args are not named entities.
+
+        - ``aliases`` maps a surface form to its canonical node (e.g. '46' / '.46' /
+          'node' -> 'node .46'; 'nemotron-3-super:cloud' -> 'nemotron'). Applied to
+          subject and object after extraction, so the SAME real thing becomes ONE
+          node — which is what lets triples share nodes and chains form. Keys are
+          matched case-insensitively, as a whole value OR a whole-word substring.
+        - ``require_entity`` (strict binding): a component<->component triple is kept
+          only if BOTH args resolve to a known entity (from the fact's entity set +
+          the alias canonicals); attribute relations (set_to/produces) exempt the
+          object. Drops fragment/pronoun noise ('/consolidation', 'mid-session') at
+          the cost of some recall. Re-dedups after aliasing. Pure; no DB access."""
+        if not aliases and not require_entity:
+            return triples
+        amap = {str(k).strip().lower(): str(v).strip() for k, v in (aliases or {}).items() if k and v}
+
+        def canon(arg: str) -> str:
+            a = (arg or "").strip()
+            low = a.lower()
+            if low in amap:
+                return amap[low]
+            for surf, canonical in amap.items():           # whole-word alias inside the span
+                if re.search(rf"\b{re.escape(surf)}\b", low):
+                    return canonical
+            return a
+
+        for t in triples:
+            t["subject"] = canon(t["subject"])
+            t["object"] = canon(t["object"])
+
+        if require_entity:
+            ent = {e.strip().lower() for e in (entities if entities is not None
+                                               else self._extract_entities(content)) if e}
+            ent |= {v.strip().lower() for v in amap.values()}       # alias canonicals count as entities
+
+            def grounded(arg: str) -> bool:
+                a = (arg or "").strip().lower()
+                return bool(a) and (a in ent or any(
+                    e == a or re.search(rf"\b{re.escape(e)}\b", a) for e in ent))
+            triples = [t for t in triples if grounded(t["subject"]) and (
+                t["relation"] in self._ATTRIBUTE_RELATIONS or grounded(t["object"]))]
+
+        seen, out = set(), []                              # re-dedup (aliasing can merge)
+        for t in triples:
+            k = (t["subject"], t["relation"], t["object"])
+            if t["subject"] and t["object"] and t["subject"] != t["object"] and k not in seen:
+                seen.add(k)
+                out.append(t)
+        return out
+
     def extract_and_store_relations(self, fact_id: int, content: str,
                                     entities: Optional[List[str]] = None,
                                     min_confidence: float = 0.5,
                                     reason_model: Optional[str] = None,
                                     ollama_endpoint: Optional[str] = None,
                                     use_llm: bool = False,
-                                    llm_prompt: Optional[str] = None) -> int:
+                                    llm_prompt: Optional[str] = None,
+                                    vocabulary: Optional[List[str]] = None,
+                                    examples: Optional[str] = None,
+                                    aliases: Optional[Dict[str, str]] = None,
+                                    require_entity: bool = False) -> int:
         """Extract triples from a fact's content and persist the confident ones.
 
         Deterministic extraction always runs; the optional LLM pass (use_llm) only
         runs when a model + endpoint are supplied, and its triples are merged
         (deterministic taking precedence on a key collision). Returns inserted count.
+
+        ``vocabulary`` (a closed relation set for the agent's domain) constrains BOTH
+        paths to relations in the set: the deterministic path drops out-of-vocab
+        patterns (is_a/has noise) and the LLM path becomes a validated slot-filler.
+        ``examples`` are domain few-shots for the LLM prompt. ``aliases`` +
+        ``require_entity`` are the Phase-2 entity-binding step (node canonicalization
+        + optional strict grounding). All default None/off (legacy behaviour).
         """
-        triples = self.extract_triples(content, entities)
+        triples = self.extract_triples(content, entities, vocabulary=vocabulary)
         if use_llm and reason_model and ollama_endpoint:
             have = {(t["subject"], t["relation"], t["object"]) for t in triples}
             for t in self._llm_extract_triples(content, reason_model, ollama_endpoint,
-                                               entities=entities, prompt=llm_prompt):
+                                               entities=entities, prompt=llm_prompt,
+                                               vocabulary=vocabulary, examples=examples):
                 if (t["subject"], t["relation"], t["object"]) not in have:
                     triples.append(t)
+        triples = self._canonicalize_triples(triples, content, entities, aliases, require_entity)
         return self.store_fact_relations(fact_id, triples, min_confidence)
 
     # ====================== READS (substrate / inspection) ======================
@@ -454,7 +597,8 @@ class RelationsMixin:
                           max_results: int = 10,
                           min_confidence: float = 0.0,
                           hrr_floor: float = 0.4,
-                          include_superseded: bool = False) -> List[Dict]:
+                          include_superseded: bool = False,
+                          aliases: Optional[Dict[str, str]] = None) -> List[Dict]:
         """Answer a relational query over the triple graph (Phase 5b).
 
         Two complementary passes, ranked together:
@@ -474,14 +618,17 @@ class RelationsMixin:
         if query and not (subject or relation or object or anchors):
             relation, anchors = self._parse_relational_query(query)
 
+        # Canonicalize the QUERY side through the same alias map as the stored graph, so a
+        # query term ('node', 'the node') resolves to the stored canonical node ('node .46').
+        amap = {str(k).strip().lower(): str(v).strip() for k, v in (aliases or {}).items() if k and v}
         slots = {}
         if subject:
-            slots["subject"] = subject.strip().lower()
+            slots["subject"] = _canon_term(subject.strip().lower(), amap)
         if relation:
             slots["relation"] = relation.strip().lower()
         if object:
-            slots["object"] = object.strip().lower()
-        anchor_set = {a.strip().lower() for a in (anchors or []) if a and a.strip()}
+            slots["object"] = _canon_term(object.strip().lower(), amap)
+        anchor_set = {_canon_term(a.strip().lower(), amap) for a in (anchors or []) if a and a.strip()}
         if not slots and not anchor_set:
             return []
 
@@ -604,7 +751,8 @@ class RelationsMixin:
     def infer_relations(self, subject: str, object: Optional[str] = None,
                         max_hops: int = 2, min_confidence: float = 0.0,
                         hop_decay: float = 0.6, max_results: int = 10,
-                        include_superseded: bool = False) -> List[Dict]:
+                        include_superseded: bool = False,
+                        aliases: Optional[Dict[str, str]] = None) -> List[Dict]:
         """Bounded transitive inference over the triple graph (Phase 5c).
 
         Chains stored triples forward from `subject` (a→r1→b→r2→c …) up to
@@ -631,13 +779,16 @@ class RelationsMixin:
         returned. Cycles are prevented (a node is never revisited within a path);
         fanout and result count are bounded. Superseded history is excluded by default.
         """
-        start = subject.strip().lower() if subject else None
+        # Canonicalize the query endpoints through the alias map so 'the node' chains
+        # from the stored 'node .46' (mirrors the storage + relational_recall side).
+        amap = {str(k).strip().lower(): str(v).strip() for k, v in (aliases or {}).items() if k and v}
+        start = _canon_term(subject.strip().lower(), amap) if subject else None
         if not start:
             return []
         # Floor at 1 (not 2): max_hops=1 is the explicit "no multi-hop" setting and
         # returns [] because the loop below only emits paths of length ≥ 2.
         max_hops = max(1, int(max_hops))
-        target = object.strip().lower() if object else None
+        target = _canon_term(object.strip().lower(), amap) if object else None
 
         def _out_edges(node: str) -> List[Dict]:
             where = ["r.subject = ?", "r.confidence >= ?"]

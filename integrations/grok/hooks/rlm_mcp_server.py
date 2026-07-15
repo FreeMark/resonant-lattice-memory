@@ -10,6 +10,7 @@ Speaks newline-delimited JSON-RPC 2.0. Connection settings come from rlm_grok_co
   recall         : rlm_search (own), external_rlm_search + transfer_knowledge (domain lattices)
   feedback       : rlm_feedback (soft resonance nudge, helpful/unhelpful)
   inspect        : rlm_inspect (one fact + its belief history), rlm_entity (entity-graph walk)
+  relations      : rlm_relational (typed graph query), rlm_infer (multi-hop inference)
   identity       : rlm_self_model (read / allowlisted-key write)
   health         : rlm_stats, rlm_conflict (list / resolve / dismiss)
 """
@@ -188,6 +189,34 @@ TOOLS = [
                          "key": {"type": "string", "description": "identity key (e.g. role, mandate, current_focus)"},
                          "value": {"type": "string", "description": "the value to record (for set)"}},
                      "required": ["op"]}},
+    {"name": "rlm_relational",
+     "description": ("Query your OWN relation graph: how NAMED things in your system connect "
+                     "(subject -relation-> object), built from typed operational relations "
+                     "(runs_on, serves, uses, set_to, depends_on, part_of, ...). Ask a free-text "
+                     "question ('what runs on the node', 'how is granite connected', 'what does "
+                     "rlm_forget use') and it returns exact graph edges plus fuzzy near-matches, "
+                     "each with the source fact. Typed and directed, unlike rlm_entity's untyped "
+                     "co-occurrence. The graph is a fallible secondary substrate - grounded, not "
+                     "gospel; it may be sparse on a topic."),
+     "inputSchema": {"type": "object",
+                     "properties": {
+                         "query": {"type": "string", "description": "what to recall about how things connect"},
+                         "k": {"type": "integer", "description": "max results (default 10)"}},
+                     "required": ["query"]}},
+    {"name": "rlm_infer",
+     "description": ("Multi-hop inference over your OWN relation graph: chains typed edges from a "
+                     "'subject' (a->b->c) and returns DERIVED connections with the full supporting "
+                     "path and a confidence that decays per hop (e.g. the node serves granite + "
+                     "granite runs the narrative => the narrative depends on the node). Inferences "
+                     "are HYPOTHESES, always weaker than a stored fact and never saved. Optional "
+                     "'object' filters to chains ending there. Returns nothing where the graph "
+                     "doesn't link named things - that is normal for a sparse graph."),
+     "inputSchema": {"type": "object",
+                     "properties": {
+                         "subject": {"type": "string", "description": "the named thing to chain outward from"},
+                         "object": {"type": "string", "description": "optional: only chains ending at this thing"},
+                         "max_hops": {"type": "integer", "description": "max path length in edges (default 2)"}},
+                     "required": ["subject"]}},
 ]
 
 
@@ -396,6 +425,54 @@ def fmt_self_model(res):
     return "\n".join(f"- {m.get('key')}: {m.get('value')}" for m in model)
 
 
+def do_relational(query, k):
+    return _run(f"{C.REMOTE_PY} {C.REMOTE_DIR}/rlm_relational.py --k {int(k)}",
+                inp=(query or "").encode("utf-8"))
+
+
+def _arg(v):
+    """Sanitize an entity/value argument to shell-safe chars for a single-quoted cmd token."""
+    return re.sub(r"[^A-Za-z0-9 ._:/@-]", "", (v or "")).strip()
+
+
+def do_infer(subject, obj, hops):
+    cmd = f"{C.REMOTE_PY} {C.REMOTE_DIR}/rlm_infer.py --max-hops {int(hops)}"
+    o = _arg(obj)
+    if o:
+        cmd += f" --object '{o}'"
+    return _run(cmd, inp=(subject or "").encode("utf-8"))
+
+
+def fmt_relational(res):
+    if not res.get("ok"):
+        return f"relational failed: {res.get('error')}"
+    rs = res.get("results") or []
+    if not rs:
+        return "no relational matches (the relation graph may be sparse on this topic)"
+    lines = [f"{len(rs)} relational match(es):"]
+    for r in rs:
+        tag = "exact" if r.get("match") == "graph" else f"~{r.get('score')}"
+        lines.append(f"  ({r.get('subject')} -{r.get('relation')}-> {r.get('object')}) "
+                     f"[{tag}] from #{r.get('fact_id')}")
+    return "\n".join(lines)
+
+
+def fmt_infer(res):
+    if not res.get("ok"):
+        return f"infer failed: {res.get('error')}"
+    infs = res.get("inferences") or []
+    if not infs:
+        return "no multi-hop connections found (chains form only where the graph links named things)"
+    lines = [f"{len(infs)} inferred connection(s) - derived hypotheses, weaker than stored facts:"]
+    for i in infs:
+        rel = i.get("relation") or "connected_to"
+        path = " -> ".join(f"{e.get('subject')} -{e.get('relation')}-> {e.get('object')}"
+                           for e in (i.get("path") or []))
+        lines.append(f"  {i.get('subject')} ~{rel}~> {i.get('object')} "
+                     f"(conf {i.get('confidence')}, {i.get('hops')} hops): {path}")
+    return "\n".join(lines)
+
+
 def fmt_stats(res):
     if not res.get("ok"):
         return f"stats failed: {res.get('error')}"
@@ -601,6 +678,22 @@ def main():
                 res = do_self_model(op, a.get("key"), (a.get("value") or "").strip())
                 log(f"tools/call rlm_self_model[{op}] -> {res.get('ok')}")
                 send_tool(mid, fmt_self_model(res), not res.get("ok"))
+            elif name == "rlm_relational":
+                query = (a.get("query") or "").strip()
+                if not query:
+                    send_tool(mid, "error: provide a query (what to recall about how things connect)", True)
+                    continue
+                res = do_relational(query, int(a.get("k") or 10))
+                log(f"tools/call rlm_relational -> ok={res.get('ok')} n={res.get('count')}")
+                send_tool(mid, fmt_relational(res), not res.get("ok"))
+            elif name == "rlm_infer":
+                subject = (a.get("subject") or "").strip()
+                if not subject:
+                    send_tool(mid, "error: provide a subject to chain from", True)
+                    continue
+                res = do_infer(subject, a.get("object"), int(a.get("max_hops") or 2))
+                log(f"tools/call rlm_infer -> ok={res.get('ok')} n={res.get('count')}")
+                send_tool(mid, fmt_infer(res), not res.get("ok"))
             else:
                 send_tool(mid, f"error: unknown tool {name}", True)
         elif method == "ping":

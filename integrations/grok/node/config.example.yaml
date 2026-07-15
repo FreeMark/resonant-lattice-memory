@@ -47,6 +47,30 @@ narrative_keep: 40
 narrative_model: your-relation-model
 narrative_endpoint: http://YOUR_OLLAMA_HOST:11434
 
+# --- relation graph: domain vocabulary + entity binding (optional) ----------------------------
+# A CLOSED relation_vocabulary makes triples RECUR into a traversable graph (vs free-form one-offs
+# that never match), and entity_aliases unify surface forms into ONE node so multi-hop chains form
+# (relational / infer). Match the vocabulary to the domain -- personal: works_at/lives_in/prefers/
+# part_of/named ; operational: runs_on/serves/uses/set_to/produces/depends_on/part_of/supersedes ;
+# technical: uses/requires/returns/extends/configures/implements/part_of. Leave relation_vocabulary
+# empty for legacy free-form behaviour. The graph is a FALLIBLE secondary substrate (~2/3 precise
+# from a small local model on dense prose) -- grounded, not gospel; ongoing ingest keeps it fresh.
+enable_relations: true
+relation_extract_llm: true                  # small local model slot-fills triples per new fact
+relation_min_confidence: 0.5
+relation_require_entity: false              # strict binding drops fragment noise at a recall cost
+relation_vocabulary: [runs_on, serves, uses, set_to, produces, supersedes, depends_on, part_of]
+relation_examples: |
+  Examples:
+  Note: "The build node serves the reason model plus a local triple model."
+  -> [{"subject":"build node","relation":"serves","object":"reason model"},{"subject":"build node","relation":"serves","object":"triple model"}]
+  Note: "initial_resonance was raised to 6 to clear the promotion threshold."
+  -> [{"subject":"initial_resonance","relation":"set_to","object":"6"}]
+  Note: "My job is to notice problems rather than paper over them." -> []
+entity_aliases:                              # unify surface forms -> one canonical node (examples)
+  "the node": "build node"
+  "reason-model:cloud": "reason model"
+
 # Lab-scoped extraction prompt: anti-fabrication grounding + source_quote + an OPEN category rule.
 # Retarget the domain sentence to whatever this agent operates on. The category is deliberately
 # open-ended (self-evident labels, natural overlap) so a fixed list never excludes a fact by chance.

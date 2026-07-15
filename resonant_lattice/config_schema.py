@@ -258,6 +258,40 @@ CONFIG_SCHEMA = [
                     "OFF; only when enable_relations is on). LLM triples run through the "
                     "same grounding + confidence gate. Adds an Ollama call per new fact.",
      "default": False},
+    {"key": "relation_vocabulary",
+     "description": "A CLOSED relation vocabulary for this agent's DOMAIN (a list, e.g. "
+                    "['runs_on','serves','uses','set_to','produces','supersedes','depends_on',"
+                    "'part_of']). When set, BOTH extraction paths are constrained to it: the "
+                    "deterministic path drops out-of-vocab is_a/has noise, and the LLM pass "
+                    "becomes a validated slot-filler whose relations therefore RECUR (a "
+                    "traversable graph) instead of being free-form one-offs. Match the vocab to "
+                    "the domain -- personal memory: works_at/lives_in/prefers/part_of/named; "
+                    "operational: runs_on/serves/uses/set_to/produces/depends_on/part_of/"
+                    "supersedes; technical reference: uses/requires/returns/extends/configures/"
+                    "implements/part_of. Empty = legacy free-form behaviour (one-off relations).",
+     "default": []},
+    {"key": "relation_examples",
+     "description": "Optional domain few-shot examples appended to the built relation prompt "
+                    "when relation_vocabulary is set and relation_prompt is not overridden. A "
+                    "short block of 'Note: ... -> [triples]' lines (include one that maps to [] "
+                    "for a non-relational note) sharpens a small local model's slot-filling. "
+                    "Empty = vocabulary-only prompt.",
+     "default": ""},
+    {"key": "entity_aliases",
+     "description": "Phase-2 node canonicalization: a map of surface form -> canonical node "
+                    "(e.g. {'46':'node .46', '.46':'node .46', 'nemotron-3-super:cloud':"
+                    "'nemotron'}). Applied to triple subjects/objects after extraction so the "
+                    "SAME real thing collapses to ONE graph node -- which is what lets triples "
+                    "share nodes and multi-hop chains form (relational/infer). Matched whole-value "
+                    "or whole-word, case-insensitive. Empty = no aliasing.",
+     "default": {}},
+    {"key": "relation_require_entity",
+     "description": "Phase-2 strict binding (default OFF). When on, a component<->component triple "
+                    "is kept only if BOTH args resolve to a known entity (the fact's entities + "
+                    "alias canonicals); attribute relations (set_to/produces) exempt the object. "
+                    "Drops fragment/pronoun noise ('/consolidation', 'mid-session') for higher "
+                    "precision at some recall cost. Pairs with entity_aliases.",
+     "default": False},
     {"key": "relation_model",
      "description": "Optional dedicated model for the per-fact LLM relation (triple) pass. "
                     "Triple extraction is single-sentence IE — a small LOCAL model handles "

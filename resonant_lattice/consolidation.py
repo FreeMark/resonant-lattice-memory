@@ -869,7 +869,11 @@ class ConsolidationMixin:
                 reason_model=self._relation_model,
                 ollama_endpoint=self._ollama_endpoint_relation,
                 use_llm=self._relation_extract_llm,
-                llm_prompt=self._relation_prompt,
+                llm_prompt=getattr(self, "_relation_llm_prompt", self._relation_prompt),
+                vocabulary=getattr(self, "_relation_vocabulary", None),
+                examples=getattr(self, "_relation_examples", None),
+                aliases=getattr(self, "_entity_aliases", None),
+                require_entity=getattr(self, "_relation_require_entity", False),
             )
         except Exception as e:
             logger.debug("Relation extraction failed (non-fatal): %s", e)
