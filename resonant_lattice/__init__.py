@@ -19,7 +19,7 @@ and the `LatticeStore` mixins (see MODULE_MAP.md / README.md):
 
 from __future__ import annotations
 
-__version__ = "1.5.3"  # grok aperture: self-model + narrative in the projection, reinforce-on-recall for rlm_search (use drives promotion), and rlm_stats / rlm_conflict MCP tools
+__version__ = "1.5.4"  # grok aperture batch: rlm_feedback (soft resonance nudge), rlm_inspect (fact + history), rlm_entity (entity-graph walk), rlm_self_model (allowlisted identity write), and authority/quarantine sections in the projection
 
 import json
 import logging

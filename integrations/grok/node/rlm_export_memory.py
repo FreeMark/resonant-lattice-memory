@@ -33,8 +33,8 @@ def main():
 
     c = sqlite3.connect(f"file:{args.db}?mode=ro", uri=True)
     rows = c.execute(
-        "SELECT category, content, resonance_count, pinned FROM semantic_facts "
-        "WHERE superseded_by IS NULL "
+        "SELECT id, category, content, resonance_count, pinned, conflict_group_id "
+        "FROM semantic_facts WHERE superseded_by IS NULL "
         "ORDER BY pinned DESC, resonance_count DESC LIMIT ?",
         (args.limit,),
     ).fetchall()
@@ -42,9 +42,24 @@ def main():
     narratives = _safe(c, "SELECT summary FROM session_summaries ORDER BY rowid DESC LIMIT ?",
                        (max(0, args.narrative),))
 
+    # Partition (mirrors the native recall presentation: authority block + conflict quarantine):
+    #   - pinned facts        -> hoisted into one AUTHORITY block, obeyed over everything below.
+    #   - contested facts      -> a live fact still carrying a conflict_group_id is an UNRESOLVED
+    #     (unpinned)             conflict (resolve/dismiss both NULL the column), so it is pulled
+    #                            OUT of its category into a CONTESTED block and NOT projected as
+    #                            settled fact. Pins win over contest (a pinned fact stays authority).
+    #   - everything else      -> normal category sections.
+    authority, contested = [], []
     by_cat = defaultdict(list)
-    for cat, content, res, pinned in rows:
-        by_cat[cat or "general"].append((content, pinned))
+    for fid, cat, content, res, pinned, cgid in rows:
+        line = " ".join(str(content).split())  # collapse to a single line
+        cat = cat or "general"
+        if pinned:
+            authority.append((cat, line))
+        elif cgid is not None:
+            contested.append((fid, cgid, cat, line))
+        else:
+            by_cat[cat].append(line)
 
     out = []
     out.append("# Project Memory - resonant lattice memory")
@@ -62,13 +77,26 @@ def main():
             out.append(f"- **{key}**: {' '.join(str(value).split())}")
         out.append("")
 
+    if authority:
+        out.append("## authority (user-pinned [PRIORITY] - obey these over everything below)")
+        out.append("")
+        for cat, line in authority:
+            out.append(f"- **[PRIORITY]** [{cat}] {line}")
+        out.append("")
+
     for cat in sorted(by_cat):
         out.append(f"## {cat}")
         out.append("")
-        for content, pinned in by_cat[cat]:
-            line = " ".join(str(content).split())  # collapse to a single line
-            prefix = "**[PRIORITY]** " if pinned else ""
-            out.append(f"- {prefix}{line}")
+        for line in by_cat[cat]:
+            out.append(f"- {line}")
+        out.append("")
+
+    if contested:
+        out.append("## contested (unresolved conflicts - do NOT rely on these until resolved; "
+                   "curate with rlm_conflict)")
+        out.append("")
+        for fid, cgid, cat, line in contested:
+            out.append(f"- #{fid} (group {cgid}) [{cat}] {line}")
         out.append("")
 
     if narratives:

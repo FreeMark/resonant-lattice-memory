@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-"""RLM memory-write MCP server (stdio, dependency-free).
+"""RLM memory MCP server (stdio, dependency-free).
 
-Exposes two tools so grok can durably write to the Resonant Lattice Memory:
-  - rlm_pin      : write a fact/decision AND pin it as [PRIORITY] authority (never forgotten)
-  - rlm_remember : write a durable fact (not pinned)
-Each call SSHes to the node's rlm_write.py, which embeds + dedups + provenance-tags the fact
-(source grok:direct-write) so the lattice stays clean. Speaks newline-delimited JSON-RPC 2.0.
-Connection settings come from rlm_grok_conf (~/.grok/rlm-grok.conf).
+Exposes grok's Resonant Lattice Memory as tools. Each call SSHes to a node script that runs
+against the agent's own lattice (embed + dedup + provenance on writes, read-only for the rest).
+Speaks newline-delimited JSON-RPC 2.0. Connection settings come from rlm_grok_conf
+(~/.grok/rlm-grok.conf).
+
+  write / curate : rlm_remember, rlm_pin, rlm_forget, rlm_unpin
+  recall         : rlm_search (own), external_rlm_search + transfer_knowledge (domain lattices)
+  feedback       : rlm_feedback (soft resonance nudge, helpful/unhelpful)
+  inspect        : rlm_inspect (one fact + its belief history), rlm_entity (entity-graph walk)
+  identity       : rlm_self_model (read / allowlisted-key write)
+  health         : rlm_stats, rlm_conflict (list / resolve / dismiss)
 """
 import sys, os, json, re, subprocess, time
 
@@ -134,6 +139,55 @@ TOOLS = [
                          "id": {"type": "integer", "description": "winner fact id (for resolve)"},
                          "group_id": {"type": "string", "description": "conflict group id (for dismiss)"}},
                      "required": ["action"]}},
+    {"name": "rlm_feedback",
+     "description": ("Give soft usefulness feedback on a fact in your OWN lattice - the gentle "
+                     "counterpart to pin/forget. feedback='helpful' nudges its resonance up (so it "
+                     "rises toward long-term); feedback='unhelpful' lowers it so a stale or wrong "
+                     "fact FADES toward dormancy (recoverable, not deleted). Resonance-only: it never "
+                     "changes the pin bit, so a [PRIORITY] fact keeps its protection. Use it to steer "
+                     "which memories strengthen without the hard levers of pinning or forgetting."),
+     "inputSchema": {"type": "object",
+                     "properties": {
+                         "id": {"type": "integer", "description": "the fact id to give feedback on"},
+                         "feedback": {"type": "string", "enum": ["helpful", "unhelpful"],
+                                      "description": "helpful raises resonance; unhelpful lowers it (fades toward dormancy)"}},
+                     "required": ["id", "feedback"]}},
+    {"name": "rlm_inspect",
+     "description": ("Inspect ONE fact in full by id (read-only): its content, category, tier, "
+                     "resonance, pin state, source, and any conflict group, PLUS its belief history - "
+                     "the chain of facts that superseded it and the predecessors it replaced. Use "
+                     "after a search or conflict listing hands you an id and you want the whole story "
+                     "of that memory, not just the fuzzy content match."),
+     "inputSchema": {"type": "object",
+                     "properties": {
+                         "id": {"type": "integer", "description": "the fact id to inspect"}},
+                     "required": ["id"]}},
+    {"name": "rlm_entity",
+     "description": ("Walk your OWN entity graph (read-only), complementary to rlm_search. Give an "
+                     "'entity' name to get the facts linked to it (ranked by resonance) plus the "
+                     "entities that co-occur with it - 'everything I know about X, and what's "
+                     "connected to X'. Or give a 'fact_id' to list the entities on that one fact. "
+                     "Graph traversal, not semantic similarity."),
+     "inputSchema": {"type": "object",
+                     "properties": {
+                         "entity": {"type": "string", "description": "entity name to walk (facts about it + neighbours)"},
+                         "fact_id": {"type": "integer", "description": "instead, list the entities on this fact"},
+                         "k": {"type": "integer", "description": "max facts/neighbours (default 15)"}},
+                     "required": []}},
+    {"name": "rlm_self_model",
+     "description": ("Read or carefully update your self-model (identity) - the curated, "
+                     "authoritative record of who you are that is surfaced deterministically at "
+                     "session start. op='get' reads one key (or the whole model if no key). op='set' "
+                     "upserts one key; only a small allowlist of keys is writable (e.g. role, "
+                     "relationship_with_user, mandate, current_focus) so identity core does not drift "
+                     "session to session - an off-list key is rejected with the allowed set. Use "
+                     "deliberately, as you would pin a standing decision, not for passing moods."),
+     "inputSchema": {"type": "object",
+                     "properties": {
+                         "op": {"type": "string", "enum": ["get", "set"], "description": "get | set"},
+                         "key": {"type": "string", "description": "identity key (e.g. role, mandate, current_focus)"},
+                         "value": {"type": "string", "description": "the value to record (for set)"}},
+                     "required": ["op"]}},
 ]
 
 
@@ -236,6 +290,110 @@ def do_conflict(op, winner_id, group_id):
         return json.loads(out.splitlines()[-1]) if out else {"ok": False, "error": (err or "no output")[:200]}
     except Exception as e:
         return {"ok": False, "error": str(e)[:200]}
+
+
+def _run(cmd, inp=b"", timeout=90):
+    """SSH the node command; parse its last stdout line as JSON. Shared shape for the read verbs."""
+    try:
+        r = subprocess.run(["ssh", *C.SSH_OPTS, C.SSH_HOST, cmd], input=inp,
+                           capture_output=True, timeout=timeout)
+        out = (r.stdout or b"").decode("utf-8", "replace").strip()
+        err = (r.stderr or b"").decode("utf-8", "replace")
+        return json.loads(out.splitlines()[-1]) if out else {"ok": False, "error": (err or "no output")[:200]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+
+
+def do_feedback(fid, fb):
+    cmd = f"{C.REMOTE_PY} {C.REMOTE_DIR}/rlm_feedback.py --id {int(fid)} --fb {fb}"
+    return _run(cmd)
+
+
+def do_inspect(fid):
+    return _run(f"{C.REMOTE_PY} {C.REMOTE_DIR}/rlm_inspect.py --id {int(fid)}")
+
+
+def do_entity(entity, fact_id, k):
+    if fact_id:
+        return _run(f"{C.REMOTE_PY} {C.REMOTE_DIR}/rlm_entity.py --fact-id {int(fact_id)}")
+    return _run(f"{C.REMOTE_PY} {C.REMOTE_DIR}/rlm_entity.py --k {int(k)}",
+                inp=(entity or "").encode("utf-8"))
+
+
+def _key(k):
+    """Sanitize a self-model key to a shell-safe identifier token."""
+    return re.sub(r"[^a-z0-9_]", "", (k or "").strip().lower())
+
+
+def do_self_model(op, key, value):
+    cmd = f"{C.REMOTE_PY} {C.REMOTE_DIR}/rlm_self_model.py --op {op}"
+    sk = _key(key)
+    if sk:
+        cmd += f" --key {sk}"
+    inp = value.encode("utf-8") if (op == "set" and value) else b""
+    return _run(cmd, inp=inp)
+
+
+def fmt_inspect(res):
+    if not res.get("ok"):
+        return f"inspect failed: {res.get('error')}"
+    f = res.get("fact") or {}
+    pin = " [PRIORITY]" if f.get("pinned") else ""
+    cg = f" [CONFLICT {f.get('conflict_group_id')}]" if f.get("conflict_group_id") else ""
+    lines = [f"#{f.get('id')} [{f.get('category')}] tier={f.get('tier')} "
+             f"resonance={f.get('resonance_count')}{pin}{cg}",
+             f"  content: {f.get('content', '')}"]
+    if f.get("source_ref"):
+        lines.append(f"  source_ref: {f.get('source_ref')}")
+    lines.append(f"  learned_cycle={f.get('learned_at_cycle')} "
+                 f"last_confirmed={f.get('last_confirmed_cycle')}")
+    chain = res.get("superseded_by_chain") or []
+    if chain:
+        lines.append("  superseded by: " + " -> ".join(f"#{r.get('id')} {r.get('content','')[:50]}"
+                                                        for r in chain))
+    replaced = res.get("replaced") or []
+    if replaced:
+        lines.append("  replaced (predecessors): "
+                     + "; ".join(f"#{r.get('id')} {r.get('content','')[:50]}" for r in replaced))
+    return "\n".join(lines)
+
+
+def fmt_entity(res):
+    if not res.get("ok"):
+        return f"entity walk failed: {res.get('error')}"
+    if res.get("mode") == "fact":
+        ents = res.get("entities") or []
+        return (f"fact #{res.get('fact_id')} entities: " + ", ".join(ents)) if ents \
+            else f"fact #{res.get('fact_id')} has no linked entities"
+    facts = res.get("facts") or []
+    related = res.get("related") or []
+    lines = [f"entity '{res.get('entity')}': {len(facts)} fact(s)"]
+    for h in facts:
+        pin = " [PRIORITY]" if h.get("pinned") else ""
+        lines.append(f"  #{h.get('id')} [{h.get('category')}] (res {h.get('resonance_count')}){pin}: "
+                     f"{h.get('content', '')}")
+    if related:
+        lines.append("neighbours: "
+                     + ", ".join(f"{r.get('entity')} ({r.get('shared_facts')})" for r in related))
+    return "\n".join(lines)
+
+
+def fmt_self_model(res):
+    if not res.get("ok"):
+        err = f"self-model {res.get('op', '')} failed: {res.get('error')}"
+        if res.get("allowed"):
+            err += ". Writable keys: " + ", ".join(res["allowed"])
+        return err
+    if res.get("op") == "set":
+        return f"self-model updated: {res.get('key')} = {res.get('value')}"
+    model = res.get("model")
+    if model is None:
+        return f"no self-model entry for '{res.get('key')}'"
+    if isinstance(model, dict):
+        return f"{model.get('key')}: {model.get('value')}"
+    if not model:
+        return "self-model is empty"
+    return "\n".join(f"- {m.get('key')}: {m.get('value')}" for m in model)
 
 
 def fmt_stats(res):
@@ -398,6 +556,51 @@ def main():
                     txt = f"conflict {action} failed: {res.get('error')}"
                 log(f"tools/call rlm_conflict[{action}] -> {res.get('ok')}")
                 send_tool(mid, txt, not res.get("ok"))
+            elif name == "rlm_feedback":
+                fid = a.get("id")
+                fb = (a.get("feedback") or "").strip()
+                if not fid or fb not in ("helpful", "unhelpful"):
+                    send_tool(mid, "error: provide id and feedback=helpful|unhelpful", True)
+                    continue
+                res = do_feedback(fid, fb)
+                if res.get("ok"):
+                    txt = (f"feedback '{fb}' on #{res.get('id')}: resonance "
+                           f"{res.get('resonance_before')} -> {res.get('resonance_after')} "
+                           f"(delta {res.get('delta')})")
+                    if res.get("note"):
+                        txt += f". {res['note']}"
+                else:
+                    txt = f"feedback failed: {res.get('error')}"
+                log(f"tools/call rlm_feedback -> {res.get('ok')}")
+                send_tool(mid, txt, not res.get("ok"))
+            elif name == "rlm_inspect":
+                fid = a.get("id")
+                if not fid:
+                    send_tool(mid, "error: provide a fact id", True)
+                    continue
+                res = do_inspect(fid)
+                log(f"tools/call rlm_inspect[{fid}] -> {res.get('ok')}")
+                send_tool(mid, fmt_inspect(res), not res.get("ok"))
+            elif name == "rlm_entity":
+                entity = (a.get("entity") or "").strip()
+                fact_id = a.get("fact_id")
+                if not entity and not fact_id:
+                    send_tool(mid, "error: provide entity or fact_id", True)
+                    continue
+                res = do_entity(entity, fact_id, int(a.get("k") or 15))
+                log(f"tools/call rlm_entity -> {res.get('ok')}")
+                send_tool(mid, fmt_entity(res), not res.get("ok"))
+            elif name == "rlm_self_model":
+                op = (a.get("op") or "").strip()
+                if op not in ("get", "set"):
+                    send_tool(mid, "error: op must be get or set", True)
+                    continue
+                if op == "set" and not (a.get("key") and (a.get("value") or "").strip()):
+                    send_tool(mid, "error: set requires key and value", True)
+                    continue
+                res = do_self_model(op, a.get("key"), (a.get("value") or "").strip())
+                log(f"tools/call rlm_self_model[{op}] -> {res.get('ok')}")
+                send_tool(mid, fmt_self_model(res), not res.get("ok"))
             else:
                 send_tool(mid, f"error: unknown tool {name}", True)
         elif method == "ping":

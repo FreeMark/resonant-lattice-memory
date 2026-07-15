@@ -26,6 +26,17 @@ max_long_facts: 5000                        # 0 = unbounded long tier
 reinforce_on_recall: true                   # a fact the agent SEARCHES (rlm_search, self only)
 recall_bump: 2.0                            # strengthens, so use drives promotion (saturates at 50)
 
+# --- feedback + self-model (grok MCP verbs; read ONLY by the node scripts, not core) ----------
+# rlm_feedback is the soft usefulness lever (resonance-only, never the pin bit). Asymmetric: a
+# 'helpful' nudge is gentle and kept below recall_bump; an 'unhelpful' ding is stronger so a
+# wrong/stale fact fades toward dormancy faster. Positive side is clamped to the 50.0 recall cap.
+feedback_helpful_delta: 1.0
+feedback_unhelpful_delta: -3.0
+# rlm_self_model 'set' is allowlist-gated so identity core (e.g. name) can't drift session to
+# session. Only these keys are writable by the agent; an off-list key is rejected.
+self_model_writable_keys:
+  [role, relationship_with_user, mandate, current_focus, values, communication_style]
+
 # --- roadmap layers (LLM-driven; each costs reason-model calls in/after the dream) -----------
 gist_before_prune: true
 enable_self_model: true

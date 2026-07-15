@@ -31,11 +31,20 @@ RLM is the source of truth; grok's *native* memory engine is the delivery layer.
   into grok's native workspace `MEMORY.md`. Grok's engine indexes it and does the rest:
   - **first-turn injection**: situational memory auto-loaded at session start + after compaction (prefetch);
   - **`memory_search` tool**: the agent searches memory on demand for deep recall (postfetch), as a visible tool call.
-- **Write path (optional MCP tools):** `rlm_pin` and `rlm_remember` let the agent **durably write**
-  into the lattice mid-session (embedded, deduped, provenance-tagged; `rlm_pin` marks it `[PRIORITY]`
-  authority) through a small MCP server. This is the write-side complement to `memory_search`, and
-  the durable alternative to grok's native `remember` (which only touches the local file and is
-  overwritten each session).
+- **Live MCP tools (optional):** a small MCP server exposes the lattice as tools so the agent can
+  operate its memory mid-session, not just wake up with a projection:
+  - **write / curate**: `rlm_remember`, `rlm_pin` (durable write, deduped, provenance-tagged; `rlm_pin`
+    marks `[PRIORITY]` authority), `rlm_forget`, `rlm_unpin` (the inverses);
+  - **recall**: `rlm_search` (own lattice, hybrid vector + keyword; a recall reinforces the fact),
+    `external_rlm_search` + `transfer_knowledge` (read-only domain lattices, import by id);
+  - **feedback**: `rlm_feedback` (soft resonance nudge, helpful/unhelpful - steer strength without
+    the hard levers of pin/forget);
+  - **inspect**: `rlm_inspect` (one fact + its belief history), `rlm_entity` (walk the entity graph);
+  - **identity**: `rlm_self_model` (read, or update an allowlisted identity key);
+  - **health**: `rlm_stats`, `rlm_conflict` (list / resolve / dismiss contradictions).
+
+  These are the write-and-operate complement to `memory_search`, and the durable alternative to grok's
+  native `remember` (which only touches the local file and is overwritten each session).
 
 RLM is the **sole writer** of grok's memory (grok's own auto-save/dream/flush are turned off), so
 the store stays a clean projection of the lattice; the write tools route the agent's own writes
