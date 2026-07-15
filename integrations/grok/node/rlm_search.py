@@ -88,6 +88,24 @@ def search(db_path, query, k, cfg):
              "score": round(r["_score"], 4)} for r in scored[:k]]
 
 
+def reinforce(db_path, ids, bump):
+    """SELF lattice only: a small resonance bump for recalled facts (saturates at 50), mirroring
+    the RLM recall-reinforcement so recalled facts strengthen and can promote. Opens a SEPARATE
+    writable connection; external lattices are never passed here and stay strictly read-only."""
+    if not ids or bump <= 0:
+        return 0
+    conn = sqlite3.connect(db_path)
+    try:
+        ph = ",".join("?" * len(ids))
+        cur = conn.execute(
+            f"UPDATE semantic_facts SET resonance_count = MIN(resonance_count + ?, 50.0) "
+            f"WHERE id IN ({ph})", (bump, *ids))
+        conn.commit()
+        return cur.rowcount or 0
+    finally:
+        conn.close()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default=DEFAULT_DB)
@@ -101,8 +119,14 @@ def main():
         print(json.dumps({"ok": False, "error": "no such lattice"}))
         return
     try:
-        hits = search(args.db, query, args.k, load_config())
-        print(json.dumps({"ok": True, "count": len(hits), "hits": hits}))
+        cfg = load_config()
+        hits = search(args.db, query, args.k, cfg)
+        # reinforce-on-read: SELF lattice only (never external), gated by config
+        reinforced = 0
+        is_self = os.path.abspath(args.db) == os.path.abspath(DEFAULT_DB)
+        if is_self and hits and cfg.get("reinforce_on_recall") and float(cfg.get("recall_bump", 0)) > 0:
+            reinforced = reinforce(args.db, [h["id"] for h in hits], float(cfg.get("recall_bump")))
+        print(json.dumps({"ok": True, "count": len(hits), "reinforced": reinforced, "hits": hits}))
     except Exception as e:
         print(json.dumps({"ok": False, "error": str(e)[:200]}))
 

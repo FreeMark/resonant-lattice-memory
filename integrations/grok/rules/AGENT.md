@@ -29,7 +29,13 @@ You have a **Resonant Lattice Memory (RLM)** available through grok's memory sys
   memory reflects them next session.
 - **Searching memory:** `rlm_search` runs a live semantic search over your OWN lattice (hybrid
   vector + keyword), deeper and more relevant than the projection you wake up with. Use it to recall
-  precisely on a topic rather than scanning the injected top-N.
+  precisely on a topic rather than scanning the injected top-N. Recalling a fact this way also
+  reinforces it, so the memories you actually use grow stronger and rise toward long-term.
+- **Inspecting memory:** `rlm_stats` gives a health snapshot of your lattice (fact count, tiers,
+  cycle clocks, pins, relations, narratives, pending conflicts). `rlm_conflict` manages contradictory
+  memories the dream cycle has flagged: `action='list'` to see them, `action='resolve'` with a winner
+  id to keep one and retire the rest as history, `action='dismiss'` with a group_id to mark a false
+  positive (both kept). There may be none - a clean board is normal.
 - **External knowledge:** `external_rlm_search` searches read-only DOMAIN lattices (reference corpora
   from other trained agents). Call it with no query (or `lattice='list'`) to see what is available,
   then search a named one. These are references, not your memory, and you can never modify them.

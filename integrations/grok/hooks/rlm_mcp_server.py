@@ -116,6 +116,24 @@ TOOLS = [
                          "ids": {"type": "array", "items": {"type": "integer"},
                                  "description": "fact ids to import (from an external_rlm_search result)"}},
                      "required": ["lattice", "ids"]}},
+    {"name": "rlm_stats",
+     "description": ("Read-only health snapshot of your OWN lattice: fact count, tier distribution "
+                     "(short/mid/long), pins, memory + dream cycle clocks, episodes, entities, "
+                     "relations, narratives, and pending conflicts. Use to check the state of your memory."),
+     "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "rlm_conflict",
+     "description": ("Inspect and resolve contradictory memories in your OWN lattice. action='list' "
+                     "shows pending (unresolved) conflict groups. action='resolve' with an id picks "
+                     "that fact as the winner and retires the other members as superseded history. "
+                     "action='dismiss' with a group_id marks the group a false positive (all members "
+                     "kept). Conflicts are surfaced by the dream cycle; there may be none."),
+     "inputSchema": {"type": "object",
+                     "properties": {
+                         "action": {"type": "string", "enum": ["list", "resolve", "dismiss"],
+                                    "description": "list | resolve | dismiss"},
+                         "id": {"type": "integer", "description": "winner fact id (for resolve)"},
+                         "group_id": {"type": "string", "description": "conflict group id (for dismiss)"}},
+                     "required": ["action"]}},
 ]
 
 
@@ -190,6 +208,44 @@ def do_import(lattice, ids):
         return json.loads(out.splitlines()[-1]) if out else {"ok": False, "error": (err or "no output")[:200]}
     except Exception as e:
         return {"ok": False, "error": str(e)[:200]}
+
+
+def do_stats():
+    cmd = f"{C.REMOTE_PY} {C.REMOTE_DIR}/rlm_stats.py"
+    try:
+        r = subprocess.run(["ssh", *C.SSH_OPTS, C.SSH_HOST, cmd], capture_output=True, timeout=90)
+        out = (r.stdout or b"").decode("utf-8", "replace").strip()
+        err = (r.stderr or b"").decode("utf-8", "replace")
+        return json.loads(out.splitlines()[-1]) if out else {"ok": False, "error": (err or "no output")[:200]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+
+
+def do_conflict(op, winner_id, group_id):
+    cmd = f"{C.REMOTE_PY} {C.REMOTE_DIR}/rlm_conflicts.py --op {op}"
+    if winner_id:
+        cmd += f" --winner-id {int(winner_id)}"
+    if group_id:
+        gid = re.sub(r"[^A-Za-z0-9_.-]", "", str(group_id))
+        if gid:
+            cmd += f" --group-id {gid}"
+    try:
+        r = subprocess.run(["ssh", *C.SSH_OPTS, C.SSH_HOST, cmd], capture_output=True, timeout=90)
+        out = (r.stdout or b"").decode("utf-8", "replace").strip()
+        err = (r.stderr or b"").decode("utf-8", "replace")
+        return json.loads(out.splitlines()[-1]) if out else {"ok": False, "error": (err or "no output")[:200]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+
+
+def fmt_stats(res):
+    if not res.get("ok"):
+        return f"stats failed: {res.get('error')}"
+    tiers = ", ".join(f"{k}={v}" for k, v in (res.get("by_tier") or {}).items())
+    return (f"lattice: {res.get('total_facts')} facts ({tiers}); {res.get('pinned')} pinned; "
+            f"memory_cycle {res.get('memory_cycle')}, dream_cycle {res.get('dream_cycle')}; "
+            f"{res.get('entities')} entities, {res.get('relations')} relations, "
+            f"{res.get('narratives')} narratives, {res.get('pending_conflicts')} pending conflicts")
 
 
 def fmt_hits(res, source):
@@ -320,6 +376,27 @@ def main():
                 else:
                     txt = f"transfer failed: {res.get('error')}"
                 log(f"tools/call transfer_knowledge[{lattice}] -> {res.get('ok')}")
+                send_tool(mid, txt, not res.get("ok"))
+            elif name == "rlm_stats":
+                res = do_stats()
+                log(f"tools/call rlm_stats -> {res.get('ok')}")
+                send_tool(mid, fmt_stats(res), not res.get("ok"))
+            elif name == "rlm_conflict":
+                action = (a.get("action") or "").strip()
+                if action not in ("list", "resolve", "dismiss"):
+                    send_tool(mid, "error: action must be list, resolve, or dismiss", True)
+                    continue
+                res = do_conflict(action, a.get("id"), a.get("group_id"))
+                if res.get("ok"):
+                    if action == "list":
+                        cs = res.get("conflicts") or []
+                        txt = (f"{len(cs)} pending conflict group(s): {json.dumps(cs)[:600]}"
+                               if cs else "no pending conflicts")
+                    else:
+                        txt = f"{action} done: {json.dumps(res.get('result'))[:400]}"
+                else:
+                    txt = f"conflict {action} failed: {res.get('error')}"
+                log(f"tools/call rlm_conflict[{action}] -> {res.get('ok')}")
                 send_tool(mid, txt, not res.get("ok"))
             else:
                 send_tool(mid, f"error: unknown tool {name}", True)

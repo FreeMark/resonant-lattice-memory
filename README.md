@@ -27,6 +27,19 @@ ready-made preset profiles (Scholar, Sovereign Vault, Overnight, Low-VRAM, and m
 
 ## What's new
 
+- **v1.5.3 (2026-07-15): grok's read aperture widens.** Four improvements to how the grok agent
+  perceives and maintains its own memory:
+  - **Self-model and narrative in the projection.** The `MEMORY.md` the agent wakes up with now
+    leads with its self-model (identity) and ends with the recent narrative (autobiographical gist),
+    not just a fact list, so it wakes up knowing who it is and what has been happening.
+  - **Reinforce on recall.** `rlm_search` now reinforces the facts it returns (self-lattice only,
+    saturating at a cap), so memories the agent actually uses grow stronger and rise toward the long
+    tier. This is the mechanism that makes *use* drive promotion. External lattices stay read-only.
+  - **`rlm_stats`** reports a health snapshot: fact count, tier distribution, cycle clocks, pins,
+    relations, narratives, and pending conflicts.
+  - **`rlm_conflict`** lets the agent manage contradictions the dream cycle surfaces: list pending
+    conflict groups, resolve one (pick a winner, retire the rest as history), or dismiss a false
+    positive (keep both).
 - **v1.5.2 (2026-07-15): grok can search its own memory and read external domain lattices.** Three
   new MCP tools extend the grok integration's read side:
   - **`rlm_search`** runs a live hybrid (vector + keyword) search over the agent's *own* lattice,

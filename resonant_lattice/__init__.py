@@ -19,7 +19,7 @@ and the `LatticeStore` mixins (see MODULE_MAP.md / README.md):
 
 from __future__ import annotations
 
-__version__ = "1.5.2"  # grok cross-lattice knowledge: rlm_search (self), external_rlm_search (read-only domain lattices, auto-discovered), transfer_knowledge (import external facts into own lattice, provenance-tagged)
+__version__ = "1.5.3"  # grok aperture: self-model + narrative in the projection, reinforce-on-recall for rlm_search (use drives promotion), and rlm_stats / rlm_conflict MCP tools
 
 import json
 import logging
