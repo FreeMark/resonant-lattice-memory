@@ -19,7 +19,7 @@ and the `LatticeStore` mixins (see MODULE_MAP.md / README.md):
 
 from __future__ import annotations
 
-__version__ = "1.4.5"  # grok CLI agent integration (integrations/grok): out-of-loop RLM memory via grok's native memory, RLM sole writer; README refresh (agent-general, de-contest)
+__version__ = "1.4.6"  # grok integration: durable memory-WRITE tools (rlm_pin/rlm_remember) via a small MCP server -> the node lattice (write-side complement to memory_search)
 
 import json
 import logging

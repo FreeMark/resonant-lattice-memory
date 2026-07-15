@@ -1,0 +1,10 @@
+# Merge this into ~/.grok/config.toml to register the RLM memory-WRITE tools (rlm_pin / rlm_remember).
+# Edit `command` (your python) and the args path (absolute path to rlm_mcp_server.py in your hooks dir).
+# The server reads connection settings from ~/.grok/rlm-grok.conf (same file the hooks use).
+
+[mcp_servers.rlm-memory]
+command = "python3"
+args = ["/ABSOLUTE/PATH/TO/.grok/hooks/rlm_mcp_server.py"]
+enabled = true
+startup_timeout_sec = 30
+tool_timeout_sec = 120

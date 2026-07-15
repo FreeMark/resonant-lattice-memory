@@ -14,6 +14,9 @@ You have a **Resonant Lattice Memory (RLM)** available through grok's memory sys
 - **Authority order:** your project kit (`AGENTS.md` and any decisions/session docs) and live
   checks win over recalled lattice facts on any conflict. Facts marked **[PRIORITY]** are
   user-pinned authority - weight them heavily and never act against them.
-- **You are not the memory writer.** The lattice is written by the RLM pipeline (sole writer)
-  from your sessions. State durable facts clearly so the next ingest captures them; do not
-  hand-edit memory files.
+- **Writing memory:** to durably remember a fact or lock a decision, use your `rlm_remember` and
+  `rlm_pin` tools (if the rlm-memory MCP server is installed). They write into the lattice
+  (embedded, deduplicated; `rlm_pin` marks it `[PRIORITY]` authority) and persist across sessions.
+  When you and the user lock a decision or a standing rule, `rlm_pin` it. Do NOT hand-edit grok's
+  own memory files (a native `remember` / direct `MEMORY.md` edit is transient and gets overwritten
+  by the lattice each session). The session ingest also captures whatever you clearly state.

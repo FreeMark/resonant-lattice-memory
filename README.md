@@ -27,6 +27,12 @@ ready-made preset profiles (Scholar, Sovereign Vault, Overnight, Low-VRAM, and m
 
 ## What's new
 
+- **v1.4.6 (2026-07-14): grok can write to the lattice.** The grok integration gains durable
+  memory-write tools, `rlm_pin` (write + pin as `[PRIORITY]` authority) and `rlm_remember` (write a
+  durable fact), through a small dependency-free MCP server that routes the agent's writes into the
+  node lattice (embedded, deduped, provenance-tagged). It is the write-side complement to
+  `memory_search`, and the durable alternative to grok's native `remember`, which only touches the
+  local file and is overwritten each session.
 - **v1.4.5 (2026-07-14): memory for the grok CLI agent.** A new out-of-loop integration
   ([`integrations/grok/`](integrations/grok/)) gives the xAI `grok` coding agent an RLM memory
   through grok's own seams: a `PreCompact` hook ingests each session into the lattice, and a

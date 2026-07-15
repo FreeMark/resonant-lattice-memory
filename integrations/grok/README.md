@@ -31,9 +31,15 @@ RLM is the source of truth; grok's *native* memory engine is the delivery layer.
   into grok's native workspace `MEMORY.md`. Grok's engine indexes it and does the rest:
   - **first-turn injection**: situational memory auto-loaded at session start + after compaction (prefetch);
   - **`memory_search` tool**: the agent searches memory on demand for deep recall (postfetch), as a visible tool call.
+- **Write path (optional MCP tools):** `rlm_pin` and `rlm_remember` let the agent **durably write**
+  into the lattice mid-session (embedded, deduped, provenance-tagged; `rlm_pin` marks it `[PRIORITY]`
+  authority) through a small MCP server. This is the write-side complement to `memory_search`, and
+  the durable alternative to grok's native `remember` (which only touches the local file and is
+  overwritten each session).
 
 RLM is the **sole writer** of grok's memory (grok's own auto-save/dream/flush are turned off), so
-the store stays a clean projection of the lattice rather than flat session summaries.
+the store stays a clean projection of the lattice; the write tools route the agent's own writes
+*through* the lattice too, rather than into flat session summaries.
 
 > Trigger note: `PreCompact` is used because grok does **not** fire `SessionEnd` on a normal
 > interactive exit. The convention is to run a compaction before exiting a session.
@@ -65,9 +71,12 @@ dir (a `config.yaml` + a `lattice.db`). See the main repo README for the RLM pac
 5. **Rule:** copy `rules/AGENT.md` to your grok repo root (it is not your `AGENTS.md`).
 6. **Bootstrap (per repo):** run `bootstrap.sh` from inside the repo once, so grok creates its
    memory dir.
+7. **Optional write tools:** copy `hooks/rlm_mcp_server.py` into `~/.grok/hooks/` and `node/rlm_write.py`
+   into your instance dir, then merge `grok-mcp-config.toml` into `~/.grok/config.toml` (edit the
+   command/path). This registers `rlm_pin` / `rlm_remember` so the agent can durably write to the lattice.
 
 Then just use grok: compact before exiting (ingest), and each new session wakes up with the
-lattice (prefetch). `memory_search` is available for deep recall.
+lattice (prefetch). `memory_search` reads on demand; `rlm_pin` / `rlm_remember` write on demand.
 
 ## Privacy note
 
