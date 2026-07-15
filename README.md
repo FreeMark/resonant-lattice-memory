@@ -27,6 +27,11 @@ ready-made preset profiles (Scholar, Sovereign Vault, Overnight, Low-VRAM, and m
 
 ## What's new
 
+- **v1.4.8 (2026-07-15): open-ended extraction categories.** The grok integration's config
+  template (`integrations/grok/node/config.example.yaml`) replaces the fixed category enum in the
+  extraction prompt with an open-ended rule: pick a self-evident, plain-language category, let
+  natural overlap happen, and never drop or distort a fact just because it does not match a fixed
+  label. The category is a hint for recall, not a gate on what gets remembered.
 - **v1.4.7 (2026-07-14): grok memory scope (per-repo or global).** The grok integration's
   SessionStart projection now takes an `RLM_MEMORY_SCOPE` lever: `workspace` (default, per-repo
   memory keyed by git origin) or `global` (project the lattice into grok's global memory so it

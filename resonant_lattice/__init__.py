@@ -19,7 +19,7 @@ and the `LatticeStore` mixins (see MODULE_MAP.md / README.md):
 
 from __future__ import annotations
 
-__version__ = "1.4.7"  # grok integration: memory-scope lever (RLM_MEMORY_SCOPE workspace|global, global writes a preserved block into grok's global memory) + memory-scope docs
+__version__ = "1.4.8"  # grok integration: open-ended extraction category rule in the config template (self-evident labels, natural overlap, a fixed list never excludes a fact)
 
 import json
 import logging
