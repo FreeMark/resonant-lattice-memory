@@ -27,6 +27,12 @@ ready-made preset profiles (Scholar, Sovereign Vault, Overnight, Low-VRAM, and m
 
 ## What's new
 
+- **v1.6.7 (2026-07-16): grok compact/ingest observability.** A new `rlm_watch_ingest.py` (with the
+  `rlm-watch.cmd` launcher) watches a `/compact` -> ingest "memory cycle" to completion and signals
+  when it is safe to continue the conversation. It is buffer-immune: it keys off the `rlm_ingest.py`
+  process plus the live `semantic_facts` count rather than the block-buffered ingest log, whose
+  per-window lines can lag. `rlm_ingest_worker.py` now launches the node ingest with `python -u`, so
+  those log lines stream live instead of flushing only at process exit. grok-integration only.
 - **v1.6.6 (2026-07-15): grok transport stdin fix.** `rlm_grok_conf.run()` now gives the spawned
   node process `DEVNULL` stdin whenever no `input` is passed, instead of letting it inherit fd 0. In
   the long-lived MCP server fd 0 is grok's live JSON-RPC pipe; v1.6.4 concurrency made the main read

@@ -39,7 +39,7 @@ try:
         sys.exit(1)
     log(f"ship ok -> {remote} ({'local' if C.LOCAL else 'scp'})")
 
-    cmd = (f"nohup {C.REMOTE_PY} {C.REMOTE_DIR}/rlm_ingest.py {remote} "
+    cmd = (f"nohup {C.REMOTE_PY} -u {C.REMOTE_DIR}/rlm_ingest.py {remote} "
            f"--session-id {ingest_sid} >> {C.REMOTE_DIR}/ingest.log 2>&1 &")
     r = C.run(cmd, timeout=60, text=True)             # backgrounded locally or over ssh
     log(f"ingest launched sid={ingest_sid} ({'local' if C.LOCAL else 'ssh'}) rc={r.returncode} "

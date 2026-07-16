@@ -19,7 +19,7 @@ and the `LatticeStore` mixins (see MODULE_MAP.md / README.md):
 
 from __future__ import annotations
 
-__version__ = "1.6.6"  # grok transport stdin fix. rlm_grok_conf.run() now gives the child DEVNULL stdin when no input is passed, instead of inheriting fd 0. In the long-lived MCP server fd 0 is grok's live JSON-RPC pipe; v1.6.4 concurrency made the main read loop read it while a worker's ssh (input-less call) also inherited it -> deadlock to timeout -> fail-open. Fixes external_rlm_search lattice=list ('no lattices' after a 30s hang) plus rlm_stats/rlm_conflict/import/reinforce. Builds on v1.6.5 prefetch bridge.
+__version__ = "1.6.7"  # grok compact/ingest observability. New rlm_watch_ingest.py + rlm-watch.cmd watch a /compact -> ingest 'memory cycle' to completion, buffer-immune (keys off the rlm_ingest.py process + live semantic_facts count, not the block-buffered ingest log). rlm_ingest_worker.py now launches the node ingest with 'python -u' so per-window log lines stream live instead of flushing only at process exit. Prior 1.6.6 = grok transport stdin fix (input-less node calls inherited the MCP child's JSON-RPC stdin -> deadlock; fixed external_rlm_search lattice=list + rlm_stats/rlm_conflict).
 
 import json
 import logging

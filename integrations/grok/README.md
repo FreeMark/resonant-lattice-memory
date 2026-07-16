@@ -364,7 +364,12 @@ The integration, end to end:
   ACP (grok session-update) transcript parser; per-window consolidation → one post-ingest dream
   cycle → rolling narrative; SessionStart projection with a self-model header, a pinned
   **authority** block, a **contested** (unresolved-conflict) quarantine, and the recent narrative.
-  UTF-8-clean write path.
+  UTF-8-clean write path. The worker launches the node ingest with `python -u`, so per-window
+  progress lines stream live instead of flushing only at exit.
+- **Ingest observability** - `rlm_watch_ingest.py` (with the `rlm-watch.cmd` launcher) watches a
+  `/compact` -> ingest "memory cycle" to completion and signals when it is safe to continue the
+  conversation. Buffer-immune: it keys off the `rlm_ingest.py` process plus the live `semantic_facts`
+  count, not the block-buffered log.
 - **Per-turn prefetch** - a `UserPromptSubmit` hook precomputes a `<resonant_memory>` block for the
   current message; the `rlm_prefetch` tool serves it instantly and reinforces on read. Plus a
   chunk-aligned projection so grok's native first-turn / post-compaction injection surfaces whole
@@ -412,6 +417,11 @@ The integration, end to end:
   call inherit the server's stdin (grok's JSON-RPC pipe), which deadlocked to a timeout under the
   v1.6.4 concurrent dispatch. Update `rlm_grok_conf.py` to the current version (a plain copy) and
   restart the grok session. Named search was never affected.
+- **"Is the memory cycle done? Can I continue after `/compact`?"** - run `rlm-watch.cmd` (or
+  `python ~/.grok/hooks/rlm_watch_ingest.py`). It refreshes until the ingest finishes, then rings the
+  bell and prints a "safe to continue" banner. It watches the `rlm_ingest.py` process + the live
+  `semantic_facts` count, so it stays correct even though the ingest log is block-buffered (per-window
+  lines can lag). `--once` prints a single snapshot instead of looping.
 - **grok wrote to `MEMORY.md` itself** - grok's own writers are still on; re-check
   `grok-memory-config.toml` is merged (RLM must be the sole writer).
 
