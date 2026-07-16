@@ -19,7 +19,7 @@ and the `LatticeStore` mixins (see MODULE_MAP.md / README.md):
 
 from __future__ import annotations
 
-__version__ = "1.6.7"  # grok compact/ingest observability. New rlm_watch_ingest.py + rlm-watch.cmd watch a /compact -> ingest 'memory cycle' to completion, buffer-immune (keys off the rlm_ingest.py process + live semantic_facts count, not the block-buffered ingest log). rlm_ingest_worker.py now launches the node ingest with 'python -u' so per-window log lines stream live instead of flushing only at process exit. Prior 1.6.6 = grok transport stdin fix (input-less node calls inherited the MCP child's JSON-RPC stdin -> deadlock; fixed external_rlm_search lattice=list + rlm_stats/rlm_conflict).
+__version__ = "1.6.8"  # grok re-compact dedup. rlm_ingest.py keeps a per-session line high-water mark (ingest_watermarks table): grok's chat_history.jsonl is APPEND-ONLY, so a second /compact of the same session re-snapshots from turn 1. The ingest now skips the already-ingested prefix and mines only the new tail (verified: a re-compact dropped from 16 windows to 4), keyed on the stable grok session id (strips the _HHMMSS compact suffix); watermark advances only on a successful DONE (crash -> safe re-process). Prior 1.6.7 = compact/ingest observability (rlm_watch_ingest.py + rlm-watch.cmd; ingest log via python -u).
 
 import json
 import logging

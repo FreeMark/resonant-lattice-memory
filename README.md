@@ -27,6 +27,13 @@ ready-made preset profiles (Scholar, Sovereign Vault, Overnight, Low-VRAM, and m
 
 ## What's new
 
+- **v1.6.8 (2026-07-16): grok re-compact deduplication.** grok's `chat_history.jsonl` is
+  append-only, so compacting the *same* session a second time re-snapshots from turn 1 and the ingest
+  used to re-mine everything the previous compact already processed (wasted compute + near-duplicate
+  facts). `rlm_ingest.py` now keeps a per-session line high-water mark (an `ingest_watermarks` table,
+  keyed on the stable grok session id with the `_HHMMSS` compact suffix stripped) and ingests only
+  the new tail on a later compact. Verified on a live double-compact: 16 windows dropped to 4. The
+  mark advances only on a clean finish, so a crash safely re-processes. grok-integration only.
 - **v1.6.7 (2026-07-16): grok compact/ingest observability.** A new `rlm_watch_ingest.py` (with the
   `rlm-watch.cmd` launcher) watches a `/compact` -> ingest "memory cycle" to completion and signals
   when it is safe to continue the conversation. It is buffer-immune: it keys off the `rlm_ingest.py`

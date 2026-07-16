@@ -370,6 +370,11 @@ The integration, end to end:
   `/compact` -> ingest "memory cycle" to completion and signals when it is safe to continue the
   conversation. Buffer-immune: it keys off the `rlm_ingest.py` process plus the live `semantic_facts`
   count, not the block-buffered log.
+- **Re-compact dedup** - grok's `chat_history.jsonl` is append-only, so compacting the same session
+  twice re-snapshots from turn 1. The ingest keeps a per-session line high-water mark
+  (`ingest_watermarks`, keyed on the stable grok session id) and mines only the new tail on a later
+  compact, so re-compacts stay cheap and the lattice does not accrue near-duplicate facts. The mark
+  advances only on a clean finish, so a crash safely re-processes.
 - **Per-turn prefetch** - a `UserPromptSubmit` hook precomputes a `<resonant_memory>` block for the
   current message; the `rlm_prefetch` tool serves it instantly and reinforces on read. Plus a
   chunk-aligned projection so grok's native first-turn / post-compaction injection surfaces whole

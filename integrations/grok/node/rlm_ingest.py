@@ -9,7 +9,7 @@ Flow (mirrors an overnight trainer, per-window):
 
 Usage: rlm_ingest.py <chat_history.jsonl> [--session-id ID] [--max-windows N] [--dry-run]
 """
-import argparse, json, os, sys, time
+import argparse, json, os, re, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from rlm_common import build_provider, fact_count  # noqa: E402
@@ -39,10 +39,19 @@ def coerce_text(content):
     return str(content)
 
 
-def parse_turns(path):
+def parse_turns(path, skip_lines=0):
+    """Parse (role, text) turns from the transcript, skipping the first `skip_lines` raw
+    lines. Returns (turns, total_lines). grok's chat_history.jsonl is append-only, so the
+    first N lines of any later snapshot are byte-identical to what an earlier compact
+    already ingested -- a line high-water mark lets a re-compact ingest only the new tail
+    instead of re-mining the whole session."""
     raw = []
+    total = 0
     with open(path, encoding="utf-8", errors="replace") as f:
-        for line in f:
+        for i, line in enumerate(f):
+            total = i + 1
+            if i < skip_lines:
+                continue
             line = line.strip()
             if not line:
                 continue
@@ -74,7 +83,7 @@ def parse_turns(path):
             turns[-1] = (role, turns[-1][1] + text)
         else:
             turns.append((role, text))
-    return turns
+    return turns, total
 
 
 def make_windows(turns, max_turns, max_chars=12000):
@@ -90,28 +99,75 @@ def make_windows(turns, max_turns, max_chars=12000):
     return windows
 
 
+def _ensure_watermark_table(store):
+    store._conn.execute(
+        "CREATE TABLE IF NOT EXISTS ingest_watermarks ("
+        "session_key TEXT PRIMARY KEY, lines_ingested INTEGER NOT NULL, "
+        "turns_ingested INTEGER, updated_at TEXT)")
+    store._conn.commit()
+
+
+def _get_watermark(store, key):
+    row = store._conn.execute(
+        "SELECT lines_ingested FROM ingest_watermarks WHERE session_key = ?", (key,)).fetchone()
+    return int(row[0]) if row else 0
+
+
+def _set_watermark(store, key, lines, turns):
+    store._conn.execute(
+        "INSERT OR REPLACE INTO ingest_watermarks "
+        "(session_key, lines_ingested, turns_ingested, updated_at) "
+        "VALUES (?, ?, ?, datetime('now'))", (key, lines, turns))
+    store._conn.commit()
+
+
+def _session_key(base_sid):
+    # ingest session-id is '<grok-session-uuid>_<HHMMSS>'; key the watermark on the stable
+    # grok session so repeated compacts of the same session share one high-water mark.
+    return re.sub(r"_\d{6}$", "", base_sid)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("chat_history")
     ap.add_argument("--session-id", default=None)
     ap.add_argument("--max-windows", type=int, default=0, help="cap windows (0 = all)")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--ignore-watermark", action="store_true",
+                    help="re-ingest the whole snapshot even if a session watermark exists")
     args = ap.parse_args()
 
     path = os.path.abspath(args.chat_history)
     base_sid = args.session_id or os.path.basename(os.path.dirname(path)) or "grok-ingest"
-    turns = parse_turns(path)
     print(f"[ingest] file={path}")
-    print(f"[ingest] base_session={base_sid}  usable turns={len(turns)} "
-          f"(user/assistant only; system/reasoning/tool_result gated out)")
 
     if args.dry_run:
+        turns, total = parse_turns(path)
+        print(f"[ingest] base_session={base_sid}  usable turns={len(turns)}  ({total} lines)")
         for r, t in turns[:8]:
             print(f"   {r:9} {t[:100]!r}")
         return
 
     prov = build_provider(session_id=base_sid)
     store = prov._store
+    session_key = _session_key(base_sid)
+    _ensure_watermark_table(store)
+    wm = 0 if args.ignore_watermark else _get_watermark(store, session_key)
+    turns, total_lines = parse_turns(path, skip_lines=wm)
+    print(f"[ingest] base_session={base_sid}  session_key={session_key}")
+    if wm:
+        print(f"[ingest] watermark={wm} lines already ingested; snapshot={total_lines} lines "
+              f"-> {len(turns)} NEW usable turns (re-compact: skipping ingested prefix)")
+    else:
+        print(f"[ingest] usable turns={len(turns)}  ({total_lines} lines; no prior watermark; "
+              f"user/assistant only, system/reasoning/tool_result gated out)")
+
+    if not turns:
+        print(f"[ingest] === nothing new since line {wm} (snapshot {total_lines} lines); "
+              f"no windows to ingest ===")
+        _set_watermark(store, session_key, total_lines, 0)
+        return
+
     win_turns = max(6, int(getattr(prov, "_reflection_frequency", 5)) * 2)
     windows = make_windows(turns, win_turns)
     if args.max_windows > 0:
@@ -196,8 +252,10 @@ def main():
             print(f"[ingest] narrative FAILED (non-fatal): {e}")
 
     after_total = fact_count(store)
+    _set_watermark(store, session_key, total_lines, len(turns))
     print(f"\n[ingest] === DONE facts {before_total} -> {after_total}  "
-          f"born={after_total-before_total}  ({time.time()-t0:.0f}s) ===")
+          f"born={after_total-before_total}  ({time.time()-t0:.0f}s) "
+          f"[watermark {session_key} = {total_lines} lines] ===")
 
 
 if __name__ == "__main__":
