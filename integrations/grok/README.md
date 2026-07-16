@@ -407,6 +407,11 @@ The integration, end to end:
   installed or has not fired yet; check `~/.grok/rlm-queue/prefetch.log` and that a `<hash>.md` block
   exists under `~/.grok/rlm-queue/prefetch/`. Until then, `rlm_prefetch` falls back to a live recall
   on the captured prompt; `rlm_search` with an explicit query always works.
+- **`external_rlm_search lattice=list` returns "no lattices" (or `rlm_stats`/`rlm_conflict` stall)
+  inside a live grok session** - fixed in v1.6.6. Older `rlm_grok_conf.py` let an input-less node
+  call inherit the server's stdin (grok's JSON-RPC pipe), which deadlocked to a timeout under the
+  v1.6.4 concurrent dispatch. Update `rlm_grok_conf.py` to the current version (a plain copy) and
+  restart the grok session. Named search was never affected.
 - **grok wrote to `MEMORY.md` itself** - grok's own writers are still on; re-check
   `grok-memory-config.toml` is merged (RLM must be the sole writer).
 

@@ -69,9 +69,21 @@ def run(cmd_str, input=None, timeout=90, capture_output=True,
     """Run a node shell command under the active transport (local `sh -c`, or ssh).
 
     Drop-in for the old subprocess.run(["ssh", ...]) call: same CompletedProcess result, but
-    transport-agnostic. `input` may be bytes (default) or str (with text=True)."""
-    return subprocess.run(_argv(cmd_str), input=input, capture_output=capture_output,
-                          timeout=timeout, text=text, encoding=encoding, errors=errors)
+    transport-agnostic. `input` may be bytes (default) or str (with text=True).
+
+    When no input is given, the child's stdin is DEVNULL, never inherited. In the long-lived MCP
+    server, fd 0 is grok's live JSON-RPC pipe; an inherited ssh/sh child races the read loop for it
+    and hangs until timeout (the input-less list/stats/conflict/import/reinforce calls). DEVNULL =
+    the child gets immediate EOF, exactly like the input path (which already redirects stdin to a
+    pipe). v1.6.4 concurrency exposed this: the main read loop now reads fd 0 while a worker's ssh
+    inherits it, so an input-less call deadlocked to a 30s timeout -> fail-open [] ('no lattices')."""
+    kwargs = dict(capture_output=capture_output, timeout=timeout,
+                  text=text, encoding=encoding, errors=errors)
+    if input is None:
+        kwargs["stdin"] = subprocess.DEVNULL
+    else:
+        kwargs["input"] = input
+    return subprocess.run(_argv(cmd_str), **kwargs)
 
 
 def push(local_path, remote_relpath, timeout=120):

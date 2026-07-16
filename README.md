@@ -27,6 +27,14 @@ ready-made preset profiles (Scholar, Sovereign Vault, Overnight, Low-VRAM, and m
 
 ## What's new
 
+- **v1.6.6 (2026-07-15): grok transport stdin fix.** `rlm_grok_conf.run()` now gives the spawned
+  node process `DEVNULL` stdin whenever no `input` is passed, instead of letting it inherit fd 0. In
+  the long-lived MCP server fd 0 is grok's live JSON-RPC pipe; v1.6.4 concurrency made the main read
+  loop read that pipe while a worker's `ssh` (for an input-less call) also inherited it, so the call
+  deadlocked to its timeout and failed open. This deterministically broke `external_rlm_search`
+  `lattice=list` (returned "no lattices" after a 30s hang) and would have stalled `rlm_stats`,
+  `rlm_conflict`, `transfer_knowledge`, and the v1.6.5 prefetch reinforce (90-180s each). One
+  chokepoint fix; named search was unaffected because it already passes `input`. grok-integration only.
 - **v1.6.5 (2026-07-15): grok's per-turn prefetch.** Closes the last gap between the reference
   in-loop agent (which recalls memory on every turn) and grok (which auto-injects only on the first
   turn and after compaction). A new `UserPromptSubmit` hook detaches a worker that recalls against

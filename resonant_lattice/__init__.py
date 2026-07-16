@@ -19,7 +19,7 @@ and the `LatticeStore` mixins (see MODULE_MAP.md / README.md):
 
 from __future__ import annotations
 
-__version__ = "1.6.5"  # grok per-turn prefetch bridge. Closes the last hermes<->grok gap: hermes recalls memory on EVERY turn (autonomous prefetch), grok only injected on first-turn + post-compaction. New UserPromptSubmit hook detaches a worker that recalls (no-reinforce) against the user's actual message and writes a <resonant_memory> block; a new rlm_prefetch MCP tool (16 total) serves it instantly and reinforces on consumption. Export reshaped into <=1400-char chunk-aligned sections so grok's own indexer injects whole topics, not fragments. Builds on v1.6.4 concurrent dispatch.
+__version__ = "1.6.6"  # grok transport stdin fix. rlm_grok_conf.run() now gives the child DEVNULL stdin when no input is passed, instead of inheriting fd 0. In the long-lived MCP server fd 0 is grok's live JSON-RPC pipe; v1.6.4 concurrency made the main read loop read it while a worker's ssh (input-less call) also inherited it -> deadlock to timeout -> fail-open. Fixes external_rlm_search lattice=list ('no lattices' after a 30s hang) plus rlm_stats/rlm_conflict/import/reinforce. Builds on v1.6.5 prefetch bridge.
 
 import json
 import logging
