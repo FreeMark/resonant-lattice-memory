@@ -4,8 +4,8 @@ The exact, battle-tested procedure (incl. the gotchas found in the field). Every
 machine where hermes-agent is installed. Paths assume the default `HERMES_HOME=~/.hermes`.
 
 **Shorthands used below:**
-- `VENV=~/.hermes/hermes-agent/venv/bin` — hermes-agent's Python venv (its `pip`/`python`).
-- `PLUGINS=~/.hermes/plugins` — the user plugins dir (created in Step 2).
+- `VENV=~/.hermes/hermes-agent/venv/bin` - hermes-agent's Python venv (its `pip`/`python`).
+- `PLUGINS=~/.hermes/plugins` - the user plugins dir (created in Step 2).
 
 ---
 
@@ -22,7 +22,7 @@ machine where hermes-agent is installed. Paths assume the default `HERMES_HOME=~
 `sqlite-vec` is **required** (the provider declines activation without it); `numpy` powers HRR.
 
 > ⚠️ **Do NOT `source .../activate` and use bare `pip`.** hermes uses a **uv** venv that may not ship a
-> standalone `pip`, so after `activate` your `pip` silently falls through to the **system** Python — which
+> standalone `pip`, so after `activate` your `pip` silently falls through to the **system** Python - which
 > on Debian/Ubuntu refuses with `error: externally-managed-environment`. That is the wrong interpreter.
 > Always target the venv's Python by absolute path with `python -m pip` (below). Do NOT use
 > `--break-system-packages` (that installs into the system Python, which hermes-agent never uses).
@@ -41,10 +41,10 @@ c=sqlite3.connect(":memory:"); c.enable_load_extension(True); sqlite_vec.load(c)
 print("sqlite_vec OK", c.execute("select vec_version()").fetchone()[0])
 PY
 ```
-Optional (encryption tiers — skip for a basic deploy):
+Optional (encryption tiers - skip for a basic deploy):
 ```bash
 $VENV/pip install argon2-cffi sqlcipher3-wheels   # Tier 0 at-rest (SQLCipher)
-# Tier 1 blind store needs a real OpenFHE build (the `openfhe` pip wheel is a stub) — node-pending.
+# Tier 1 blind store needs a real OpenFHE build (the `openfhe` pip wheel is a stub) - node-pending.
 ```
 
 ## 2. Install the plugin into the user plugins dir
@@ -54,9 +54,9 @@ User-installed memory providers live in `$HERMES_HOME/plugins/<name>/` (imported
 `_hermes_user_memory.<name>` package). Bundled providers in `hermes-agent/plugins/memory/` win on a
 name clash, so keep the name `resonant_lattice`.
 
-> ⚠️ **Copy RUNTIME modules only — never dev/test/eval scripts.** hermes discovery `exec_module()`s
+> ⚠️ **Copy RUNTIME modules only - never dev/test/eval scripts.** hermes discovery `exec_module()`s
 > **every `.py`** in the plugin dir (to wire relative imports). It swallows import *exceptions* but NOT
-> a *hang* — so any script with top-level side effects (especially a network call, like the `contest_*`/
+> a *hang* - so any script with top-level side effects (especially a network call, like the `contest_*`/
 > benchmark scripts) will make `hermes memory status` (and startup) **hang forever**. Keep dev scripts
 > OUT of `$PLUGINS` (run them from elsewhere via `sys.path.insert`).
 >
@@ -109,7 +109,7 @@ print("Clean deploy done to", dst)
 ```yaml
 name: resonant_lattice
 version: "1.2.1"  # matches __version__ in __init__.py
-description: "Resonant Lattice Memory — neuroplastic Hebbian long-term memory…"
+description: "Resonant Lattice Memory - neuroplastic Hebbian long-term memory…"
 hooks: [on_session_end, on_session_switch, on_pre_compress, on_delegation, on_memory_write]
 ```
 
@@ -122,12 +122,12 @@ ollama pull deepseek-v4-flash:cloud # memory/dream reasoner (top pick: wicked fa
 ```
 > ⚠️ **The config tag must EXACTLY match what `ollama list` shows on that endpoint.** Ollama tags differ
 > by host: e.g. one box has `embeddinggemma:latest`, another `embeddinggemma:300m`, another
-> `embeddinggemma:300m-bf16` — these are NOT interchangeable strings. A mismatch gives `model "…" not
+> `embeddinggemma:300m-bf16` - these are NOT interchangeable strings. A mismatch gives `model "…" not
 > found` and the provider logs `Ollama probe failed` / `Failed to generate embedding`. Verify per
 > endpoint: `curl http://<host>:11434/api/tags | grep <model>`, then set `embed_model` / `reason_model`
 > to the exact tag (or `ollama pull` the one you want).
 
-The three slots are independent and may live on different hosts — see the topology table at the bottom.
+The three slots are independent and may live on different hosts - see the topology table at the bottom.
 
 ## 4. Configure (config.yaml, via dotted keys)
 ```bash
@@ -142,7 +142,7 @@ hermes config set plugins.resonant_lattice.reason_timeout 420
 ```
 > NOTE: the provider uses Ollama's **native** API (`/api/embeddings`, `/api/generate`) for its embed/
 > reason calls, so those endpoints are bare `http://host:11434` (NO `/v1`). The hermes **primary**
-> model uses the OpenAI-compatible `/v1` path — that's a separate setting (`model.base_url`).
+> model uses the OpenAI-compatible `/v1` path - that's a separate setting (`model.base_url`).
 
 ## 5. Activate + verify
 ```bash
@@ -159,7 +159,7 @@ PY
 # (b) hermes agrees it's active:
 hermes memory status            # -> Provider: resonant_lattice ... available ✓ ← active
 
-# (c) substrate smoke (add a fact, recall it) — proves embed + store + recall end-to-end:
+# (c) substrate smoke (add a fact, recall it) - proves embed + store + recall end-to-end:
 HERMES_HOME=~/.hermes $VENV/python - <<'PY'
 import os,sys,json; sys.path.insert(0, os.path.expanduser("~/.hermes/hermes-agent"))
 from plugins.memory import load_memory_provider
@@ -170,7 +170,7 @@ print(json.loads(p.handle_tool_call("lattice_store", {"action":"search","query":
 p.shutdown()
 PY
 
-# (d) live agent turn (memory works automatically — no tool call needed):
+# (d) live agent turn (memory works automatically - no tool call needed):
 hermes -z "In one sentence, what persistent memory system do you have active?"
 ```
 A clean run: `is_available: True`, `hermes memory status` shows it active, the smoke prints the recalled
@@ -183,7 +183,7 @@ afterward for a pristine start.
 - **Keep the embedder warm**: defaults send Ollama `keep_alive=10m` and use a 30s `embed_timeout`, so a
   small/idle GPU that cold-loads (~6s) doesn't drop facts. Tune via `plugins.resonant_lattice.embed_timeout`
   / `embed_keep_alive`.
-- **Behaviour flags** default sensibly (P1–P3 cognition on; relations/self-model/narrative/gist off).
+- **Behaviour flags** default sensibly (P1-P3 cognition on; relations/self-model/narrative/gist off).
   See `README.md` "Sample configuration" for all ~80 keys.
 
 ## Recommended multi-node topology (ideal: everything local)
@@ -196,7 +196,7 @@ The ideal setup runs the entire stack locally. When local inference capacity is 
 | Memory/dream (`reason_model`) | `deepseek-v4-flash:cloud` (fast cloud winner) or `gemma4:26b` / `nemotron-3-ultra` (NVIDIA) | `http://<gpu2-or-cloud>:11434` | off hot path; fast + high quality extraction (cloud excellent when local limited; Nemotron thematic for NVIDIA) |
 | Embedding (`embed_model`) | `embeddinggemma:300m` | `http://<small-gpu>:11434` | best precision/byte, 768-d, keep-alive pinned |
 
-## Fast cloud profile (limited local inference — recommended for memory layer)
+## Fast cloud profile (limited local inference - recommended for memory layer)
 
 Ideal is fully local. When local inference capacity is constrained, keep the primary agent and embeddings local (or very light) and use a fast cloud model for the memory/dream reasoner (consolidation/abstraction runs off the hot path).
 
@@ -218,6 +218,6 @@ Observed cost on the lowest $20 Ollama tier during full heavy E2E + tool-groundi
 | `Ollama probe failed` / `Failed to generate embedding` | `embed_model` tag not present on the embed endpoint (tags differ per host!) → `curl …/api/tags \| grep embeddinggemma`, set the exact tag (e.g. `embeddinggemma:latest`) or `ollama pull` it |
 | Consolidation stores **0 facts** | cold embedder timed out (old 5s) → fixed by `embed_timeout`/`keep_alive`; or **warm it first** with one embed call |
 | Consolidation **times out** with a slow reasoner | raise `reason_timeout` (default 300) |
-| Recall returns garbage after changing `embed_model` | the next dream cycle re-embeds all facts to the new model (rebuilds the vector index at the new dim) — turnkey; `force_dream_cycle` to do it now |
+| Recall returns garbage after changing `embed_model` | the next dream cycle re-embeds all facts to the new model (rebuilds the vector index at the new dim) - turnkey; `force_dream_cycle` to do it now |
 | `DIMENSION MISMATCH … DEGRADED (FTS-only)` | the DB's stored vec dim ≠ the embedder's; either keep the old model or let the re-embed migration run |
-| `hermes -z` gives no answer on a recall | one-shot mode doesn't auto-consolidate, and the model may try to *call* the memory tool (needs approval) — use an interactive `hermes chat` session, or instruct it to answer from context |
+| `hermes -z` gives no answer on a recall | one-shot mode doesn't auto-consolidate, and the model may try to *call* the memory tool (needs approval) - use an interactive `hermes chat` session, or instruct it to answer from context |

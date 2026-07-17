@@ -42,18 +42,18 @@ python tools/rl_monitor.py --demo --once
 
 ### Keys
 
-- **↑ / ↓** — move the selection in the Top-resonance table
-- **p** — pin / unpin the selected fact
-- **q** — quit
+- **↑ / ↓** - move the selection in the Top-resonance table
+- **p** - pin / unpin the selected fact
+- **q** - quit
 
 ## What you see
 
-- **Header** — memory/dream cycle counters, fact/pinned/conflict/entity/episode totals, DB size.
-- **Tiers** — short / mid / long gauges (the memory-pressure view).
-- **Top resonance** — the loudest-ringing facts (selectable; `★` = pinned).
-- **Activity (cycles)** — the cycle-structured feed: per-cycle `add` / `reinforce` / `promote` / `conflict` / `supersede`, with a `DREAM` banner summarizing each dream cycle's bulk decay/prune/promote.
-- **Conflicts** — active conflict groups and their contradicting snippets.
-- **Health** — category mix, superseded history, near-cap saturation, max resonance, orphan entities.
+- **Header** - memory/dream cycle counters, fact/pinned/conflict/entity/episode totals, DB size.
+- **Tiers** - short / mid / long gauges (the memory-pressure view).
+- **Top resonance** - the loudest-ringing facts (selectable; `★` = pinned).
+- **Activity (cycles)** - the cycle-structured feed: per-cycle `add` / `reinforce` / `promote` / `conflict` / `supersede`, with a `DREAM` banner summarizing each dream cycle's bulk decay/prune/promote.
+- **Conflicts** - active conflict groups and their contradicting snippets.
+- **Health** - category mix, superseded history, near-cap saturation, max resonance, orphan entities.
 
 ```text
 ┌───────────── Resonant Lattice Monitor ─────────────┐
@@ -84,7 +84,7 @@ python tools/rl_monitor.py --demo --once
   short busy timeout. The read connection is never a writer. `--read-only`
   turns even that off.
 - **Cycles, not seconds.** With `--refresh cycle`, the dashboard advances only
-  when the memory's own logical clock (`memory_cycle` / `dream_cycle`) ticks —
+  when the memory's own logical clock (`memory_cycle` / `dream_cycle`) ticks -
   matching the substrate. The heartbeat then merely *detects* a cycle; it isn't
   the cadence.
 

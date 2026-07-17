@@ -5,9 +5,9 @@ HRRs are a vector symbolic architecture for encoding compositional structure
 into fixed-width distributed representations. This module uses *phase vectors*:
 each concept is a vector of angles in [0, 2π). The algebraic operations are:
 
-  bind   — circular convolution (phase addition)  — associates two concepts
-  unbind — circular correlation (phase subtraction) — retrieves a bound value
-  bundle — superposition (circular mean)           — merges multiple concepts
+  bind   - circular convolution (phase addition)  - associates two concepts
+  unbind - circular correlation (phase subtraction) - retrieves a bound value
+  bundle - superposition (circular mean)           - merges multiple concepts
 
 Phase encoding is numerically stable, avoids the magnitude collapse of
 traditional complex-number HRRs, and maps cleanly to cosine similarity.
@@ -16,12 +16,12 @@ Atoms are generated deterministically from SHA-256 so representations are
 identical across processes, machines, and language versions.
 
 References:
-  Plate (1995) — Holographic Reduced Representations
-  Gayler (2004) — Vector Symbolic Architectures answer Jackendoff's challenges
+  Plate (1995) - Holographic Reduced Representations
+  Gayler (2004) - Vector Symbolic Architectures answer Jackendoff's challenges
 
 ENHANCEMENTS (rich encoding, v2):
   - _tokenize() shared helper
-  - encode_text_rich() — unigram BoW + positional binding + NON-commutative
+  - encode_text_rich() - unigram BoW + positional binding + NON-commutative
     rolled bigrams (recommended for encode_fact / conflict / abstraction)
   - encode_fact() uses encode_text_rich() internally
 
@@ -144,14 +144,14 @@ def similarity(a: "np.ndarray", b: "np.ndarray") -> float:
 
 def hrr_lift(phases: "np.ndarray") -> "np.ndarray":
     """Lift a phase vector to the ``(cos φ, sin φ)/√dim`` real vector whose COSINE equals the
-    HRR phase-similarity (E4 4a). Since ``mean(cos(a−b)) = (1/dim)·Σ[cos a·cos b + sin a·sin b]
+    HRR phase-similarity (E4 4a). Since ``mean(cos(a-b)) = (1/dim)·Σ[cos a·cos b + sin a·sin b]
     = dot(lift(a), lift(b))`` and ``‖lift‖ = 1``, the lifted vector is L2-unit and its cosine
     IS ``similarity(a, b)``.
 
     This is the client-side bridge that makes HRR recall homomorphic with ZERO new crypto: the
     Tier-1 blind store's existing cosine inner-product (``he_crypto.BlindRecallPRE`` over the
     encrypted HRR lifts in ``semantic_he_hrr``) computes HRR similarity directly on the encrypted
-    ``2*dim`` lift — no ``cos`` / ``mod 2π`` / ``bundle`` under HE (all stay plaintext here, per
+    ``2*dim`` lift - no ``cos`` / ``mod 2π`` / ``bundle`` under HE (all stay plaintext here, per
     roadmap principle 3.3). The store sees only the encrypted lift; the phase angle is not
     recoverable from it without the key. Proven on the node vs ``similarity`` (err ~1e-12).
     """
@@ -201,7 +201,7 @@ def encode_text_rich(text: str, dim: int = 1024) -> "np.ndarray":
       - Sensitive to adjacent-word substitutions (bigram binding diverges)
  
     Use this instead of encode_text() wherever order and phrase structure
-    matter — specifically in encode_fact() for conflict detection and
+    matter - specifically in encode_fact() for conflict detection and
     abstraction clustering. encode_text() is preserved for backward
     compatibility and for cases where BoW recall is the priority.
  
@@ -214,7 +214,7 @@ def encode_text_rich(text: str, dim: int = 1024) -> "np.ndarray":
  
     all_components = []
  
-    # Layer 1: Unigram BoW (original behavior — highest recall)
+    # Layer 1: Unigram BoW (original behavior - highest recall)
     for token in tokens:
         all_components.append(encode_atom(token, dim))
  
@@ -259,7 +259,7 @@ def encode_fact(content: str, entities: list, dim: int = 1024) -> "np.ndarray":
       - Word-order changes (e.g. passive voice) are detectable (positional).
  
     Role vectors are reserved atoms: "__hrr_role_content__", "__hrr_role_entity__"
-    These are identical to the original — no DB migration needed.
+    These are identical to the original - no DB migration needed.
  
     Enables algebraic extraction (unchanged from original):
         unbind(fact_vec, bind(entity_atom, ROLE_ENTITY)) ≈ content_vector
@@ -289,7 +289,7 @@ def encode_triple(subject: str, relation: str, object_: str, dim: int = 1024) ->
                        bind(rel,  ROLE_RELATION),
                        bind(obj,  ROLE_OBJECT) ).
 
-    Because binding is invertible, the stored triple is *queryable* by role —
+    Because binding is invertible, the stored triple is *queryable* by role -
     this is what Phase 5b uses for fuzzy relational recall:
 
         unbind(T, ROLE_OBJECT)  ≈ encode_atom(object)     # "(subj, rel, ?)"
@@ -316,7 +316,7 @@ def encode_triple_query(subject: str = None, relation: str = None,
                         object_: str = None, dim: int = 1024) -> "np.ndarray":
     """Partial-binding PROBE for relational recall (Phase 5b).
 
-    Bundles only the PROVIDED slots, each bound to its role atom — the same role
+    Bundles only the PROVIDED slots, each bound to its role atom - the same role
     atoms encode_triple uses. Comparing this probe to stored triple vectors with
     similarity() ranks them by how many of the known bindings they contain:
 
@@ -346,7 +346,7 @@ def encode_triple_query(subject: str = None, relation: str = None,
 
 
 def phases_to_bytes(phases: "np.ndarray") -> bytes:
-    """Serialize phase vector to bytes. float64 tobytes — 8 KB at dim=1024."""
+    """Serialize phase vector to bytes. float64 tobytes - 8 KB at dim=1024."""
     _require_numpy()
     return phases.tobytes()
 

@@ -2,7 +2,7 @@ r"""_crash_child.py - commit N facts, then HARD-exit mid-write (crash simulation
 
 Usage: python _crash_child.py <db_path> <n>
 Commits n facts (each add_or_reinforce_fact autocommits), then opens an
-uncommitted transaction with a partial INSERT and calls os._exit() — no commit,
+uncommitted transaction with a partial INSERT and calls os._exit() - no commit,
 no close. On reopen, SQLite must roll the partial write back and keep the n
 committed facts. Uses fake fixed embeddings, so it needs no Ollama.
 """
@@ -34,7 +34,7 @@ def run(db, n):
         pass
     sys.stdout.write(f"committed {n}, dying mid-write\n")
     sys.stdout.flush()
-    os._exit(137)   # hard kill — uncommitted INSERT must not survive
+    os._exit(137)   # hard kill - uncommitted INSERT must not survive
 
 
 if __name__ == "__main__":

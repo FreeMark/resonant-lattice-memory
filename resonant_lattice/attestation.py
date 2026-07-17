@@ -1,5 +1,5 @@
 """
-attestation.py — source_quote attestation (two-channel grounding verifier).
+attestation.py - source_quote attestation (two-channel grounding verifier).
 
 Phase D+. Pure (re + difflib + a passed entity list); no framework or heavy
 dependencies, so it is importable standalone (the test suite loads it directly).
@@ -8,19 +8,19 @@ A single similarity score (embedding cosine, HRR) CANNOT separate a trivial
 typo from a critical one: both 'teh'->'the' and '11434'->'11435' are a one-edit
 change, and embeddings deliberately blur surface specifics (numbers/IDs barely
 move them). The importance of a token is orthogonal to its string/semantic
-distance — so we decompose the quote and route each token-class to the metric
+distance - so we decompose the quote and route each token-class to the metric
 that is actually discriminative for it:
 
   • PROSE channel (fuzzy, typo-forgiving): difflib over a WINDOW of the
     transcript (~len(quote)) centred on the best-matching region, plus a
-    longest-contiguous coverage backstop. Windowing keeps the score — and the
-    quote_match_threshold knob — meaningful regardless of transcript length: a
+    longest-contiguous coverage backstop. Windowing keeps the score - and the
+    quote_match_threshold knob - meaningful regardless of transcript length: a
     whole-transcript ratio is 2M/(len(quote)+len(transcript)) and collapses
     toward 0 on a long log, so the knob would otherwise be inert. Tolerates
     typos, whitespace and casing.
   • SPECIFICS channel (exact, unforgiving): the load-bearing tokens. Numbers /
     IDs / ports / versions (digit-cores) are checked by SET MEMBERSHIP against
-    the transcript's number tokens — NOT as a substring of one concatenated
+    the transcript's number tokens - NOT as a substring of one concatenated
     digit blob, which would let a fabricated number slip through by spanning
     unrelated tokens (e.g. "3014" inside the blob for "...4.1 30b ... 14 ...
     34"). Named entities (reusing the system's own extractor) must appear
@@ -51,7 +51,7 @@ def _normalize_for_match(text: str) -> str:
 
 
 def _digit_core(token: str) -> str:
-    """Strip everything but digits — compare numeric identifiers exactly."""
+    """Strip everything but digits - compare numeric identifiers exactly."""
     return re.sub(r"\D", "", token)
 
 
@@ -62,7 +62,7 @@ def _attest_source_quote(quote: str, transcript: str, entities: List[str],
     Returns one of 'attested' | 'soft' | 'specific_mismatch' | 'unattested'.
     The SPECIFICS channel is checked first: a fabricated/changed numeric token or
     named entity short-circuits to 'specific_mismatch' (the caller DROPS the fact)
-    regardless of how convincing the surrounding prose is — that is exactly the
+    regardless of how convincing the surrounding prose is - that is exactly the
     'important typo' case a fuzzy score would wave through.
     """
     if not quote or not transcript:
@@ -120,10 +120,10 @@ def _attest_source_quote(quote: str, transcript: str, entities: List[str],
     m = sm.find_longest_match(0, len(nq), 0, len(nt))
     coverage = m.size / max(len(nq), 1)
     # FIX 2: score the fuzzy ratio over a WINDOW of the transcript ~len(quote)
-    # around the best match — NOT the whole transcript. A whole-transcript ratio
+    # around the best match - NOT the whole transcript. A whole-transcript ratio
     # collapses toward 0 on a long log, making ratio_threshold inert (coverage
-    # silently did all the work). Windowing keeps the score — and the
-    # quote_match_threshold knob — meaningful at any transcript length.
+    # silently did all the work). Windowing keeps the score - and the
+    # quote_match_threshold knob - meaningful at any transcript length.
     qstart = max(0, m.b - m.a)                 # transcript offset the quote aligns to
     pad = max(4, len(nq) // 8)                 # small slack for boundary drift
     window = nt[max(0, qstart - pad): qstart + len(nq) + pad]

@@ -1,18 +1,18 @@
-"""store_blind.py — BlindMixin: Tier-1 blind-store (HE) ciphertext storage.
+"""store_blind.py - BlindMixin: Tier-1 blind-store (HE) ciphertext storage.
 
 The STORE side of the homomorphic blind store (ENCRYPTION_ROADMAP §8). Holds ONLY opaque
-ciphertext per fact across the four blind tables — `semantic_he` (CKKS embedding, E2),
+ciphertext per fact across the four blind tables - `semantic_he` (CKKS embedding, E2),
 `semantic_he_hrr` (CKKS HRR lift, E4), `semantic_he_meta` (CKKS resonance scalar, E5), and
-`semantic_he_entities` (AEAD entity-name set, E7) — plus the `reencrypt_audit` log. The store
-never decrypts (it has no secret key). Encryption happens client-side — e.g.
-`he_crypto.BlindRecallPRE.encrypt_unit_vector` under the public key, or AEAD for entities —
+`semantic_he_entities` (AEAD entity-name set, E7) - plus the `reencrypt_audit` log. The store
+never decrypts (it has no secret key). Encryption happens client-side - e.g.
+`he_crypto.BlindRecallPRE.encrypt_unit_vector` under the public key, or AEAD for entities -
 BEFORE the ct reaches here, so these methods are pure SQLite BLOB ops with no `openfhe`
 dependency on the store side, and are fully substrate-testable without HE installed.
 
 Gating: the blind tables are created unconditionally by the schema migrations (empty tables
 cost nothing on non-blind stores, mirroring the other table-only migrations), but they are only
 ever populated on the blind write path, which the client/provider drives when
-`encryption_mode=blind`. These methods are mode-agnostic — the caller decides whether to use
+`encryption_mode=blind`. These methods are mode-agnostic - the caller decides whether to use
 them; the `table` selector is allowlisted (`_he_table`) so an untrusted name is never
 interpolated into SQL.
 
@@ -30,11 +30,11 @@ DEFAULT_HE_VERSION = 1
 
 # Blind-vector ciphertext tables. semantic_he holds the encrypted EMBEDDING (E2);
 # semantic_he_hrr holds the encrypted HRR LIFT (E4). Same shape + ops, so the methods
-# below take a `table` selector — allowlisted (NEVER interpolate an untrusted name into SQL).
+# below take a `table` selector - allowlisted (NEVER interpolate an untrusted name into SQL).
 DEFAULT_HE_TABLE = "semantic_he"
 # semantic_he = encrypted embedding (E2); semantic_he_hrr = encrypted HRR lift (E4);
 # semantic_he_meta = encrypted resonance scalar (E5 5b); semantic_he_entities = AEAD-encrypted
-# per-fact entity-name set (E7 7b — opaque blob, overlap is a client-side op);
+# per-fact entity-name set (E7 7b - opaque blob, overlap is a client-side op);
 # semantic_he_content = AEAD content surface ({content, category, quote, source}, §5-1); and the
 # §5-1b sealed TEXT surfaces keyed by their SOURCE row (not fact id): semantic_he_episodes
 # ({role, content} from episodes), semantic_he_triples ({subject, relation, object} from
@@ -52,10 +52,10 @@ def _he_table(table: str) -> str:
 
 # Per-table "plaintext SOURCE present" predicate for the reconciliation worklist. A fact only
 # belongs on a table's missing-blind worklist if the plaintext it would be mirrored FROM actually
-# exists — otherwise it can NEVER be mirrored and would permanently saturate the capped LIMIT
+# exists - otherwise it can NEVER be mirrored and would permanently saturate the capped LIMIT
 # window (the write-path-completeness poison-pill: a fact with a NULL hrr_vector is returned every
 # pass, skipped every pass, and starves higher-id facts that DO have an HRR lift). These fragments
-# are STATIC and code-controlled — keyed by the already-allowlisted table name, never an untrusted
+# are STATIC and code-controlled - keyed by the already-allowlisted table name, never an untrusted
 # string interpolated into SQL.
 _HE_SOURCE_PRESENT = {
     "semantic_he": "EXISTS (SELECT 1 FROM semantic_vec v WHERE v.id = f.id)",
@@ -70,18 +70,18 @@ _HE_SOURCE_PRESENT = {
 # The blind recall scan scores the query against EVERY stored ciphertext. iter_he_vectors
 # fetchall's the whole table, so at ~1 MB per embedding ciphertext a real corpus lands
 # GIGABYTES resident and the scan thrashes the memory bus (measured: 4,952 facts => ~5 GB
-# RSS, and adding CPU threads made it SLOWER — bandwidth-bound). stream_he_vectors pages
+# RSS, and adding CPU threads made it SLOWER - bandwidth-bound). stream_he_vectors pages
 # instead, holding only `batch` ciphertexts at once. Latency is flat across batch size, so
 # the batch is purely a RAM/concurrency dial; resolve_scan_batch sizes it PORTABLY from the
-# MEASURED per-ciphertext footprint and DETECTED available RAM — nothing hardcoded to a host.
+# MEASURED per-ciphertext footprint and DETECTED available RAM - nothing hardcoded to a host.
 # Latency is FLAT across batch size (measured: B=64/256/1024 all ~275s), so a bigger batch buys
 # nothing but RAM. The tuner therefore DEFAULTS to a modest latency-optimal page and only SHRINKS
-# it when RAM (per concurrent scan) can't afford even that — it never inflates to fill memory,
+# it when RAM (per concurrent scan) can't afford even that - it never inflates to fill memory,
 # which on a big-RAM host would just recreate the fetchall problem (whole corpus resident) and
 # starve concurrency. Smaller batch => more scans fit in RAM at once.
 _SCAN_BATCH_TARGET = 256       # round-trip-amortized sweet spot; the default page size
 _SCAN_BATCH_MIN = 32           # never page fewer than this (keep DB round-trips amortized)
-_SCAN_RAM_FRACTION = 0.20      # of MemAvailable, per concurrent scan — a CEILING, not a target
+_SCAN_RAM_FRACTION = 0.20      # of MemAvailable, per concurrent scan - a CEILING, not a target
 
 
 def detect_available_ram_bytes() -> Optional[int]:
@@ -156,7 +156,7 @@ class BlindMixin:
         return bytes(row["ct"]) if row else None
 
     def iter_he_vectors(self, table: str = DEFAULT_HE_TABLE) -> List[Tuple[int, bytes]]:
-        """Return [(fact_id, ct_blob), …] for every stored ct — the blind-recall scan.
+        """Return [(fact_id, ct_blob), …] for every stored ct - the blind-recall scan.
 
         Materialized list (not a live cursor) so the shared connection isn't held
         open across the caller's homomorphic scoring loop. Ordered by id for stable,
@@ -172,10 +172,10 @@ class BlindMixin:
     def stream_he_vectors(self, table: str = DEFAULT_HE_TABLE,
                           batch: int = _SCAN_BATCH_TARGET) -> Iterator[Tuple[int, bytes]]:
         """Yield ``(fact_id, ct_blob)`` for every stored ct in id order, ``batch`` rows at a
-        time — the BOUNDED-RAM blind-recall scan (A1). Unlike iter_he_vectors (which
+        time - the BOUNDED-RAM blind-recall scan (A1). Unlike iter_he_vectors (which
         fetchall's the whole table, so ~1 MB/ct becomes GBs resident at corpus scale), this
         keeps only ``batch`` ciphertexts in memory at once via KEYED PAGINATION
-        (``WHERE id > last ORDER BY id LIMIT batch`` over the primary key — O(log n) per page,
+        (``WHERE id > last ORDER BY id LIMIT batch`` over the primary key - O(log n) per page,
         no OFFSET rescan). It reuses ``self._conn`` (so it composes with at-rest SQLCipher; a
         fresh connection would lack the unlocked key) and holds ``self._lock`` only for each
         brief page fetch, releasing it while the caller does the slow homomorphic scoring."""
@@ -200,7 +200,7 @@ class BlindMixin:
             last_id = int(rows[-1]["id"])
 
     def he_blob_size(self, table: str = DEFAULT_HE_TABLE) -> int:
-        """Average stored ciphertext size in bytes (0 if the table is empty) — the MEASURED
+        """Average stored ciphertext size in bytes (0 if the table is empty) - the MEASURED
         per-ct footprint that ``resolve_scan_batch`` uses to size the streaming scan. Cheap
         AVG(LENGTH) over the (small) blind table."""
         tbl = _he_table(table)
@@ -209,17 +209,17 @@ class BlindMixin:
         return int(row[0]) if row and row[0] else 0
 
     def count_he_vectors(self, table: str = DEFAULT_HE_TABLE) -> int:
-        """Number of stored ciphertexts — leaks only the fact count (see §7.3)."""
+        """Number of stored ciphertexts - leaks only the fact count (see §7.3)."""
         tbl = _he_table(table)
         with self._lock:
             return self._conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
 
     def facts_missing_blind(self, table: str = DEFAULT_HE_TABLE, limit: int = 0) -> List[int]:
-        """Fact ids with a (non-superseded) plaintext fact row but NO ciphertext in ``table`` —
+        """Fact ids with a (non-superseded) plaintext fact row but NO ciphertext in ``table`` -
         the blind-tier RECONCILIATION worklist (roadmap §14 Priority 6a / write-path completeness).
 
-        A LEFT JOIN so every fact created OUTSIDE the consolidation mirror hook — abstraction /
-        gist / procedural distillation (all store-side) + the builtin-memory mirror — is caught,
+        A LEFT JOIN so every fact created OUTSIDE the consolidation mirror hook - abstraction /
+        gist / procedural distillation (all store-side) + the builtin-memory mirror - is caught,
         plus a first-blind-enable BACKFILL of a pre-existing store. The provider's
         ``_blind_reconcile`` reads each id's embedding/HRR/entities back from the plaintext store
         and mirrors them, so this is the idempotent driver (once mirrored, an id drops off the
@@ -241,12 +241,12 @@ class BlindMixin:
 
     def facts_needing_entity_mirror(self, limit: int = 0) -> List[int]:
         """Fact ids whose AEAD entity set needs (re)mirroring into ``semantic_he_entities``:
-        either NO ciphertext row yet, OR ``entities_dirty = 1`` — a new entity link was added
+        either NO ciphertext row yet, OR ``entities_dirty = 1`` - a new entity link was added
         since the last mirror (reinforcement grows a fact's entity set; see
         ``store_facts._link_entities``).
 
         Distinct from ``facts_missing_blind`` because the entity set is the ONE blind source that
-        MUTATES — the embedding and HRR lift are content-derived and immutable, so 'mirror once
+        MUTATES - the embedding and HRR lift are content-derived and immutable, so 'mirror once
         when the row is missing' silently goes stale for entities. ``_blind_reconcile`` mirrors
         each id and clears the flag via ``mark_entities_mirrored``, keeping this the idempotent
         driver. ``limit`` > 0 batches a backfill; ordered by id for stable, resumable batching."""
@@ -270,7 +270,7 @@ class BlindMixin:
 
     # ── §5-1 sealed-content dedup identity (content_hmac, 3e) ─────────────────────
     def set_content_hmac(self, fact_id: int, hmac_hex: str) -> None:
-        """Store a fact's blind dedup identity — the keyed HMAC hex of its normalized content
+        """Store a fact's blind dedup identity - the keyed HMAC hex of its normalized content
         (crypto_keys.content_hmac). Pure column write; the store never holds the HMAC key, so it
         can match equal identities but not derive them. Idempotent per fact (plain UPDATE)."""
         if not hmac_hex:
@@ -283,7 +283,7 @@ class BlindMixin:
             self._conn.commit()
 
     def facts_missing_content_hmac(self, limit: int = 0) -> List[int]:
-        """Fact ids (non-superseded) whose ``content_hmac`` is not yet computed — the §5-1
+        """Fact ids (non-superseded) whose ``content_hmac`` is not yet computed - the §5-1
         dedup-identity backfill worklist. Independent of the content ciphertext mirror (a fact can
         have one without the other), so ``_blind_reconcile`` drives it as its own idempotent pass:
         once ``set_content_hmac`` stamps a row it drops off. ``limit`` > 0 batches; ordered by id
@@ -300,9 +300,9 @@ class BlindMixin:
     # worklist keyed on the SOURCE row PK + a payload reader. The SQL fragments are static and
     # code-controlled (no untrusted interpolation). The mirror table's CASCADE-FK to the source PK
     # means pruning the source (episode prune, fact prune -> triple CASCADE, summary prune) drops
-    # the ciphertext automatically — no stale blind rows.
+    # the ciphertext automatically - no stale blind rows.
     def episodes_missing_blind(self, limit: int = 0) -> List[int]:
-        """Episode ids with a plaintext row but NO ciphertext in ``semantic_he_episodes`` — the
+        """Episode ids with a plaintext row but NO ciphertext in ``semantic_he_episodes`` - the
         §5-1b episode-mirror worklist. Idempotent (LEFT JOIN); ``limit`` > 0 batches; id order."""
         sql = ("SELECT e.id FROM episodes e LEFT JOIN semantic_he_episodes b ON b.id = e.id "
                "WHERE b.id IS NULL ORDER BY e.id")
@@ -312,7 +312,7 @@ class BlindMixin:
             return [r["id"] for r in self._conn.execute(sql).fetchall()]
 
     def get_episode_payload(self, episode_id: int) -> Optional[dict]:
-        """The sealable text surface of one episode — ``{role, content}`` — or None if absent."""
+        """The sealable text surface of one episode - ``{role, content}`` - or None if absent."""
         with self._lock:
             row = self._conn.execute(
                 "SELECT role, content FROM episodes WHERE id = ?", (int(episode_id),)).fetchone()
@@ -320,7 +320,7 @@ class BlindMixin:
 
     def triples_missing_blind(self, limit: int = 0) -> List[int]:
         """Relation ids (fact_relations.relation_id) with a plaintext row but NO ciphertext in
-        ``semantic_he_triples`` — the §5-1b triple-mirror worklist. Idempotent; ``limit`` batches."""
+        ``semantic_he_triples`` - the §5-1b triple-mirror worklist. Idempotent; ``limit`` batches."""
         sql = ("SELECT r.relation_id FROM fact_relations r "
                "LEFT JOIN semantic_he_triples b ON b.id = r.relation_id "
                "WHERE b.id IS NULL ORDER BY r.relation_id")
@@ -330,7 +330,7 @@ class BlindMixin:
             return [r["relation_id"] for r in self._conn.execute(sql).fetchall()]
 
     def get_triple_payload(self, relation_id: int) -> Optional[dict]:
-        """The sealable text of one triple — ``{subject, relation, object}`` — or None if absent."""
+        """The sealable text of one triple - ``{subject, relation, object}`` - or None if absent."""
         with self._lock:
             row = self._conn.execute(
                 "SELECT subject, relation, object FROM fact_relations WHERE relation_id = ?",
@@ -339,7 +339,7 @@ class BlindMixin:
                 "object": row["object"]} if row else None
 
     def relation_ids_for_fact(self, fact_id: int) -> List[int]:
-        """Structural map fact -> its relation ids (NO triple text) — what a §5-2 client visitor uses
+        """Structural map fact -> its relation ids (NO triple text) - what a §5-2 client visitor uses
         to fetch + decrypt a fact's sealed triples. Survives the §5-4 seal, which nulls only the
         triple TEXT columns while these structural rows/ids remain. Ordered by relation_id."""
         with self._lock:
@@ -349,7 +349,7 @@ class BlindMixin:
 
     def summaries_missing_blind(self, limit: int = 0) -> List[int]:
         """Summary ids (session_summaries.summary_id) with a plaintext row but NO ciphertext in
-        ``semantic_he_summaries`` — the §5-1b summary-mirror worklist. Idempotent; ``limit`` batches."""
+        ``semantic_he_summaries`` - the §5-1b summary-mirror worklist. Idempotent; ``limit`` batches."""
         sql = ("SELECT s.summary_id FROM session_summaries s "
                "LEFT JOIN semantic_he_summaries b ON b.id = s.summary_id "
                "WHERE b.id IS NULL ORDER BY s.summary_id")
@@ -370,9 +370,9 @@ class BlindMixin:
     def record_reencrypt_event(self, cycle: int, query_token: str, k: int) -> None:
         """Append one re-encryption grant to the persisted audit log (roadmap 6c).
 
-        The store records WHAT it re-encrypted for the agent — the logical ``cycle``, the
+        The store records WHAT it re-encrypted for the agent - the logical ``cycle``, the
         binding ``query_token`` (from ScopeLimiter.authorize / BlindReEncryptGate.register),
-        and ``k`` results — so the user has a substrate-checkable trail of the honest-seam
+        and ``k`` results - so the user has a substrate-checkable trail of the honest-seam
         policy bound. Pure SQLite; no key/crypto here."""
         if not query_token or int(k) <= 0:
             raise ValueError("query_token must be non-empty and k positive")

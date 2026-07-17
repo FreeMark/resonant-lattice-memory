@@ -1,9 +1,9 @@
-"""eval_presets.py — run a corpus under N config presets and compare.
+"""eval_presets.py - run a corpus under N config presets and compare.
 
 Embeddings are computed ONCE into a shared cache, so presets differ ONLY in their dynamics (never
 in the vectors); the replays then run in parallel (each gets its own temp store). A preset is
-``{"name": str, "config": {...}}`` — exactly the JSON the slider page (A12) exports. Results are
-ranked by right-time recall, then by (low) poison leak — the A1/A6 priority order.
+``{"name": str, "config": {...}}`` - exactly the JSON the slider page (A12) exports. Results are
+ranked by right-time recall, then by (low) poison leak - the A1/A6 priority order.
 """
 
 import concurrent.futures as _cf

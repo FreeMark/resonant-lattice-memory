@@ -1,4 +1,4 @@
-"""store_dream.py — DreamCycleMixin: Hebbian maintenance (decay, dwell,
+"""store_dream.py - DreamCycleMixin: Hebbian maintenance (decay, dwell,
 promotion, conflict bleed/resolution, pruning, HRR re-encode).
 
 Mixed into LatticeStore; relies on the composite for self._conn/_lock and
@@ -71,7 +71,7 @@ def _policy_stems(content: str) -> set:
 # "[web_search] prefer Y") as category='procedural' facts. Field finding from
 # overnight curriculum runs: this layer accumulates CONTRADICTORY guidance
 # ("bundle many URLs per call" vs "prefer a single URL per invocation") that
-# contradicts by PARAPHRASE — and the general HRR pass excludes the category
+# contradicts by PARAPHRASE - and the general HRR pass excludes the category
 # (template-parallel, entity-thin), so the pairs were never flagged. An agent
 # recalling both flip-flops between strategies, or worse, recalls loop
 # promoters ("retry the exact same failed request"). The sweep pairs facts
@@ -82,13 +82,13 @@ def _policy_stems(content: str) -> set:
 #                          reason-model adjudicator (capped per pass) and lock
 #                          ONLY on an explicit True. Unlike the poison-policy
 #                          pass this is NOT fail-open: superstition is
-#                          self-inflicted, not adversarial — a missed pair
+#                          self-inflicted, not adversarial - a missed pair
 #                          waits for the next cycle; a false duel would lock a
 #                          useful heuristic for nothing.
 _PROC_TOOL_RE = re.compile(r"^\s*\[([a-z0-9_\-]+)\]", re.IGNORECASE)
 # Stance markers. Deliberately narrow: procedural facts often carry mixed
 # polarity in one sentence ("X often fails; prefer Y"), so bare "fail"/"use"
-# would misclassify — ambiguity returns "" and defers to the adjudicator lane.
+# would misclassify - ambiguity returns "" and defers to the adjudicator lane.
 _PROC_AVOID = ("avoid", "do not", "don't", "never", "must not",
                "consistently fail", "consistently result", "unreliable")
 _PROC_PREFER = ("prefer", "always set", "always use", "always enable",
@@ -140,7 +140,7 @@ class DreamCycleMixin:
 
         Stored HRR vectors are float64 (8 bytes/element). If the blob length
         doesn't match the configured hrr_dim, the vector was encoded at a
-        different dim — return None so callers skip it rather than crashing
+        different dim - return None so callers skip it rather than crashing
         a whole dream cycle on a numpy shape mismatch.
         """
         if blob is None or not _HRR_AVAILABLE:
@@ -190,7 +190,7 @@ class DreamCycleMixin:
                     "SELECT id, content FROM semantic_facts"
                 ).fetchall()
                 if not facts:
-                    # Fresh store — nothing to re-encode; just stamp.
+                    # Fresh store - nothing to re-encode; just stamp.
                     self._conn.execute(
                         "INSERT OR REPLACE INTO meta(key, value) VALUES ('hrr_reencoded', ?)",
                         (target_version,),
@@ -228,7 +228,7 @@ class DreamCycleMixin:
                     "INSERT OR REPLACE INTO meta(key, value) VALUES ('hrr_reencoded', ?)",
                     (target_version,),
                 )
-                # The store's vectors are now genuinely at self.hrr_dim — update
+                # The store's vectors are now genuinely at self.hrr_dim - update
                 # the stamped dim so _stamp_meta() stops reporting a mismatch
                 # that the re-encode just fixed.
                 self._conn.execute(
@@ -237,7 +237,7 @@ class DreamCycleMixin:
                 )
                 self._conn.commit()
                 logger.info(
-                    "HRR re-encode complete — %d facts normalized to %s encoding.",
+                    "HRR re-encode complete - %d facts normalized to %s encoding.",
                     updated, target_version,
                 )
                 return updated
@@ -253,7 +253,7 @@ class DreamCycleMixin:
         stored ``semantic_vec`` vectors in the OLD model's space, so a new-model query embedding no
         longer matches them and recall silently degrades. This recomputes every fact's embedding
         from its stored content via ``embed_fn`` (the live Ollama embedder the provider passes), and
-        REBUILDS ``semantic_vec`` at the new dimension if it changed — so a model swap on an existing
+        REBUILDS ``semantic_vec`` at the new dimension if it changed - so a model swap on an existing
         store is turnkey. The plaintext analogue of ``reencode_hrr_if_needed``; runs off the hot path
         from the dream cycle, self-gating via ``meta['embed_model']``.
 
@@ -266,7 +266,7 @@ class DreamCycleMixin:
 
         Held under ``self._lock`` for the whole pass (like the cosine rebuild) so no fact can be
         inserted at the old model/dim mid-migration. Network-bound but one-shot + background. Only
-        stamps (locks in the new model) when EVERY fact re-embedded — a transient embedder outage
+        stamps (locks in the new model) when EVERY fact re-embedded - a transient embedder outage
         leaves the gate open so the next dream cycle retries. ``embed_fn(text) -> list[float]`` (None
         on failure). Returns the number of facts re-embedded (0 if skipped)."""
         if embed_fn is None or not target_model:
@@ -316,8 +316,8 @@ class DreamCycleMixin:
                     else:
                         failed += 1
                 if not new_vecs:
-                    # Embedder down — leave the gate OPEN (don't stamp) so we retry next cycle.
-                    logger.error("Migration: re-embed produced no vectors (embedder down?) — "
+                    # Embedder down - leave the gate OPEN (don't stamp) so we retry next cycle.
+                    logger.error("Migration: re-embed produced no vectors (embedder down?) - "
                                  "will retry next dream cycle.")
                     return 0
 
@@ -354,7 +354,7 @@ class DreamCycleMixin:
                 self._conn.commit()
                 logger.info("Migration: re-embedded %d/%d facts to %s%s.",
                             len(new_vecs), len(facts), target_model,
-                            "" if failed == 0 else f" ({failed} failed — gate left open for retry)")
+                            "" if failed == 0 else f" ({failed} failed - gate left open for retry)")
                 return len(new_vecs)
             except Exception as e:
                 logger.error("Re-embed migration failed: %s", e)
@@ -368,11 +368,11 @@ class DreamCycleMixin:
 
         ``protect_conflicts`` holds contested facts (active conflict group) in sustained-resonance
         limbo (conflict-limbo, A9/A13). ``peak_discount`` (0..1) is surprise/importance-weighted
-        retention (A11): a fact that EVER mattered — high ``max_resonance_seen``, e.g. a surprising
-        one-off that entered high via ``novelty_boost``, or a reinforced fact — fades SLOWER (up to
+        retention (A11): a fact that EVER mattered - high ``max_resonance_seen``, e.g. a surprising
+        one-off that entered high via ``novelty_boost``, or a reinforced fact - fades SLOWER (up to
         ``peak_discount`` less decay once its peak reaches ``promotion_threshold``), so the unique
         one-off is retained longer before going dormant. Both default off (legacy uniform decay)."""
-        # Pinned facts (A5, P4a) are identity-level — exempt from decay entirely (here and in
+        # Pinned facts (A5, P4a) are identity-level - exempt from decay entirely (here and in
         # staleness/prune/cap), so a never-forget fact never bleeds toward dormancy.
         where = "tier IN ('short', 'mid') AND COALESCE(pinned, 0) = 0"
         if protect_conflicts:
@@ -406,7 +406,7 @@ class DreamCycleMixin:
 
     def apply_staleness_decay(self, current_cycle: int, boost: float,
                               halflife: float = 50.0) -> int:
-        """Phase 2 'use it or lose it' — extra decay for weak AND long-unconfirmed
+        """Phase 2 'use it or lose it' - extra decay for weak AND long-unconfirmed
         facts. Off by default (boost <= 0 ⇒ no-op).
 
         Targets only the facts that are already fading on both axes: short/mid
@@ -445,8 +445,8 @@ class DreamCycleMixin:
                                          categories: tuple = ('procedural',)) -> int:
         """Perishable-knowledge decay for PROCEDURAL (tool-use) facts.
 
-        Domain facts are largely permanent, but procedural knowledge — which
-        search operator works, which URL pattern to fetch — ages as tools and
+        Domain facts are largely permanent, but procedural knowledge - which
+        search operator works, which URL pattern to fetch - ages as tools and
         backends change. Two design facts make stale procedural advice sticky: it
         is EXCLUDED from conflict detection (so a corrected rule can't duel it
         out), and once it reaches the long tier it is decay-EXEMPT. That
@@ -457,8 +457,8 @@ class DreamCycleMixin:
         don't need: a procedural fact not confirmed within ``grace_cycles`` bleeds
         ``bleed`` resonance each dream cycle, in ANY tier (unlike apply_cycle_decay,
         which exempts long). ``last_confirmed_cycle`` is refreshed by every
-        reinforcement (add_or_reinforce_fact) — and an in-use pattern is re-distilled
-        and reinforced each dream cycle — so a pattern that stays useful never
+        reinforcement (add_or_reinforce_fact) - and an in-use pattern is re-distilled
+        and reinforced each dream cycle - so a pattern that stays useful never
         bleeds; once a better/pinned rule wins and the stale one stops being
         re-confirmed, it fades and prunes on its own. Pinned facts and facts in an
         active conflict group are exempt. Off when ``bleed`` <= 0. Returns rows hit.
@@ -487,7 +487,7 @@ class DreamCycleMixin:
     def increment_tier_cycles(self) -> None:
         """Advance the tier-dwell counter by one dream cycle.
 
-        Turn/cycle-based only — never wall-clock. Counts dwell for the tiers
+        Turn/cycle-based only - never wall-clock. Counts dwell for the tiers
         that can still promote (short, mid); 'long' is terminal.
         """
         with self._lock:
@@ -511,7 +511,7 @@ class DreamCycleMixin:
         counted fresh. mid→long runs first so a fact cannot skip a tier in a
         single call (the reset also prevents this independently)."""
         with self._lock:
-            # mid → long FIRST — requires mid-tier dwell satisfied
+            # mid → long FIRST - requires mid-tier dwell satisfied
             self._conn.execute(
                 """
                 UPDATE semantic_facts
@@ -522,7 +522,7 @@ class DreamCycleMixin:
                 """,
                 (self.promotion_threshold, self.mid_tier_cycles),
             )
-            # short → mid — requires short-tier dwell satisfied
+            # short → mid - requires short-tier dwell satisfied
             self._conn.execute(
                 """
                 UPDATE semantic_facts
@@ -584,14 +584,14 @@ class DreamCycleMixin:
             )
             self._conn.commit()
 
-            # Step 3 (free winner) deliberately removed — see free_conflict_winners()
+            # Step 3 (free winner) deliberately removed - see free_conflict_winners()
 
     def free_conflict_winners(self) -> None:
         """Remove conflict_group_id from facts whose opponents have been pruned.
  
         Called from the dream cycle AFTER prune_weak_facts() so that losers
         (resonance <= 0) are already deleted. Any conflict group that now has
-        only one member is resolved — that survivor is the winner and gets
+        only one member is resolved - that survivor is the winner and gets
         its conflict lock cleared.
  
         This was previously an unguarded _conn.execute() call in __init__.py.
@@ -666,10 +666,10 @@ class DreamCycleMixin:
         """Phase 6: resolve a conflict explicitly (user/agent-driven).
 
         The winner is boosted, confirmed, and freed; the OTHER live members of its
-        group are SUPERSEDED (P1 — retired to tier='superseded', superseded_by=winner),
+        group are SUPERSEDED (P1 - retired to tier='superseded', superseded_by=winner),
         never deleted. Returns {winner_id, conflict_group_id, superseded:[ids]} or None
         if winner_id is not in an active conflict group. This is the explicit, auditable
-        resolution path — nothing is silently overwritten beyond the existing duel.
+        resolution path - nothing is silently overwritten beyond the existing duel.
         """
         with self._lock:
             if current_cycle is None:
@@ -728,7 +728,7 @@ class DreamCycleMixin:
         """Phase 6: dismiss a conflict group as a FALSE POSITIVE (members compatible).
 
         The second resolution verb. resolve_conflict picks a winner and retires
-        every other member as superseded — which is WRONG when arbitration finds
+        every other member as superseded - which is WRONG when arbitration finds
         the facts COMPATIBLE (both true), e.g. the template-parallel detection
         false-positive class ("gl_FragCoord is available in GLSL ES 1.00/3.00"
         vs "gl_FrontFacing is available in GLSL ES 1.00/3.00"). Before this verb
@@ -738,7 +738,7 @@ class DreamCycleMixin:
 
         Unlocks ALL live members of the group: clears the conflict lock, stamps
         last_confirmed_cycle (arbitration just verified them), and applies a
-        small SATURATING confirm bump — symmetric across members, unlike the
+        small SATURATING confirm bump - symmetric across members, unlike the
         winner boost. Nothing is superseded, nothing is destroyed. Accepts the
         group id or any member's fact_id. Returns {conflict_group_id,
         dismissed:[ids]} or None when nothing matches an ACTIVE group."""
@@ -787,7 +787,7 @@ class DreamCycleMixin:
         Run in the dream cycle BEFORE prune_weak_facts(). apply_conflict_decay()
         has already bled each active conflict group; a member at resonance <= 0 is
         a loser the prune would otherwise DELETE. For each such group the surviving
-        member with the highest resonance (tie-break newest id — matching the
+        member with the highest resonance (tie-break newest id - matching the
         resurrection bias in apply_conflict_decay) is the winner. Every loser is
         moved to a terminal tier='superseded' with superseded_by=winner and
         superseded_at_cycle=current_cycle, and its conflict_group_id is cleared so
@@ -796,7 +796,7 @@ class DreamCycleMixin:
         Superseded rows are FROZEN: excluded from decay/promotion by tier, from
         new conflict detection (tier != 'long'), from recall by the exclusion
         sweep, and from prune_weak_facts. They are belief history, not active
-        belief — no content is rewritten. Non-lethal conflict mode
+        belief - no content is rewritten. Non-lethal conflict mode
         (conflict_decay_floor > 0) never drives a member to <= 0, so there are no
         losers and this is a no-op. Returns the number of facts superseded.
         """
@@ -899,22 +899,22 @@ class DreamCycleMixin:
 
     def prune_weak_facts(self, forget_after_cycles: int = 0, protect_conflicts: bool = False) -> None:
         """Remove facts that have completely faded, regardless of tier. (Phase 1b: tier='superseded'
-        is EXCLUDED — those sit at resonance <= 0 by design but are retained conflict history.)
+        is EXCLUDED - those sit at resonance <= 0 by design but are retained conflict history.)
 
         Forget policy (buried-but-pluckable, P2b-store):
-          * ``forget_after_cycles == 0`` — delete a dormant fact (resonance <= 0) immediately (legacy
+          * ``forget_after_cycles == 0`` - delete a dormant fact (resonance <= 0) immediately (legacy
             behavior; the method default, so existing callers/tests are unchanged).
-          * ``forget_after_cycles  > 0`` — DEMOTE then deep-delete: a dormant fact is KEPT (low
+          * ``forget_after_cycles  > 0`` - DEMOTE then deep-delete: a dormant fact is KEPT (low
             resonance, still pluckable by a strong cue) and deleted only after it has stayed dormant
-            for ``forget_after_cycles`` cycles. 'Eventually fades, preserve the essence' — cycle-
+            for ``forget_after_cycles`` cycles. 'Eventually fades, preserve the essence' - cycle-
             driven, no wall-clock.
-          * ``forget_after_cycles  < 0`` — never delete (pure archive).
+          * ``forget_after_cycles  < 0`` - never delete (pure archive).
         Dormancy is stamped/cleared on ``dormant_since_cycle`` against the logical memory clock.
         When ``protect_conflicts`` is set, facts in an ACTIVE conflict group are never demoted or
-        deleted — held in limbo until arbitration (conflict-limbo, A9/A13). Default off (legacy)."""
+        deleted - held in limbo until arbitration (conflict-limbo, A9/A13). Default off (legacy)."""
         contested = " AND conflict_group_id IS NULL" if protect_conflicts else ""
         # Pinned facts (A5, P4a) are never demoted or deleted (they also never decay to 0, but a
-        # fact pinned while already dormant must still be protected) — guard every delete/stamp.
+        # fact pinned while already dormant must still be protected) - guard every delete/stamp.
         contested += " AND COALESCE(pinned, 0) = 0"
         with self._lock:
             if forget_after_cycles == 0:
@@ -949,7 +949,7 @@ class DreamCycleMixin:
 
         Disabled when max_long_facts <= 0 (default). When set, keeps the strongest
         (highest resonance, then most-recently-updated) long facts and deletes the
-        rest — a bounded-memory safety valve. Returns the number evicted.
+        rest - a bounded-memory safety valve. Returns the number evicted.
         """
         if max_long_facts <= 0:
             return 0
@@ -993,13 +993,13 @@ class DreamCycleMixin:
     def _parallel_subject_veto(self, fid1: int, ents1: set,
                                fid2: int, ents2: set) -> bool:
         """True when a band-matched pair is PARALLEL facts about different
-        subjects — not a contradiction.
+        subjects - not a contradiction.
 
         The false-positive class this kills: "gl_FragCoord is available in GLSL
         ES 1.00/3.00" vs "gl_FrontFacing is available in GLSL ES 1.00/3.00".
         Shared context entities (the version numbers) push overlap past 0.5 and
-        the shared sentence template lands similarity mid-band — the exact
-        contradiction signature — yet both facts are TRUE. What separates them
+        the shared sentence template lands similarity mid-band - the exact
+        contradiction signature - yet both facts are TRUE. What separates them
         from a real attribute contradiction ("user lives in Seattle" vs "user
         lives in Portland") is the SUBJECT role: parallel facts have disjoint
         subjects, contradictions share one. Entity sets are role-blind, so this
@@ -1015,7 +1015,7 @@ class DreamCycleMixin:
         subj1 = self._relation_subjects(fid1)
         subj2 = self._relation_subjects(fid2)
         if not subj1 or not subj2:
-            return False                      # no role information — cannot veto
+            return False                      # no role information - cannot veto
         e1 = {str(e).strip().lower() for e in ents1}
         e2 = {str(e).strip().lower() for e in ents2}
 
@@ -1040,12 +1040,12 @@ class DreamCycleMixin:
         """HRR-powered conflict detection for established (mid + long tier) facts.
 
         Scans the 300 most-recently-updated mid/long facts (was long-only, which
-        missed contradictions until BOTH facts survived to long tier — a
+        missed contradictions until BOTH facts survived to long tier - a
         contradiction is most worth surfacing when one belief is fresh). Pairs are
         gated by entity overlap-COEFFICIENT >= 0.5 (was Jaccard > 0.5, which
         excluded attribute contradictions whose differing values are entities) and
         then by the content-similarity band [conflict_sim_low, conflict_sim_high]
-        — the band, unchanged, remains the real discriminator. Detected pairs are
+        - the band, unchanged, remains the real discriminator. Detected pairs are
         marked CONTESTED, not bled (conflict_limbo default ON), so a false positive
         surfaces for user arbitration rather than destroying a fact.
 
@@ -1057,7 +1057,7 @@ class DreamCycleMixin:
           True (contradict) / False (compatible: skip) / None (unknown: flag).
           Injected by the consolidation layer (typically an LLM second opinion)
           so the store itself stays model-free. FAIL-OPEN: errors and None keep
-          the pre-existing conservative behavior — flag the pair; conflict_limbo
+          the pre-existing conservative behavior - flag the pair; conflict_limbo
           protects it and arbitration (resolve_conflict / dismiss_conflict)
           decides.
 
@@ -1065,7 +1065,7 @@ class DreamCycleMixin:
         content+entity gates cannot pair: the policy pass (opposite-polarity
         rules, gated by detect_policy_conflicts) and the procedural pass
         (same-tool usage heuristics that contradict by paraphrase, gated by
-        detect_procedural_conflicts — the adjudicator is reused there but locks
+        detect_procedural_conflicts - the adjudicator is reused there but locks
         only on an explicit True)."""
         if not _HRR_AVAILABLE:
             return
@@ -1079,7 +1079,7 @@ class DreamCycleMixin:
             # FIX 9 LOGIC: Ensure we only evaluate facts not currently in a conflict group.
             # Exclude abstractions (category='abstract'): an abstraction shares
             # entities with its source facts but is intentionally more general, so
-            # its content similarity is low — exactly the conflict signature. Left
+            # its content similarity is low - exactly the conflict signature. Left
             # in, abstractions would duel the very facts they summarize.
             rows = self._conn.execute(
                 """
@@ -1096,7 +1096,7 @@ class DreamCycleMixin:
  
             # NOTE: no early-return on <2 mid/long rows. The policy-contradiction
             # pass below also scans SHORT-tier policy facts and must run even when
-            # the general (mid+long) pass has nothing to pair — else a fresh poison
+            # the general (mid+long) pass has nothing to pair - else a fresh poison
             # policy (short) vs one established rule (long) is never checked. The
             # general pairwise loop is a no-op on <2 rows, so this is safe.
  
@@ -1184,14 +1184,14 @@ class DreamCycleMixin:
                     if CONFLICT_SIM_LOW <= sim <= CONFLICT_SIM_HIGH:
                         # Parallel-fact veto (deterministic, relation-role-aware):
                         # template-parallel facts about DIFFERENT subjects are not
-                        # contradictions — skip before spending an adjudication call.
+                        # contradictions - skip before spending an adjudication call.
                         if getattr(self, "conflict_subject_veto", True) and \
                                 self._parallel_subject_veto(f1["id"], ents1,
                                                             f2["id"], ents2):
                             continue
                         # Optional second opinion (injected by the consolidation
                         # layer; the store stays model-free). FAIL-OPEN: None or an
-                        # exception keeps the pre-existing conservative behavior —
+                        # exception keeps the pre-existing conservative behavior -
                         # flag; limbo protects, arbitration decides.
                         if adjudicator is not None:
                             verdict = None
@@ -1221,7 +1221,7 @@ class DreamCycleMixin:
             #
             # NOTE: includes SHORT tier (unlike the general pass above, which stays
             # mid+long to dodge distractor churn). A poison policy is adversarial,
-            # FRESH input — it must be checked against established policies the
+            # FRESH input - it must be checked against established policies the
             # moment it lands, not after it dwells up to mid (that latency let a
             # just-injected poison go unflagged). Safe to scan short here because
             # _policy_like gates to rare, deliberate policy facts (no churn).
@@ -1300,7 +1300,7 @@ class DreamCycleMixin:
                               and adjudications < _PROC_ADJUDICATION_CAP):
                             # Lane 2: paraphrase contradictions ("bundle URLs"
                             # vs "one URL per call") need semantics. Lock only
-                            # on an explicit True — None/error/False skip.
+                            # on an explicit True - None/error/False skip.
                             adjudications += 1
                             try:
                                 contradict = adjudicator(c1, c2) is True

@@ -1,9 +1,9 @@
-"""eval_embedders.py — compare embedding models on the reference corpus (model-selection stage).
+"""eval_embedders.py - compare embedding models on the reference corpus (model-selection stage).
 
-Holds the dynamics FIXED (low decay so facts persist — recall failures reflect the EMBEDDER, not
+Holds the dynamics FIXED (low decay so facts persist - recall failures reflect the EMBEDDER, not
 forgetting) and varies only the embedder. Reports top-1 ranking + recall + poison leak in two modes:
-  * pure   — keyword_weight 0: the embedder's RAW semantic ranking quality.
-  * hybrid — keyword_weight 0.35 + relevance_margin 0.10: the realistic P2a configuration.
+  * pure   - keyword_weight 0: the embedder's RAW semantic ranking quality.
+  * hybrid - keyword_weight 0.35 + relevance_margin 0.10: the realistic P2a configuration.
 The harness auto-sizes vector_dim to whatever the embedder returns. Needs Ollama with the embedders
 pulled. Usage: python eval_embedders.py [model ...]
 """

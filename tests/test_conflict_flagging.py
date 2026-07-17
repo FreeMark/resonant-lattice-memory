@@ -109,7 +109,7 @@ def main():
                flagged_b >= 0.8 * len(POLICY_PAIRS), f"{flagged_b}/{len(POLICY_PAIRS)}")
     sb.close()
 
-    # ---- C: precision — controls must NOT be flagged ----
+    # ---- C: precision - controls must NOT be flagged ----
     sc, Rc, _, _ = C.make_store("cf_ctrl.db")
     vc = []
     for a, b, ents in CONTROLS:

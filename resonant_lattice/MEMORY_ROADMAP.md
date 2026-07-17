@@ -1,4 +1,4 @@
-# Resonant Lattice — Memory Evolution Roadmap
+# Resonant Lattice - Memory Evolution Roadmap
 
 A phased plan to grow the system from an excellent *retrieval* memory into one that
 has a sense of **time**, **self**, and the ability to **reason** over what it knows.
@@ -14,11 +14,11 @@ test-backed commit, exactly like the refactor + hardening passes.
 > P2 `d825327`, P3 `e29f875`, P4 `728a5b4`, P5 `4c46ccc`/`9ca3e18`/`d11473a`,
 > P6 `c481ec6`, P7 `5d52333`, P8 `32e5b44` (+ post-validation polish `2df0707`).
 > 
-> **Default flags**: Core (P1–P3 + P6) are ON by default. Heavier phases (P4 gist, P5 relations, P7 self-model, P8 narrative) are OFF by default for safety/LLM cost control, but recommended ON via `recommended_config.yaml`.
+> **Default flags**: Core (P1-P3 + P6) are ON by default. Heavier phases (P4 gist, P5 relations, P7 self-model, P8 narrative) are OFF by default for safety/LLM cost control, but recommended ON via `recommended_config.yaml`.
 > Recommended flags are wired ON in `recommended_config.yaml`; per-module detail is
 > in `MODULE_MAP.md`. Validated live end-to-end on local models (e.g. gemma4, granite) and fast cloud models
 > (e.g. deepseek-v4-flash:cloud). The plan below is preserved as the design record. **Next: the
-> encryption north star (a separate, larger effort) — not part of this roadmap.**
+> encryption north star (a separate, larger effort) - not part of this roadmap.**
 
 ---
 
@@ -62,10 +62,10 @@ P8 Narrative ─── (independent; pairs well with P4/P8 gisting infra)
 
 ---
 
-## Phase 1 — Temporal & supersedion layer  *(highest importance)*
+## Phase 1 - Temporal & supersedion layer  *(highest importance)*
 
 **Goal.** Facts know *when* they were learned, *when* last confirmed, and *what
-replaced them* — turning a state store into something that can reason about change.
+replaced them* - turning a state store into something that can reason about change.
 
 **Why.** A memory is the history of what you believed, not just the current row.
 "You've preferred dark themes since cycle 40; before that, light" is the difference
@@ -74,21 +74,21 @@ stamp it.
 
 **Depends on.** Nothing. Enables P2, P4, P6.
 
-**Data model** — migration `_migrate_add_temporal` (SchemaMixin):
-- `semantic_facts.learned_at_cycle INTEGER` — memory_cycle at first INSERT.
-- `semantic_facts.last_confirmed_cycle INTEGER` — memory_cycle at last reinforcement.
-- `semantic_facts.superseded_by INTEGER` — id of the fact that replaced this one
+**Data model** - migration `_migrate_add_temporal` (SchemaMixin):
+- `semantic_facts.learned_at_cycle INTEGER` - memory_cycle at first INSERT.
+- `semantic_facts.last_confirmed_cycle INTEGER` - memory_cycle at last reinforcement.
+- `semantic_facts.superseded_by INTEGER` - id of the fact that replaced this one
   (nullable; `ON DELETE SET NULL`).
-- `semantic_facts.superseded_at_cycle INTEGER` — when supersedion happened.
+- `semantic_facts.superseded_at_cycle INTEGER` - when supersedion happened.
 - Index on `superseded_by` (partial, `WHERE superseded_by IS NOT NULL`).
 
 **Code touchpoints.**
 - `store_facts.py`: a tiny `_current_memory_cycle()` helper reading `meta`
-  (single source of truth — no caller signature changes). `add_or_reinforce_fact`
+  (single source of truth - no caller signature changes). `add_or_reinforce_fact`
   stamps `learned_at_cycle = last_confirmed_cycle = current` on INSERT, and updates
   `last_confirmed_cycle = current` on reinforce (semantic/exact).
 - `store_dream.py`: change the conflict end-game so a pruned loser is **superseded,
-  not deleted** — in `prune_weak_facts` (or a new `supersede_conflict_losers` run
+  not deleted** - in `prune_weak_facts` (or a new `supersede_conflict_losers` run
   before it), set `superseded_by` = the surviving group member + `superseded_at_cycle`,
   and move the row to a terminal `tier='superseded'` (excluded from recall/promotion)
   rather than `DELETE`. Keep a bounded history (config cap).
@@ -110,14 +110,14 @@ They are history, not active belief. No content is rewritten.
   `superseded_by = winner_id`, `tier='superseded'`, excluded from `search`.
 
 **Risks.** Reading `meta` per insert (cheap; one indexed lookup). Supersedion changes
-the conflict end-game — gate behind `keep_superseded` and keep the bound.
+the conflict end-game - gate behind `keep_superseded` and keep the bound.
 
 **Complexity.** Medium. (1a columns+stamping is small/low-risk; 1b supersedion is the
-careful part — ship 1a first, then 1b.)
+careful part - ship 1a first, then 1b.)
 
 ---
 
-## Phase 2 — Decouple strength from freshness
+## Phase 2 - Decouple strength from freshness
 
 **Goal.** Recall and confidence consider *recency of confirmation*, not just resonance.
 
@@ -129,12 +129,12 @@ long-unconfirmed belief should be held with calibrated doubt.
 **Data model.** None (derived: `staleness_cycles = current_cycle - last_confirmed_cycle`).
 
 **Code touchpoints.**
-- `retrieval.py` (`search`): add an optional freshness term to ranking — a soft
+- `retrieval.py` (`search`): add an optional freshness term to ranking - a soft
   penalty on very stale facts so a fresh near-match can edge out a stale strong one.
   Keep it gentle (rank nudge, not a hard filter).
 - `recall.py` (`_compute_prefetch`): annotate each recalled fact with a freshness /
   confidence hint, e.g. `[confirmed ~N cycles ago]`, so the model self-calibrates.
-- `store_dream.py` (optional): a "use it or lose it" nudge — facts that are both
+- `store_dream.py` (optional): a "use it or lose it" nudge - facts that are both
   low-resonance **and** long-unconfirmed decay slightly faster.
 
 **Config.** `freshness_halflife_cycles` (soft confidence decay, default e.g. 50),
@@ -147,19 +147,19 @@ long-unconfirmed belief should be held with calibrated doubt.
 - Tests: a fact confirmed long ago carries a higher staleness annotation; ranking
   reflects the freshness nudge between an equally-similar fresh vs stale fact.
 
-**Risks.** Over-penalising stale-but-correct facts — keep the nudge soft and tunable.
+**Risks.** Over-penalising stale-but-correct facts - keep the nudge soft and tunable.
 
-**Complexity.** Low–Medium.
+**Complexity.** Low-Medium.
 
 ---
 
-## Phase 3 — Salience / novelty at ingestion
+## Phase 3 - Salience / novelty at ingestion
 
 **Goal.** Novel, surprising facts enter at higher resonance so important one-shot
 facts stick without needing repetition.
 
 **Why.** "Your daughter's name is Maya" should survive on first mention; "nice weather"
-should not. Surprise is exactly what biological memory privileges — and we already
+should not. Surprise is exactly what biological memory privileges - and we already
 compute the surprise signal.
 
 **Depends on.** None (synergises with P4).
@@ -173,14 +173,14 @@ compute the surprise signal.
   (no match ⇒ fully novel). `effective_initial = initial_resonance + novelty_boost * novelty`.
   Update `max_resonance_seen` on every reinforce.
 - (Phase 3b, optional) the consolidation extraction prompt can emit a coarse
-  `importance` hint for a small, conservative boost — but novelty is the deterministic
+  `importance` hint for a small, conservative boost - but novelty is the deterministic
   default; LLM importance is opt-in to avoid inflation.
 
 **Config.** `novelty_enabled` (default True), `novelty_boost` (max extra resonance for
 a fully-novel fact, default ~2.0).
 
 **Anti-fabrication / invariants.** Deterministic and bounded; a novel fact can now
-clear `promotion_threshold` passively (the intended effect — document the interaction
+clear `promotion_threshold` passively (the intended effect - document the interaction
 with the existing `initial_resonance < promotion_threshold` warning).
 
 **Acceptance.**
@@ -188,16 +188,16 @@ with the existing `initial_resonance < promotion_threshold` warning).
 - Tests: a fact unlike anything stored gets higher initial resonance than one near an
   existing fact; `max_resonance_seen` tracks the peak.
 
-**Risks.** Novelty boost interacting with promotion — covered by tests + the warning.
+**Risks.** Novelty boost interacting with promotion - covered by tests + the warning.
 
 **Complexity.** Low.
 
 ---
 
-## Phase 4 — Gist-preserving forgetting
+## Phase 4 - Gist-preserving forgetting
 
 **Goal.** Before pruning a fading fact, preserve its *meaning* (gist) so detail loss
-isn't meaning loss — mirroring hippocampal→neocortical consolidation.
+isn't meaning loss - mirroring hippocampal→neocortical consolidation.
 
 **Why.** Today `prune_weak_facts` deletes wholesale; meaning only survives if the fact
 happened to be in an abstraction cluster. Human memory degrades gracefully.
@@ -230,33 +230,33 @@ carry provenance to their (now-pruned) sources; framed as summary, not verbatim.
   gist exists and the original is pruned.
 
 **Risks.** LLM cost; gisting noise. Mitigated by conservative gating (earned-its-place
-only) and frequency control. The highest-complexity phase — ship behind a default-off flag.
+only) and frequency control. The highest-complexity phase - ship behind a default-off flag.
 
 **Complexity.** High.
 
 ---
 
-## Phase 5 — HRR for relational reasoning
+## Phase 5 - HRR for relational reasoning
 
 **Goal.** Use the holographic substrate for relational/transitive recall, not just
-similarity — the door to "far exceeds current systems."
+similarity - the door to "far exceeds current systems."
 
 **Why.** `holographic.py` already supports bind/unbind; today it's used only as a
 similarity/conflict signal (~20% of its purpose). HRR exists *for* variable binding.
 
 **Depends on.** None (but benefits from the entity graph already present).
 
-**Data model.** `fact_relations(fact_id, subject, relation, object, confidence)` —
+**Data model.** `fact_relations(fact_id, subject, relation, object, confidence)` -
 migration `_migrate_add_relations` + indexes on subject/object.
 
 **Code touchpoints.**
-- **5a — extraction:** during consolidation, a constrained pass extracts simple
+- **5a - extraction:** during consolidation, a constrained pass extracts simple
   `(subject, relation, object)` triples from fact content (lightweight patterns first;
   optional LLM triple pass). Store in `fact_relations`. Encode triples as bound HRR
   structures alongside the existing fact vector.
-- **5b — relational query:** a `relational_recall(query)` path resolving "who/where/
+- **5b - relational query:** a `relational_recall(query)` path resolving "who/where/
   what" questions via the triple graph (SQL) and HRR unbinding for fuzzy matches.
-- **5c — bounded transitive inference:** chain triples (≤ `max_inference_hops`) to
+- **5c - bounded transitive inference:** chain triples (≤ `max_inference_hops`) to
   surface *inferred* candidates (user→works-at→Acme, Acme→in→Seattle ⇒ user near
   Seattle), returned as **labelled inferences, never stored as facts**.
 - Surface via a new `relational` tool action and/or enriched recall.
@@ -280,13 +280,13 @@ Staged (5a→5b→5c) so each sub-step is independently valuable and verifiable.
 
 ---
 
-## Phase 6 — Conflicts as conversation
+## Phase 6 - Conflicts as conversation
 
 **Goal.** Surface unresolved conflicts for active disambiguation instead of resolving
 them silently.
 
 **Why.** The duel-to-the-death resolves internally; the most *human* move is to ask
-"I've got conflicting info on where you live — which is right?"
+"I've got conflicting info on where you live - which is right?"
 
 **Depends on.** P1 (supersedion, to record the resolution).
 
@@ -297,7 +297,7 @@ them silently.
   groups + their competing facts; and a `resolve_conflict(winner_id)` action that
   boosts the winner and supersedes the loser (P1).
 - `recall.py` / system prompt: optional gentle nudge when a conflicted fact surfaces
-  ("unresolved conflicting memory about X — consider confirming"), gated so the duel
+  ("unresolved conflicting memory about X - consider confirming"), gated so the duel
   runs a little first.
 
 **Config.** `surface_conflicts` (default True), `conflict_surface_min_group_age_cycles`
@@ -311,16 +311,16 @@ nothing is silently overwritten beyond the existing duel.
   sets winner resonance up and loser `superseded_by`.
 - Tests: the full create→surface→resolve loop.
 
-**Risks.** Nagging fatigue — the age gate + a per-conflict "asked once" guard.
+**Risks.** Nagging fatigue - the age gate + a per-conflict "asked once" guard.
 
-**Complexity.** Low–Medium.
+**Complexity.** Low-Medium.
 
 ---
 
-## Phase 7 — Deliberate self-model
+## Phase 7 - Deliberate self-model
 
 **Goal.** A curated, never-auto-ingested store of the agent's identity, capabilities,
-and standing relationship with the user — the *positive* counterpart to the Phase-E
+and standing relationship with the user - the *positive* counterpart to the Phase-E
 suppression gate.
 
 **Why.** The self-write gate only *suppresses* accidental self-chatter; there's no
@@ -344,22 +344,22 @@ write-gated `category='self_model'`.
 
 **Anti-fabrication / invariants.** **Hard rule:** the consolidation/ingest LLM paths
 can *read* but never *write* the self-model. Writes are explicit, primary-context only
-— so it can't become a backdoor for the self-chatter the gate exists to prevent.
+- so it can't become a backdoor for the self-chatter the gate exists to prevent.
 
 **Acceptance.**
 - Substrate: `SELECT * FROM agent_identity;` set via the action.
 - Tests: an identity entry set by the action; assert a consolidation epoch never
   writes to the identity store.
 
-**Risks.** Backdoor risk — covered by the read-only-for-autonomous-paths invariant + test.
+**Risks.** Backdoor risk - covered by the read-only-for-autonomous-paths invariant + test.
 
 **Complexity.** Medium.
 
 ---
 
-## Phase 8 — Narrative / autobiographical layer
+## Phase 8 - Narrative / autobiographical layer
 
-**Goal.** Cross-session continuity of "what we've been doing together" — story, not
+**Goal.** Cross-session continuity of "what we've been doing together" - story, not
 just atomic facts.
 
 **Why.** Episodes are L1/ephemeral (pruned by session window); semantic facts are
@@ -368,7 +368,7 @@ atomic. There's no durable thread of *what happened across sessions*.
 **Depends on.** None (reuses the session-end consolidation + gisting infra from P4).
 
 **Data model.** `session_summaries(session_id, summary, started_cycle, ended_cycle,
-created_cycle)` — migration `_migrate_add_session_summaries`; or `category='narrative'`
+created_cycle)` - migration `_migrate_add_session_summaries`; or `category='narrative'`
 facts that survive episode pruning.
 
 **Code touchpoints.**
@@ -388,7 +388,7 @@ verbatim; bounded; never asserted as exact quotes.
 - Substrate: end a session → a narrative summary row exists with cycle stamps.
 - Tests: simulate session end → narrative summary present and bounded.
 
-**Risks.** LLM cost (already at session end), summary quality — keep it short + bounded.
+**Risks.** LLM cost (already at session end), summary quality - keep it short + bounded.
 
 **Complexity.** Medium.
 
@@ -396,12 +396,12 @@ verbatim; bounded; never asserted as exact quotes.
 
 ## Sequencing & milestones
 
-- **Milestone A — "Memory has time" (P1, P2, P3).** The highest-leverage block; small
+- **Milestone A - "Memory has time" (P1, P2, P3).** The highest-leverage block; small
   schema, big behavioural change. After this the system tracks *when* and *how
   strongly/freshly* it believes things, and important one-shot facts stick.
-- **Milestone B — "Memory forgets gracefully & talks back" (P4, P6).** Graceful
+- **Milestone B - "Memory forgets gracefully & talks back" (P4, P6).** Graceful
   degradation + active conflict resolution. P4 is the heaviest single phase.
-- **Milestone C — "Memory reasons & knows itself" (P5, P7, P8).** The frontier:
+- **Milestone C - "Memory reasons & knows itself" (P5, P7, P8).** The frontier:
   relational inference, a deliberate self-model, and autobiographical continuity.
 
 Each phase ends green on the full harness (tests + inventory + verify_logic + stub

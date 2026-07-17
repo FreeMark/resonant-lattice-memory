@@ -1,17 +1,17 @@
-"""eval_replay.py — drive the REAL store/retriever dynamics over a corpus under one config preset.
+"""eval_replay.py - drive the REAL store/retriever dynamics over a corpus under one config preset.
 
 Faithful: it builds an actual ``LatticeStore`` + ``LatticeRetriever`` and exercises the real
-FactsMixin / DreamCycleMixin / recall code — the dynamics being tuned (resonance, decay, promotion,
+FactsMixin / DreamCycleMixin / recall code - the dynamics being tuned (resonance, decay, promotion,
 conflict) all live in the store, so this measures the genuine behaviour, not a reimplementation.
 Deterministic: facts are injected from the corpus and embeddings come from an injectable cached
 ``embed_fn``, so two presets differ ONLY in their dynamics. Provider-free: Hermes isn't installable,
 so the dream-cycle STEP ORDER is replicated over the real store methods.
 
-Per turn (mirroring the Hermes loop — A10): (1) PREFETCH for the user prompt and score it BEFORE
+Per turn (mirroring the Hermes loop - A10): (1) PREFETCH for the user prompt and score it BEFORE
 this turn's facts exist; (2) reinforce the recalled facts (affects future turns); (3) ingest the
 turn's facts; (4) advance the memory cycle and, on cadence, run the dream-cycle maintenance. A
 session boundary advances extra idle cycles so decay/consolidation actually happen "between
-sessions" — the A1 'three weeks later' shape.
+sessions" - the A1 'three weeks later' shape.
 """
 
 import os
@@ -80,7 +80,7 @@ def replay(corpus, config=None, embed_fn=None, db_path=None):
     # Size the store's embedding dim from the embedder so they can never mismatch.
     probe = embed_fn("dimension probe")
     if not probe:
-        raise RuntimeError("embed_fn returned no vector — is Ollama running for ollama_embed?")
+        raise RuntimeError("embed_fn returned no vector - is Ollama running for ollama_embed?")
     store_kwargs["vector_dim"] = len(probe)
 
     tmpdir = tempfile.mkdtemp()
@@ -126,7 +126,7 @@ def replay(corpus, config=None, embed_fn=None, db_path=None):
     try:
         for session in corpus:
             for turn in session:
-                # 1. PREFETCH (before this turn's facts exist) — the recall we score.
+                # 1. PREFETCH (before this turn's facts exist) - the recall we score.
                 user = turn.get("user") or ""
                 prefetched_fids = ([h["id"] for h in retr.search(
                     user, limit=block, keyword_weight=kw, relevance_margin=margin,
@@ -139,7 +139,7 @@ def replay(corpus, config=None, embed_fn=None, db_path=None):
                     "poison": list(turn.get("poison") or []),
                     "tool_calls": list(turn.get("tool_calls") or []),
                 })
-                # 2. RECALL REINFORCEMENT — referencing memories raises resonance (future turns).
+                # 2. RECALL REINFORCEMENT - referencing memories raises resonance (future turns).
                 if prefetched_fids and bump:
                     try:
                         store.reinforce_on_recall(prefetched_fids, bump)

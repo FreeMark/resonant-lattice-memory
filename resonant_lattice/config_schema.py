@@ -1,5 +1,5 @@
 """
-config_schema.py — static config field list for `hermes memory setup`.
+config_schema.py - static config field list for `hermes memory setup`.
 
 Text/data only. Extracted verbatim from LatticeMemoryProvider.get_config_schema,
 which now returns CONFIG_SCHEMA. All fields are local (no secrets/credentials).
@@ -35,7 +35,7 @@ CONFIG_SCHEMA = [
     {"key": "embed_model", "description": "Embedding model name", "default": "nomic-embed-text"},
     {"key": "embed_timeout",
      "description": "HTTP timeout (seconds) for embedding calls. Default 30 (was 5) so a COLD "
-                    "networked embedder — e.g. a small GPU that idle-unloaded the model — can load "
+                    "networked embedder - e.g. a small GPU that idle-unloaded the model - can load "
                     "on the first call instead of timing out and silently dropping facts at "
                     "consolidation time (~6s cold vs ~0.6s warm observed).",
      "default": 30.0},
@@ -46,9 +46,9 @@ CONFIG_SCHEMA = [
      "default": "10m"},
     {"key": "reason_model",
      "description": "Reasoning model for consolidation/abstraction (async/off the hot "
-                    "path — favour quality). Exact Ollama tag (namespaced). Ideal is fully "
+                    "path - favour quality). Exact Ollama tag (namespaced). Ideal is fully "
                     "local. When local inference is limited, fast cloud models (e.g. "
-                    "deepseek-v4-flash:cloud — excellent speed + quality, very low usage) "
+                    "deepseek-v4-flash:cloud - excellent speed + quality, very low usage) "
                     "are recommended for the memory layer. Local step-up: ibm/granite4.1:30b "
                     "Q4_K_M, never below Q4.",
      "default": "ibm/granite4.1:8b"},
@@ -56,7 +56,7 @@ CONFIG_SCHEMA = [
      "description": "HTTP timeout (seconds) for reason-model calls (extraction/abstraction/"
                     "distillation). Default 300 (was 180). Runs off the hot path (dream cycle), so a "
                     "flagship reasoner (e.g. nemotron-3-ultra) that thinks past 180s won't time out "
-                    "the epoch and store 0 facts. A one-off timeout is non-fatal — the next cycle retries.",
+                    "the epoch and store 0 facts. A one-off timeout is non-fatal - the next cycle retries.",
      "default": 300.0},
     {"key": "memory_reason_max_concurrency",
      "description": "Max concurrent reasoning-model calls the memory layer may have in "
@@ -76,7 +76,7 @@ CONFIG_SCHEMA = [
     {"key": "reconsolidate_zero_fact_sessions",
      "description": "Consolidation debt: never discard an experience the substrate has not "
                     "digested. A session that logged substantial episodes but banked ZERO facts "
-                    "(epoch death, gate wipeout, reason-model outage — failures "
+                    "(epoch death, gate wipeout, reason-model outage - failures "
                     "extraction_max_attempts cannot see) is flagged as debt, its episodes are "
                     "exempt from pruning while the debt is open, and the dream cycle retries the "
                     "consolidation epoch for one debt session per cycle until facts land or "
@@ -140,21 +140,21 @@ CONFIG_SCHEMA = [
      "default": 1000},
     {"key": "forget_after_dormant_cycles",
      "description": "Buried-but-pluckable forget policy: cycles a fully-faded fact (resonance 0) "
-                    "stays DORMANT — kept and still pluckable by a strong contextual cue — before "
+                    "stays DORMANT - kept and still pluckable by a strong contextual cue - before "
                     "it is truly deleted. >0 = demote then deep-delete (the default; 'eventually "
                     "fades, preserve the essence'); 0 = delete immediately at resonance 0 (legacy); "
                     "<0 = never delete (pure archive). Cycle-driven, no wall-clock.",
      "default": 100},
     {"key": "conflict_limbo",
      "description": "Conflict-limbo (default true): a CONTESTED fact (in an active conflict group) "
-                    "is held in sustained-resonance limbo — protected from decay AND prune, and "
-                    "auto-bleed is skipped — so a contested belief never fades before the USER "
+                    "is held in sustained-resonance limbo - protected from decay AND prune, and "
+                    "auto-bleed is skipped - so a contested belief never fades before the USER "
                     "arbitrates it (resolve_conflict); it stays flagged on recall to nudge "
                     "arbitration. False restores the original auto-bleed-to-resolution duel.",
      "default": True},
     {"key": "surprise_decay_discount",
      "description": "Surprise/importance-weighted retention (A11, 0..1, default 0.5): a fact that "
-                    "ever mattered (high max_resonance_seen — a surprising one-off that entered high "
+                    "ever mattered (high max_resonance_seen - a surprising one-off that entered high "
                     "via novelty_boost, or a reinforced fact) fades SLOWER (up to this fraction less "
                     "decay once its peak reaches promotion_threshold), so a unique one-off is "
                     "retained longer before going dormant. 0 = uniform decay.",
@@ -162,9 +162,9 @@ CONFIG_SCHEMA = [
     {"key": "procedural_seed",
      "description": "P3e tool-grounding seed: a list of durable procedural/guardrail fact strings "
                     "ingested at startup (category=procedural, tier=long, high resonance) so the "
-                    "agent is grounded from day one — e.g. the Stripe Link CLI guardrails. Idempotent. "
+                    "agent is grounded from day one - e.g. the Stripe Link CLI guardrails. Idempotent. "
                     "Phrase POSITIVELY ('always require human approval') rather than naming a "
-                    "forbidden capability ('never auto_approve') — the negative form primes small "
+                    "forbidden capability ('never auto_approve') - the negative form primes small "
                     "models to do it. Empty = no seed.",
      "default": []},
     {"key": "keep_superseded",
@@ -233,7 +233,7 @@ CONFIG_SCHEMA = [
      "description": "When True (default), pinned priority RULES (policy/compliance/procedural "
                     "guardrails and imperative language) that appear in autonomous prefetch "
                     "are lifted into a separate <authority_rules> block ABOVE fallible "
-                    "<resonant_memory> — so binding rules are not peer candidates next to "
+                    "<resonant_memory> - so binding rules are not peer candidates next to "
                     "poison/noise. Marker A/B validated that presentation steers obedience; "
                     "structural separation strengthens that signal. False = legacy (rules "
                     "stay inside <resonant_memory> with [PRIORITY RULE] tags only).",
@@ -313,7 +313,7 @@ CONFIG_SCHEMA = [
      "default": False},
     {"key": "relation_model",
      "description": "Optional dedicated model for the per-fact LLM relation (triple) pass. "
-                    "Triple extraction is single-sentence IE — a small LOCAL model handles "
+                    "Triple extraction is single-sentence IE - a small LOCAL model handles "
                     "it well (pair with a few-shot relation_prompt; small models return [] "
                     "under the strict zero-shot default). Empty = use reason_model. "
                     "Offloading frees reason-endpoint slots during finalize tails (field "
@@ -332,15 +332,15 @@ CONFIG_SCHEMA = [
     {"key": "max_inference_hops",
      "description": "Phase 5c: max path length in edges for the `infer` action (bounded "
                     "transitive reasoning over the triple graph). Only multi-hop DERIVED "
-                    "chains are returned (a single stored triple is not an inference — use "
+                    "chains are returned (a single stored triple is not an inference - use "
                     "relational for those). 1 = multi-hop inference DISABLED (returns no "
-                    "inferences — safest for constrained agents). 2 = allow 2-edge chains "
-                    "(default). Raise carefully — combinatorial growth and uncertainty both "
+                    "inferences - safest for constrained agents). 2 = allow 2-edge chains "
+                    "(default). Raise carefully - combinatorial growth and uncertainty both "
                     "rise with hops. Inferences are labelled, confidence-decayed per hop, "
                     "and NEVER stored as facts. Values below 1 are raised to 1.",
      "default": 2},
     {"key": "enable_self_model",
-     "description": "Phase 7 (default OFF): maintain a deliberate self-model — a separate, "
+     "description": "Phase 7 (default OFF): maintain a deliberate self-model - a separate, "
                     "curated agent_identity store the autonomous ingest path can NEVER write "
                     "(only the primary-context set_self_model action can). When on, a curated "
                     "identity block is surfaced in the system prompt and the get/set_self_model "
@@ -356,7 +356,7 @@ CONFIG_SCHEMA = [
      "description": "Phase 8 (default OFF): at session end, write a one-paragraph LLM gist of "
                     "the session into the durable session_summaries table (survives episode "
                     "pruning) and surface the most recent as 'recent history' in the system "
-                    "prompt — cross-session continuity of what you and the user did together.",
+                    "prompt - cross-session continuity of what you and the user did together.",
      "default": False},
     {"key": "narrative_keep",
      "description": "Max session summaries retained (oldest pruned). Bounds the autobiographical log.",
@@ -480,7 +480,7 @@ CONFIG_SCHEMA = [
                     "new facts per cycle) never hits the cap. 0 = unlimited.",
      "default": 200},
     {"key": "blind_scan_batch",
-     "description": "Tier-1 blind only: streaming blind-recall scan batch — how many encrypted "
+     "description": "Tier-1 blind only: streaming blind-recall scan batch - how many encrypted "
                     "ciphertexts are pulled from disk and scored at a time. 0 = AUTO (recommended): "
                     "sized at runtime from available RAM and the MEASURED per-ciphertext footprint so "
                     "the scan's memory stays bounded no matter the corpus size (a full-corpus recall no "
@@ -511,7 +511,7 @@ CONFIG_SCHEMA = [
      "default": ""},
     # Additional runtime defaults used by provider/retriever.
     # NOTE: recall_floor / conflict_sim_low / conflict_sim_high are already defined
-    # above (Hebbian block) — do NOT re-add them here or they double-list in the
+    # above (Hebbian block) - do NOT re-add them here or they double-list in the
     # `hermes memory setup` wizard. Only genuinely-new keys belong below.
     {"key": "recall_limit", "description": "Max facts considered per recall", "default": 300},
     {"key": "recall_procedural_cap",
@@ -520,7 +520,7 @@ CONFIG_SCHEMA = [
                     "so content facts backfill the freed slots). Procedural facts are numerous and, "
                     "when embedding-similar to a query, can crowd the on-topic CONTENT cluster out of "
                     "context and burn attention budget (observed: a model answering 'not in memory' "
-                    "while surfacing only how-to-search tips). Prefetch ONLY — the explicit search "
+                    "while surfacing only how-to-search tips). Prefetch ONLY - the explicit search "
                     "tool stays ungated, so the agent can still pull full tool-use procedures on "
                     "demand. -1 = off (no cap, legacy); 0 = no procedural in prefetch; N = keep top-N.",
      "default": -1},
@@ -528,7 +528,7 @@ CONFIG_SCHEMA = [
      "description": "Prefetch precision gate (A6): drop recalled facts scoring more than this below the "
                     "top relevance, so only the on-topic cluster is injected into context (cleaner context, "
                     "fewer tokens). 0 = off (inject everything above recall_floor). 0.20 was chosen "
-                    "empirically as the knee — it trims the near-relevant long tail (~50 distractors in a "
+                    "empirically as the knee - it trims the near-relevant long tail (~50 distractors in a "
                     "loaded store) while dropping ZERO relevant facts; 0.15 starts dropping relevant ones. "
                     "Applies to the AUTONOMOUS prefetch only; the explicit lattice_store 'search' action "
                     "still returns the full ranked list. Ignored by the blind/HE retriever (vector-only).",
@@ -551,11 +551,11 @@ CONFIG_SCHEMA = [
                     "0.6 is a good on-value; recommended ON for financial/compliance agents.",
      "default": 0.0},
     {"key": "importance_categories",
-     "description": "Categories treated as high-stakes for importance_decay_discount — facts here decay "
+     "description": "Categories treated as high-stakes for importance_decay_discount - facts here decay "
                     "slower so they are retained even when unused. Default covers money/compliance/policy.",
      "default": ["policy", "rule", "compliance", "guardrail", "procedural", "spend", "financial", "legal"]},
     {"key": "detect_policy_conflicts",
-     "description": "Also flag entity-less POLICY contradictions during conflict detection — two "
+     "description": "Also flag entity-less POLICY contradictions during conflict detection - two "
                     "policy/rule facts about the same action with OPPOSITE stance (tighten vs loosen, "
                     "e.g. 'never auto-approve' vs 'auto-approval enabled'). Content-similarity + entity "
                     "overlap can't pair these (sim ~0, no entities), so this is a conservative lexical "
@@ -568,14 +568,14 @@ CONFIG_SCHEMA = [
                     "for contradictions during conflict detection. Field finding (overnight curriculum "
                     "runs): the dream cycle distills these from tool episodes and the layer accumulates "
                     "contradictory superstition ('bundle many URLs per call' vs 'prefer a single URL per "
-                    "invocation') that contradicts by PARAPHRASE — the general similarity-band pass "
+                    "invocation') that contradicts by PARAPHRASE - the general similarity-band pass "
                     "excludes category='procedural', so such pairs were never flagged and the agent "
                     "flip-flopped between strategies. This pass pairs facts about the SAME tool that "
                     "share a specific topic stem (tool-name and generic outcome words excluded), flags "
                     "opposite-stance pairs (avoid vs prefer) deterministically, and sends stance-"
                     "ambiguous pairs to the reason-model adjudicator (capped per cycle, locks only on "
                     "an explicit yes). Precision-first: unlike poison-policy detection this lane is NOT "
-                    "fail-open, because superstition is self-inflicted rather than adversarial — a "
+                    "fail-open, because superstition is self-inflicted rather than adversarial - a "
                     "missed pair waits for the next cycle instead of risking a false duel. Set False "
                     "to disable.",
      "default": True},
@@ -583,7 +583,7 @@ CONFIG_SCHEMA = [
      "description": "Deterministic false-positive guard for HRR conflict detection. Template-parallel "
                     "facts about DIFFERENT subjects ('gl_FragCoord is available in GLSL ES 1.00/3.00' vs "
                     "'gl_FrontFacing is available in GLSL ES 1.00/3.00') share context entities and "
-                    "sentence shape — enough to pass the overlap gate and land mid-band — yet both are "
+                    "sentence shape - enough to pass the overlap gate and land mid-band - yet both are "
                     "true. When BOTH facts carry relation-triple subjects and neither side's subject "
                     "matches the other side (equality/containment/entity-mention), the pair is skipped "
                     "as parallel rather than locked as a conflict. Conservative: missing role info or "
@@ -595,7 +595,7 @@ CONFIG_SCHEMA = [
                     "model ('do these actually contradict?') before being locked into a conflict group. "
                     "Catches the remainder of the template-parallel false-positive class when relation "
                     "subjects are missing. FAIL-OPEN: an LLM error/timeout/ambiguous answer flags the "
-                    "pair anyway (the pre-existing conservative behavior — conflict_limbo protects, "
+                    "pair anyway (the pre-existing conservative behavior - conflict_limbo protects, "
                     "arbitration resolves), so this can only REDUCE false positives, never hide a real "
                     "contradiction behind a model failure. Costs at most a few short reason-model calls "
                     "per dream cycle. Set False for pure-heuristic detection.",
@@ -640,7 +640,7 @@ CONFIG_SCHEMA = [
      "description": "Reason-model prompt for consolidation fact extraction from a dialogue log. "
                     "Must instruct JSON array output with content/category/source_quote (and optional "
                     "source_ref). Override to change domain focus, scaffolding exclusions, or "
-                    "category vocabulary. Empty is not recommended — omit the key to use the default.",
+                    "category vocabulary. Empty is not recommended - omit the key to use the default.",
      "default": DEFAULT_EXTRACTION_PROMPT},
     {"key": "consolidation_prompt",
      "description": "Reason-model prompt for the abstraction pass (cluster of related long-tier "

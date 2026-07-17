@@ -11,7 +11,7 @@ import types
 import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-PARENT = os.path.dirname(HERE)            # repo root — holds the package dir
+PARENT = os.path.dirname(HERE)            # repo root - holds the package dir
 if PARENT not in sys.path:
     sys.path.insert(0, PARENT)
 
@@ -97,7 +97,7 @@ def main():
     enum = schemas[0]["parameters"]["properties"]["action"]["enum"]
     assert "memory_audit" in enum, f"memory_audit action missing from schema: {enum}"
     # P4a tool-surface: pin/unpin/request_abstraction added; agent-facing 'remove'
-    # retired from the enum (no-delete by design — fade via unhelpful feedback instead).
+    # retired from the enum (no-delete by design - fade via unhelpful feedback instead).
     for a in ("pin", "unpin", "request_abstraction"):
         assert a in enum, f"P4a action {a!r} missing from schema enum: {enum}"
     assert "remove" not in enum, f"'remove' must be retired from the agent enum (A21 no-delete): {enum}"

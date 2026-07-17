@@ -1,10 +1,10 @@
-"""store_narrative.py — NarrativeMixin: Phase-8 autobiographical layer.
+"""store_narrative.py - NarrativeMixin: Phase-8 autobiographical layer.
 
 Mixed into LatticeStore; uses self._conn/_lock and sibling methods
 (self.get_recent_episodes, self._clean_llm_json) via the composite.
 
 Episodes are L1/ephemeral (pruned by the session window) and semantic facts are
-atomic — neither preserves the THREAD of what happened across sessions. This layer
+atomic - neither preserves the THREAD of what happened across sessions. This layer
 stores a durable, bounded, one-paragraph gist per session in the separate
 session_summaries table, generated at session end. It is explicitly a remembered
 SUMMARY (never verbatim), so it surfaces as "recent history" context without being

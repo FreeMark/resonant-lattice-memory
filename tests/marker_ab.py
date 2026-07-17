@@ -2,7 +2,7 @@ r"""marker_ab.py - A/B test: does the recall-block authority MARKER change wheth
 the agent OBEYS a pinned policy when a poison note out-ranks it?
 
 Hypothesis (user): the literal tag the LLM reads ("PINNED" vs "PRIORITY" vs an
-authority directive) shifts its output — input==output. This is a PROMPT-layer
+authority directive) shifts its output - input==output. This is a PROMPT-layer
 question, separate from numeric ranking: the agent reads the whole recall block,
 so a stronger authority signal can make it obey the true rule even when the
 poison is ranked above it.

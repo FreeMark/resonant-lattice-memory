@@ -1,11 +1,11 @@
-"""store_canonical.py — CanonicalMixin: the optional current-value projection.
+"""store_canonical.py - CanonicalMixin: the optional current-value projection.
 
 Mixed into LatticeStore. A SEPARATE, explicit layer 'over' the resonance lattice:
 each row is `key -> current value` with provenance + temporal validity, so an agent
 can ask "what is the current value of X" as a single canonical field instead of
 inferring it from recall ranking, markers, and conflict metadata.
 
-It does NOT replace the lattice and is NOT written by any autonomous path — only the
+It does NOT replace the lattice and is NOT written by any autonomous path - only the
 explicit set_canonical / review_canonical calls touch it (mirrors the agent_identity
 self-model store). History is preserved: updating a key closes the old row
 (valid_until_cycle + superseded_by) and inserts a new current row. Cycle-stamped,
@@ -25,7 +25,7 @@ class CanonicalMixin:
         """Upsert the CURRENT canonical value for `key`.
 
         If a different current value exists it is closed (valid_until_cycle set,
-        superseded_by → the new row) and the new value becomes current — history
+        superseded_by → the new row) and the new value becomes current - history
         is preserved, not overwritten. If the value is unchanged this is a no-op
         refresh of metadata. Returns the canonical_id of the current row.
         """
@@ -42,7 +42,7 @@ class CanonicalMixin:
                 (key,),
             ).fetchone()
             if cur is not None and cur["value"] == value:
-                # same current value — refresh metadata only (no new history row)
+                # same current value - refresh metadata only (no new history row)
                 self._conn.execute(
                     "UPDATE canonical_facts SET category=?, "
                     "source_fact_id=COALESCE(?, source_fact_id), review_status=?, "

@@ -79,7 +79,7 @@ BATCH = int(os.environ.get("RL_BATCH", "250"))
 ABSTRACT_EVERY = int(os.environ.get("RL_ABSTRACT_EVERY", "10"))
 NIGHT_HOURS = float(os.environ.get("RL_NIGHT_HOURS", "0"))
 
-# Forgetting dynamics — tuned so ROUTINE ops noise fades quickly and the row count
+# Forgetting dynamics - tuned so ROUTINE ops noise fades quickly and the row count
 # PLATEAUS (bounded), while pinned / reinforced / high-stakes facts persist. The long-tier
 # cap alone does NOT bound memory: short+mid grow until facts decay to 0 and prune, so the
 # decay/dormancy pipeline must be short enough to reach steady state. Env-overridable.
@@ -335,7 +335,7 @@ def false_confidence(R):
 
 
 def golden_top(R, goldens, sample=6):
-    """Avg top-1 relevance for REAL (stored) golden queries — the 'signal' level.
+    """Avg top-1 relevance for REAL (stored) golden queries - the 'signal' level.
     embeddinggemma rides a higher absolute cosine baseline than nomic, so the
     honest, model-agnostic false-confidence signal is the SEPARATION between a
     real query's top hit and a never-stored query's top hit, not an absolute floor."""

@@ -1,5 +1,5 @@
 """
-prompts.py — default LLM prompt strings for the Resonant Lattice provider.
+prompts.py - default LLM prompt strings for the Resonant Lattice provider.
 
 Text only. These are the *defaults* used when the corresponding config key is
 absent; a config value overrides them (see LatticeMemoryProvider.__init__).
@@ -28,7 +28,7 @@ DEFAULT_PROCEDURAL_PROMPT = (
 DEFAULT_EXTRACTION_PROMPT = (
     "Analyze this dialogue log and extract only NEW, durable facts, user "
     "preferences, or goal states that are EXPLICITLY supported by the log.\n"
-    "GROUNDING RULES (critical — violating them corrupts memory):\n"
+    "GROUNDING RULES (critical - violating them corrupts memory):\n"
     "- Do NOT invent or infer specifics (names, numbers, dates, IDs, paths, "
     "settings, versions) that are not literally present in the log. If a "
     "detail is not in the log, leave it out.\n"
@@ -54,7 +54,7 @@ DEFAULT_CONSOLIDATION_PROMPT = (
     "- Abstraction is CONTEXTUALIZATION, not erasure. When the facts give different answers "
     "in different conditions, state the DEFAULT and PRESERVE the exceptions as scoped "
     "conditions, e.g. 'X by default; Y when <condition>'. The conditions that make each fact "
-    "correct in its situation are the POINT — keep them, don't discard them as 'detail'.\n"
+    "correct in its situation are the POINT - keep them, don't discard them as 'detail'.\n"
     "- Do NOT collapse facts that hold in distinct contexts into one detail-free claim, and "
     "NEVER invent a generalization the facts do not support.\n"
     "- Concise but meaningful; one principle per object\n"
@@ -64,7 +64,7 @@ DEFAULT_CONSOLIDATION_PROMPT = (
 
 DEFAULT_NARRATIVE_PROMPT = (
     "Summarise the session below as ONE short paragraph of durable "
-    "autobiographical memory for an AI agent — what the user and assistant worked "
+    "autobiographical memory for an AI agent - what the user and assistant worked "
     "on and decided together, the kind of throughline worth remembering at the "
     "start of the next session.\n\n"
     "Rules:\n"
@@ -77,7 +77,7 @@ DEFAULT_NARRATIVE_PROMPT = (
 
 DEFAULT_RELATION_PROMPT = (
     "Extract the explicit (subject, relation, object) triples STATED in the text "
-    "below. Capture only relationships LITERALLY present — never infer, chain, or "
+    "below. Capture only relationships LITERALLY present - never infer, chain, or "
     "add outside world knowledge (that is done elsewhere, deliberately, and never "
     "stored as fact).\n\n"
     "Rules:\n"
@@ -92,11 +92,11 @@ DEFAULT_GIST_PROMPT = (
     "You are a memory consolidation engine for an AI agent. The facts below are "
     "FADING from memory (their resonance has decayed toward zero) but they "
     "mattered once. Before they are forgotten entirely, write ONE concise GIST "
-    "that compresses the NARRATIVE while KEEPING the load-bearing specifics — so "
+    "that compresses the NARRATIVE while KEEPING the load-bearing specifics - so "
     "the meaning survives without losing the values an agent may need to act on.\n\n"
     "Rules:\n"
     "- PRESERVE exact numbers, money amounts, IDs, and dates VERBATIM. For money / "
-    "compliance / spec facts the specific value IS the meaning — rounding 4050 "
+    "compliance / spec facts the specific value IS the meaning - rounding 4050 "
     "cents to 'about $40' or dropping an invoice ID is WORSE than forgetting. "
     "Compress the surrounding prose, not the hard values.\n"
     "- Capture the common theme AND list the concrete values it covers, e.g. "

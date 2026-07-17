@@ -1,18 +1,18 @@
-"""eval_corpus.py — the replayable session corpus: schema, loader, validator, + a small example.
+"""eval_corpus.py - the replayable session corpus: schema, loader, validator, + a small example.
 
 A corpus is a list of SESSIONS; each session is a list of TURNS. A turn is a dict:
 
-  user:          (str)  the user prompt this turn — drives prefetch + right-time-recall scoring.
+  user:          (str)  the user prompt this turn - drives prefetch + right-time-recall scoring.
   facts:         [{"key","content","category"?,"entities"?}]  facts this turn introduces or
                  reinforces. Injected DIRECTLY (deterministic; no LLM extraction needed to tune the
                  dynamics). ``key`` is a stable handle the author assigns so expectations reference
                  facts by identity, independent of the fact ids the store assigns at insert.
   expect_recall: [key]   facts that SHOULD appear in this turn's prefetch (right-time-recall GT).
-  poison:        [key]   facts that must NOT appear (stale/contested/irrelevant) — the A6 guardrail.
+  poison:        [key]   facts that must NOT appear (stale/contested/irrelevant) - the A6 guardrail.
   tool_calls:    [{"name","args"?,"correct":bool}]  for the tool-hallucination metric (Phase 3).
   dream:         (bool)  force a dream cycle after this turn (else cadence-driven).   [optional]
 
-Authoring rule: give distinct facts distinct content — the store dedups by semantic similarity, so
+Authoring rule: give distinct facts distinct content - the store dedups by semantic similarity, so
 two keys with near-identical content would collapse to one fact and confuse the key↔id mapping.
 """
 
@@ -78,7 +78,7 @@ def save_corpus(path, corpus):
 
 
 def all_texts(corpus):
-    """Every text the replay will embed (fact contents + user prompts) — for cache pre-warming."""
+    """Every text the replay will embed (fact contents + user prompts) - for cache pre-warming."""
     texts = []
     for session in corpus:
         for turn in session:
@@ -91,7 +91,7 @@ def all_texts(corpus):
 
 def example_corpus():
     """A tiny built-in corpus exercising recall-over-time (the A1 'three weeks later' shape):
-    session 1 lays down facts; later sessions — after intervening decay/consolidation cycles — must
+    session 1 lays down facts; later sessions - after intervening decay/consolidation cycles - must
     still surface the right one UNPROMPTED on a semantically related prompt."""
     return [
         # ── Session 1: lay down durable facts ────────────────────────────────────
@@ -114,7 +114,7 @@ def example_corpus():
              "facts": [{"key": "freestyle", "content": "the user flies a 5-inch freestyle quadcopter",
                         "entities": ["quadcopter"]}]},
         ],
-        # ── Session 3: later — the right memory should surface unprompted ─────────
+        # ── Session 3: later - the right memory should surface unprompted ─────────
         [
             {"user": "what should I get my kid for her birthday?",
              "facts": [], "expect_recall": ["maya"]},

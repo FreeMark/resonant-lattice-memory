@@ -1,4 +1,4 @@
-"""tool_handler.py — ToolHandlerMixin + the lattice_store tool schema.
+"""tool_handler.py - ToolHandlerMixin + the lattice_store tool schema.
 
 Named tool_handler (NOT tools) on purpose: the plugin dir sits on
 sys.path[0], so a module named tools.py would shadow Hermes' tools
@@ -18,7 +18,7 @@ from store_common import hrr, _HRR_AVAILABLE
 logger = logging.getLogger(__name__)
 
 # READ-style lattice_store actions. A session that invokes any of these is
-# actively consulting its own memory — half of the synthesis-session signal
+# actively consulting its own memory - half of the synthesis-session signal
 # (the other half is a zero-web tool profile). Write/admin actions are
 # deliberately absent: a user dictating facts to store is conversation
 # provenance, not the agent reflecting on what it already knows.
@@ -36,7 +36,7 @@ _LATTICE_READ_ACTIONS = frozenset({
 LATTICE_STORE_SCHEMA = {
     "name": "lattice_store",
     "description": (
-        "Resonant Lattice Memory tool — full neuroplastic control.\n"
+        "Resonant Lattice Memory tool - full neuroplastic control.\n"
         "Actions: add, search, get_fact, fact_history, feedback, pin, unpin, "
         "request_abstraction, force_consolidation, force_dream_cycle, stats, "
         "memory_audit (includes feature_status), pending_conflicts, resolve_conflict, dismiss_conflict, facts_about_entity, "
@@ -50,20 +50,20 @@ LATTICE_STORE_SCHEMA = {
         "config value) instead of inferring 'current' from recall ranking.\n"
         "You INFLUENCE memory, you never destroy it. There is deliberately NO delete: "
         "to retire a fact you believe is wrong or stale, call feedback with "
-        "feedback='unhelpful' — that lowers its resonance so it FADES toward dormancy "
+        "feedback='unhelpful' - that lowers its resonance so it FADES toward dormancy "
         "(recoverable, still pluckable by a strong cue), rather than erasing it. "
         "feedback='helpful' raises resonance. The system alone owns decay/forget.\n"
         "Use pin to mark a fact identity-level / never-forget (e.g. the user's name, a "
         "standing preference, a safety rule): a pinned fact is exempt from ALL forgetting "
-        "— decay, dormancy-prune, and long-tier eviction — until you unpin it. Pin only "
+        "- decay, dormancy-prune, and long-tier eviction - until you unpin it. Pin only "
         "PROTECTS; it does not inflate importance. Reserve it for the few facts that must "
         "never fade; unpin to release one back to normal Hebbian dynamics.\n"
-        "Use request_abstraction to ask the memory to run a generalization pass NOW — "
+        "Use request_abstraction to ask the memory to run a generalization pass NOW - "
         "cluster related long-term facts and synthesize higher-level abstractions "
         "(contextualized: a default plus its scoped exceptions), instead of waiting for "
         "the periodic dream-cycle abstraction. Distinct from force_dream_cycle (which only "
         "sometimes abstracts).\n"
-        "Use narrative to read the durable cross-session history — one-paragraph "
+        "Use narrative to read the durable cross-session history - one-paragraph "
         "summaries of past sessions (a remembered gist, not verbatim) for continuity "
         "on what you and the user have been doing together.\n"
         "Use get_self_model / set_self_model to read or deliberately curate the "
@@ -79,19 +79,19 @@ LATTICE_STORE_SCHEMA = {
         "fuzzy matches; each carries its source fact.\n"
         "Use infer for bounded multi-hop reasoning from a 'subject' (optionally to "
         "an 'object'): it chains stored triples (<= hops) into DERIVED connections. "
-        "These are INFERENCES, not facts — each is flagged inferred=true, carries "
+        "These are INFERENCES, not facts - each is flagged inferred=true, carries "
         "the supporting path + a decayed confidence, and is NEVER stored. Treat "
         "them as leads to confirm, not as attested memory.\n"
         "Use pending_conflicts to see unresolved contradictory memories (the system "
         "duels them automatically, but you can disambiguate): each group lists the "
         "competing facts. If ONE side is correct, call resolve_conflict with "
         "fact_id = the correct one to boost it and retire the rest as superseded "
-        "history. If the facts turn out to be COMPATIBLE — both true, e.g. parallel "
-        "statements about different subjects flagged in error — call dismiss_conflict "
+        "history. If the facts turn out to be COMPATIBLE - both true, e.g. parallel "
+        "statements about different subjects flagged in error - call dismiss_conflict "
         "with group_id (or fact_id = any member) to unlock all of them; nothing is "
         "retired or boosted asymmetrically. Choose by evidence: winner -> "
         "resolve_conflict, false alarm -> dismiss_conflict.\n"
-        "Use get_fact (exact ID lookup) — NOT search — when you need to confirm "
+        "Use get_fact (exact ID lookup) - NOT search - when you need to confirm "
         "the verbatim content of a specific stored fact; search returns similar "
         "neighbours, not the exact row. get_fact also returns quote_status: only "
         "'attested' means the fact's source_quote was verified verbatim against "
@@ -106,9 +106,9 @@ LATTICE_STORE_SCHEMA = {
             },
             "content": {"type": "string", "description": "Fact content (for add/feedback)"},
             "query": {"type": "string", "description": "Search query, entity/tool name for entity-graph actions, or a natural-language relational question (relational)"},
-            "subject": {"type": "string", "description": "relational/infer: subject slot — the start node for infer (omit = unknown for relational)"},
+            "subject": {"type": "string", "description": "relational/infer: subject slot - the start node for infer (omit = unknown for relational)"},
             "relation": {"type": "string", "description": "relational: relation slot, e.g. works_at/lives_in (omit = unknown)"},
-            "object": {"type": "string", "description": "relational/infer: object slot — for infer, only chains ending here are returned (optional)"},
+            "object": {"type": "string", "description": "relational/infer: object slot - for infer, only chains ending here are returned (optional)"},
             "hops": {"type": "integer", "description": "infer: max chain length (defaults to max_inference_hops)"},
             "key": {"type": "string", "description": "set_self_model/get_self_model: identity key, e.g. name/role/relationship_with_user (get with no key returns the whole self-model)"},
             "value": {"type": "string", "description": "set_self_model: the identity value to record for key"},
@@ -205,7 +205,7 @@ class ToolHandlerMixin:
                 # Exact-ID lookup. The return shape is DELIBERATELY distinct from
                 # search (no "results"/"count" keys, no neighbours) so the model
                 # cannot confuse a direct hit with a similarity match. A miss
-                # returns found:false and NEVER neighbour rows — preventing the
+                # returns found:false and NEVER neighbour rows - preventing the
                 # phantom-fact confabulation that arises from narrating around
                 # search neighbours when asked for a specific row.
                 fact_id = args.get("fact_id")
@@ -231,7 +231,7 @@ class ToolHandlerMixin:
             elif action == "remove":
                 # A21 no-delete: the AGENT influences memory, it never destroys it. The
                 # destructive remove path is admin-only (config agent_can_delete, default
-                # False). When disabled, point the model at the non-destructive route —
+                # False). When disabled, point the model at the non-destructive route -
                 # unhelpful feedback fades the fact to dormancy (recoverable), and pin
                 # protects a vital one. (remove_fact stays for audited human/admin cleanup.)
                 if not getattr(self, "_agent_can_delete", False):
@@ -253,7 +253,7 @@ class ToolHandlerMixin:
             elif action in ("pin", "unpin"):
                 # A5 identity-level durability: pin marks a fact never-forget (exempt from
                 # decay/prune/eviction); unpin releases it to normal Hebbian dynamics.
-                # Protective only — never changes resonance, so it can't be abused to make a
+                # Protective only - never changes resonance, so it can't be abused to make a
                 # fact runaway-immortal; the system still owns forgetting for everything else.
                 fact_id = args.get("fact_id")
                 if fact_id is None:
@@ -293,7 +293,7 @@ class ToolHandlerMixin:
                 threading.Thread(
                     target=self._run_consolidation_epoch,
                     args=(self._session_id,),
-                    daemon=False    # was daemon=True — would be killed on process exit
+                    daemon=False    # was daemon=True - would be killed on process exit
                 ).start()
                 return json.dumps({"status": "Waking cycle (consolidation) triggered"})
  
@@ -302,7 +302,7 @@ class ToolHandlerMixin:
                 # so shutdown() drains it before closing the DB handle.
                 _t = threading.Thread(
                     target=self._run_dream_cycle,
-                    daemon=False    # was daemon=True — would be killed on process exit
+                    daemon=False    # was daemon=True - would be killed on process exit
                 )
                 self._last_dream_thread = _t
                 _t.start()
@@ -319,7 +319,7 @@ class ToolHandlerMixin:
 
             elif action == "memory_audit":
                 # Read-only health snapshot (same data the cycle-based audit logs).
-                # No side effects — not write-gated, like stats.
+                # No side effects - not write-gated, like stats.
                 health = self._store.get_memory_health(near_cap=self._health_near_cap)
                 health["memory_cycle"] = self._memory_cycle
                 health["dream_cycle"] = self._dream_cycle_count
@@ -356,7 +356,7 @@ class ToolHandlerMixin:
 
             elif action == "dismiss_conflict":
                 # False-positive escape hatch: the facts turned out COMPATIBLE
-                # (both true) — unlock every member instead of picking a winner.
+                # (both true) - unlock every member instead of picking a winner.
                 gid = args.get("group_id")
                 fid = args.get("fact_id")
                 if not gid and fid is None:
@@ -431,7 +431,7 @@ class ToolHandlerMixin:
 
             elif action == "infer":
                 # Phase 5c: bounded transitive inference. Read-only and never
-                # persisted — results are DERIVED, flagged inferred=true with their
+                # persisted - results are DERIVED, flagged inferred=true with their
                 # supporting path. subject (start node) is required.
                 subject = args.get("subject") or args.get("query")
                 if not subject:
@@ -443,7 +443,7 @@ class ToolHandlerMixin:
                     subject=subject, object=obj, max_hops=hops, max_results=limit,
                 )
                 return json.dumps({"inferences": inferences, "count": len(inferences),
-                                   "note": "inferred (derived) — not stored facts"})
+                                   "note": "inferred (derived) - not stored facts"})
 
             elif action == "get_self_model":
                 # Phase 7: read the deliberate self-model. Read-only (not write-
@@ -455,7 +455,7 @@ class ToolHandlerMixin:
 
             elif action == "set_self_model":
                 # Phase 7: deliberately curate the self-model. Write-gated to the
-                # primary context above — this is the ONLY write path to the
+                # primary context above - this is the ONLY write path to the
                 # agent_identity store (autonomous ingest can never reach it).
                 if not self._enable_self_model:
                     return tool_error("self-model is disabled (set enable_self_model=true to use it).")

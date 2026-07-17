@@ -174,14 +174,14 @@ conflict groups, same abstractions given the same LLM stubs).
 
 > STATUS 2026-07-12 - §5-2 FOUNDATION LANDED: the client-visitor read surface +
 > its parity acceptance. `retrieval.BlindVisitor` (via `BlindTier.visitor()`)
-> assembles each fact's dream-cycle WORKING SET — `fact_view` = {content, category,
+> assembles each fact's dream-cycle WORKING SET - `fact_view` = {content, category,
 > quote, ref, entities}, plus `triples(fact_id)` (relation ids read structurally,
-> text decrypted from `semantic_he_triples`), `summary(id)`, `episode(id)` — entirely
+> text decrypted from `semantic_he_triples`), `summary(id)`, `episode(id)` - entirely
 > from the §5-1 sealed ciphertext. `store_blind.relation_ids_for_fact` gives the
 > structural fact->relation map that survives the seal. Parity test proves the
 > blind-served working set == the plaintext store's, AND that it is truly
 > blind-sourced (tampering the plaintext `content` column does not change the
-> visitor's output — it reads ciphertext). This is the load-bearing mechanism +
+> visitor's output - it reads ciphertext). This is the load-bearing mechanism +
 > acceptance for the READ half: identical working set + fixed LLM stub => identical
 > pass outcomes by construction. 1 new test, suite 134 -> 135 green.
 > REMAINING §5-2 (couples with §5-3/§5-4, next sessions): re-route each real
@@ -222,7 +222,7 @@ computation ready for it; the daemon is packaging, not new crypto.
 3. Verify + operate hybrid as long as desired (recall already blind).
 4. `seal` when confident (god-mode export in hand).
 So "train in the clear, seal afterwards" becomes a first-class, staged workflow
-- the queued experiment validates stages 2–3 at 2,500-fact scale before any §5
+- the queued experiment validates stages 2-3 at 2,500-fact scale before any §5
 code exists.
 
 ## 6. Documented leakage profile after §5 (honest-seam summary)

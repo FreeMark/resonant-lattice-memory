@@ -1,6 +1,6 @@
 r"""test_importance_decay.py  (feature: importance != frequency)
 
-The fade probe showed retention depends on use/pin/novelty — so an important-but-
+The fade probe showed retention depends on use/pin/novelty - so an important-but-
 rarely-recalled fact (a compliance rule, a spend record) can fade like noise. The
 importance_decay_discount feature makes high-stakes-category facts decay slower,
 so they survive the dwell-to-long gauntlet and are retained where generic facts
@@ -60,16 +60,16 @@ def main():
 
     # OFF (control): both important + generic should fade (nothing pins/uses them)
     imp_off, gen_off = retain_run(0.0)
-    suite.report("feature OFF — important retained / generic retained", f"{imp_off}/{len(IMPORTANT)}  {gen_off}/{len(GENERIC)}")
+    suite.report("feature OFF - important retained / generic retained", f"{imp_off}/{len(IMPORTANT)}  {gen_off}/{len(GENERIC)}")
     suite.hard("control: with the feature OFF, unused important facts fade like generic ones",
                imp_off == 0 and gen_off == 0, f"imp={imp_off} gen={gen_off}")
 
     # ON: important facts retained, generic still fade
     imp_on, gen_on = retain_run(0.6)
-    suite.report("feature ON (0.6) — important retained / generic retained", f"{imp_on}/{len(IMPORTANT)}  {gen_on}/{len(GENERIC)}")
+    suite.report("feature ON (0.6) - important retained / generic retained", f"{imp_on}/{len(IMPORTANT)}  {gen_on}/{len(GENERIC)}")
     suite.hard("with the feature ON, UNUSED important facts are RETAINED (importance != frequency)",
                imp_on == len(IMPORTANT), f"{imp_on}/{len(IMPORTANT)}")
-    suite.hard("the feature is SELECTIVE — generic noise still fades (no unbounded retention)",
+    suite.hard("the feature is SELECTIVE - generic noise still fades (no unbounded retention)",
                gen_on == 0, f"generic retained={gen_on}")
     suite.hard("ON retains strictly more important facts than OFF (the feature is the cause)",
                imp_on > imp_off, f"off={imp_off} on={imp_on}")

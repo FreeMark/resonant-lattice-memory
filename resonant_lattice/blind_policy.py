@@ -1,14 +1,14 @@
-"""blind_policy.py — Tier-1 blind-store runtime SCOPE policy (E6, roadmap §7.2).
+"""blind_policy.py - Tier-1 blind-store runtime SCOPE policy (E6, roadmap §7.2).
 
 HE bounds PROVENANCE ("results of a query I ran") but NOT SCOPE (how much a query
 returns). A hijacked agent holding the eval key could homomorphically "select
-everything" and have the store re-encrypt it one query at a time — the math cannot stop
+everything" and have the store re-encrypt it one query at a time - the math cannot stop
 this; policy must (roadmap §7.2, tension #2). This leaf enforces the conservative,
 auditable scope bounds the roadmap commits to, all on the LOGICAL memory cycle (never
 wall-clock, per the cross-cutting principles), and keeps a re-encryption audit log the
 user can review.
 
-Pure-Python (no openfhe, no SQLite) — a leaf like store_common, fully unit-testable on
+Pure-Python (no openfhe, no SQLite) - a leaf like store_common, fully unit-testable on
 any host. The PRE/threshold crypto lives in he_crypto (BlindPRE / ThresholdAudit); this
 module is the policy that bounds the blast radius the crypto deliberately does not."""
 
@@ -19,7 +19,7 @@ from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
-# Conservative defaults — a single local user's blind recall, not a service. Tunable.
+# Conservative defaults - a single local user's blind recall, not a service. Tunable.
 DEFAULT_TOPK_CEILING = 16              # a recall never re-encrypts more than this many hits
 DEFAULT_PER_CYCLE_QUERY_CAP = 8       # max blind recalls the agent may run per memory cycle
 DEFAULT_PER_CYCLE_REENCRYPT_CAP = 64  # max results re-encrypted per cycle (sum of k)
@@ -43,7 +43,7 @@ class ReEncryptEvent:
 
 
 class ReEncryptAuditLog:
-    """Append-only record of every re-encryption the store performs for the agent — the
+    """Append-only record of every re-encryption the store performs for the agent - the
     user-reviewable trail that makes the §7.2 policy bound auditable rather than implicit."""
 
     def __init__(self) -> None:
@@ -66,7 +66,7 @@ class ScopeLimiter:
     """Enforces conservative per-cycle scope on blind recall (roadmap §7.2).
 
     - **top-k ceiling**: a single recall can never request more than ``topk_ceiling``
-      results — the query-shape constraint ("top-k vs one probe," never "return all").
+      results - the query-shape constraint ("top-k vs one probe," never "return all").
     - **per-cycle query cap**: bounds how many blind recalls the agent runs per cycle.
     - **per-cycle re-encryption cap**: bounds the TOTAL results re-encrypted per cycle, so
       an agent cannot exfiltrate the store one small query at a time.
@@ -107,13 +107,13 @@ class ScopeLimiter:
 
 
 class BlindReEncryptGate:
-    """STORE-side re-encryption gate (roadmap 6c) — the store-side half of the §7.2 bound.
+    """STORE-side re-encryption gate (roadmap 6c) - the store-side half of the §7.2 bound.
 
     The store performs ``ReEncrypt`` ONLY for a token the agent presents from a
     ``ScopeLimiter.authorize()`` grant, and only up to that grant's ``k`` results
     (single-use budget). This binds every re-encryption to one approved query (provenance)
     and refuses both replay (re-registering a spent token) and over-spend (more ReEncrypts
-    than authorized) — so even with a valid eval key the agent cannot have the store
+    than authorized) - so even with a valid eval key the agent cannot have the store
     re-encrypt more than policy allows. Pure-Python; the actual ``ReEncrypt`` crypto stays
     in ``he_crypto.BlindRecallPRE.reencrypt_score``. The matching audit row is persisted by
     the store (``record_reencrypt_event``) so the trail is substrate-checkable."""
@@ -124,7 +124,7 @@ class BlindReEncryptGate:
 
     def register(self, token: str, k: int) -> None:
         """The store accepts a fresh token good for exactly ``k`` re-encryptions. A token may
-        be registered only once — replaying a whole grant is refused."""
+        be registered only once - replaying a whole grant is refused."""
         if not token or int(k) <= 0:
             raise TokenError("token must be non-empty and k positive")
         if token in self._seen:

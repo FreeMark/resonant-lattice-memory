@@ -1,4 +1,4 @@
-"""lifecycle.py — LifecycleMixin: session switch/end, shutdown, and the
+"""lifecycle.py - LifecycleMixin: session switch/end, shutdown, and the
 optional ABC hooks (on_memory_write, on_pre_compress, on_delegation).
 
 Mixed into LatticeMemoryProvider; relies on the composite for self._store/
@@ -53,7 +53,7 @@ class LifecycleMixin:
           1. Wait for the last ingest thread to finish writing episodes (5s timeout).
              Without this, the forced consolidation below might read an episode
              table that's missing the final turn's content.
-          2. Run forced blocking consolidation — extracts facts from the complete
+          2. Run forced blocking consolidation - extracts facts from the complete
              episode log including the final turn.
           3. Run dream cycle on a non-daemon thread (join 60s) so Hebbian
              maintenance completes before the process exits.
@@ -67,7 +67,7 @@ class LifecycleMixin:
             self._last_ingest_thread.join(timeout=5.0)
             if self._last_ingest_thread.is_alive():
                 logger.warning(
-                    "on_session_end: ingest thread still running after 5s — "
+                    "on_session_end: ingest thread still running after 5s - "
                     "final turn's episodes may be missing from consolidation."
                 )
  
@@ -77,7 +77,7 @@ class LifecycleMixin:
         # joined above may not be the one writing this turn, or sync landed after
         # the join). If the session still shows no episodes, poll briefly so the
         # forced consolidation below reads the real transcript instead of an
-        # empty window — the root cause of a research report distilling 0 facts.
+        # empty window - the root cause of a research report distilling 0 facts.
         if self._session_id:
             for _ in range(50):  # up to ~5s
                 try:
@@ -88,11 +88,11 @@ class LifecycleMixin:
                 time.sleep(0.1)
 
         # Step 2: Forced blocking consolidation (waits up to 50s for the lock
-        # — long enough to outlast an in-flight 45s Ollama call).
-        # Suppress its inline dream cycle — we run exactly one in Step 3.
+        # - long enough to outlast an in-flight 45s Ollama call).
+        # Suppress its inline dream cycle - we run exactly one in Step 3.
         self._run_consolidation_epoch(self._session_id, force_blocking=True, suppress_dream=True)
 
-        # Step 2.5: Phase 8 — durable autobiographical summary of this session,
+        # Step 2.5: Phase 8 - durable autobiographical summary of this session,
         # generated from the (now-complete) episode log BEFORE the dream cycle can
         # prune episodes. Gated by enable_narrative; non-fatal.
         if self._enable_narrative:
@@ -100,7 +100,7 @@ class LifecycleMixin:
 
         # Step 3: Dream cycle on a non-daemon thread with generous timeout.
         # wait_lock: under N-way overnight concurrency another process may be
-        # mid-finalize — the session-end dream WAITS (non-daemon thread, the
+        # mid-finalize - the session-end dream WAITS (non-daemon thread, the
         # process stays alive for it) instead of skipping its maintenance pass.
         t = threading.Thread(target=self._run_dream_cycle, daemon=False,
                              kwargs={"wait_lock": True})
@@ -110,7 +110,7 @@ class LifecycleMixin:
 
 
     def shutdown(self) -> None:
-        # Drain any in-flight turn ingest before closing the handle — shutdown
+        # Drain any in-flight turn ingest before closing the handle - shutdown
         # can be reached without on_session_end (which normally does this).
         if self._last_ingest_thread is not None and self._last_ingest_thread.is_alive():
             self._last_ingest_thread.join(timeout=5.0)
@@ -118,7 +118,7 @@ class LifecycleMixin:
         # grab self._lock between two dream-cycle steps and shut the connection,
         # so the next step would log a 'closed database' error and skip remaining
         # Hebbian maintenance. The dream thread is non-daemon (the process already
-        # waits for it at exit) — this only sequences close() after it. Bounded so
+        # waits for it at exit) - this only sequences close() after it. Bounded so
         # a slow LLM abstraction can't hang shutdown: if still running after the
         # grace, skip close() and let the thread + process-exit cleanup release
         # the handle (SQLite WAL recovers to the last commit on next open).
@@ -127,7 +127,7 @@ class LifecycleMixin:
             dream.join(timeout=60.0)
             if dream.is_alive():
                 logger.warning(
-                    "shutdown: dream cycle still running after grace — leaving the "
+                    "shutdown: dream cycle still running after grace - leaving the "
                     "DB handle open for the non-daemon thread to finish; it will be "
                     "released on process exit."
                 )
@@ -160,7 +160,7 @@ class LifecycleMixin:
             return
 
         # Provenance labeling: these facts are the agent's OWN synthesis (it
-        # chose the words written to MEMORY.md/USER.md) — a different trust
+        # chose the words written to MEMORY.md/USER.md) - a different trust
         # class from transcript-extracted, quote-attested facts. Three signals:
         # category reads as a note in recall ("[mental_note] ..."), quote_status
         # marks the epistemics for audits/viz, source_ref records provenance.

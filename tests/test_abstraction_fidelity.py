@@ -5,12 +5,12 @@ $40" or invents "$4000", the agent acts on a wrong number. Two compressors:
 
   ABSTRACTION (perform_abstraction_pass): clusters related facts into a general
     'abstract' fact. It ADDS a fact (sources remain), and the prompt forbids
-    inventing generalizations — so the trust bar is: it must never introduce a
+    inventing generalizations - so the trust bar is: it must never introduce a
     number that isn't in the sources (no fabricated/rounded value). Exact values
     stay recoverable from the surviving source rows.
 
   GIST (consolidate_before_prune): summarizes DYING facts right before deletion.
-    By default the prompt says to DROP exact numbers — so a gist-then-prune of a
+    By default the prompt says to DROP exact numbers - so a gist-then-prune of a
     money fact LOSES the exact value (the only surviving record is blurred). For
     money/compliance facts the number IS the meaning; this probe measures that
     loss (and, after the prompt fix, confirms the value survives).

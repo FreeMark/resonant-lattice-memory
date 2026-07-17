@@ -465,7 +465,7 @@ def _spark(value: float, maxv: float, width: int = 10) -> str:
 
 def toggle_pin(db_path: str, fid: int) -> tuple[bool, str]:
     """The ONE sanctioned write: flip a fact's `pinned` flag (which is exactly
-    what the store's pin action is — a column). Uses a brief, separate read-write
+    what the store's pin action is - a column). Uses a brief, separate read-write
     connection with a short busy timeout, so the monitoring connection stays
     strictly read-only and reads never block the agent."""
     if not os.path.exists(db_path):
@@ -697,7 +697,7 @@ class MonitorApp(App):
         cats = sorted(h["by_category"].items(), key=lambda kv: -kv[1])[:6]
         t = Text()
         t.append("categories ", style="dim")
-        t.append("  ".join(f"{k} {v}" for k, v in cats) or "—", style="white")
+        t.append("  ".join(f"{k} {v}" for k, v in cats) or "-", style="white")
         t.append("   │   superseded ", style="dim"); t.append(str(h["superseded"]), style="white")
         t.append("   near-cap ", style="dim"); t.append(str(h["near_cap"]), style="white")
         t.append("   max-res ", style="dim"); t.append(f"{h['max_res']:.1f}", style="white")

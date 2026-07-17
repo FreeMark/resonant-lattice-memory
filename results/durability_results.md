@@ -1,4 +1,4 @@
-# Durability — concurrency + crash/restart
+# Durability - concurrency + crash/restart
 
 **Date**: 2026-06-28 02:26:44  
 **Memory model**: (no LLM)  
@@ -11,7 +11,7 @@
 | kind | check | status | detail |
 |---|---|---|---|
 | info | concurrency | INFO | 8/8 threads done, 0 errors, 4.7s |
-| hard | no deadlock — all threads completed | PASS | alive=0 |
+| hard | no deadlock - all threads completed | PASS | alive=0 |
 | hard | no thread raised under concurrent add+recall | PASS | [] |
 | hard | every concurrent write landed (no lost rows) | PASS | 320/320 |
 | hard | DB integrity_check clean after concurrent load | PASS | ok |

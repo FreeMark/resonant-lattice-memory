@@ -1,10 +1,10 @@
-"""eval_embed.py — embedding sources for the harness, with a disk cache so presets reuse vectors.
+"""eval_embed.py - embedding sources for the harness, with a disk cache so presets reuse vectors.
 
 Two sources, one cache:
-  * deterministic_embed — a seeded pseudo-embedding (unit vector) for fast, Ollama-free tests/CI.
-  * ollama_embed        — real ``nomic-embed-text`` via the running Ollama; the signal that
+  * deterministic_embed - a seeded pseudo-embedding (unit vector) for fast, Ollama-free tests/CI.
+  * ollama_embed        - real ``nomic-embed-text`` via the running Ollama; the signal that
                           actually matters for tuning recall quality.
-  * CachedEmbedder      — memoizes by (model, text) to an on-disk JSON cache so a corpus is
+  * CachedEmbedder      - memoizes by (model, text) to an on-disk JSON cache so a corpus is
                           embedded ONCE and every preset run reuses it (determinism + speed; the
                           embeddings are identical across presets, so only the DYNAMICS vary).
 
@@ -23,7 +23,7 @@ DEFAULT_MODEL = "nomic-embed-text"
 
 
 def deterministic_embed(text, dim=256):
-    """Seeded unit pseudo-embedding — same text always maps to the same vector, no Ollama needed.
+    """Seeded unit pseudo-embedding - same text always maps to the same vector, no Ollama needed.
     Good enough to exercise the dynamics deterministically in tests; NOT semantically meaningful
     (use ollama_embed for real recall-quality tuning)."""
     seed = int.from_bytes(hashlib.sha256(text.encode("utf-8")).digest()[:8], "big")

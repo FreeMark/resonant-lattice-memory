@@ -1,4 +1,4 @@
-"""consolidation.py — ConsolidationMixin: the waking (consolidation) epoch,
+"""consolidation.py - ConsolidationMixin: the waking (consolidation) epoch,
 the Hebbian dream cycle, abstraction / procedural-distillation kicks,
 tool-action ingest, and source_quote attestation.
 
@@ -54,7 +54,7 @@ def _strip_goal_injection(content: str) -> str:
     INSTRUCTIONS as durable user facts. The goal loop re-sends the full goal text
     as a USER turn every cycle ('[Continuing toward your standing goal] Goal: …');
     only the assistant's responses carry new domain content worth extracting.
-    No-ops on any turn without the marker (manual chats, and the raw turn-1 goal —
+    No-ops on any turn without the marker (manual chats, and the raw turn-1 goal -
     whose one-off residue the self_write_gate catches)."""
     if content and "[Continuing toward your standing goal]" in content:
         return "[standing-goal continuation]"
@@ -80,7 +80,7 @@ class ConsolidationMixin:
         ]
         if any(sig in text for sig in strong_signals):
             return False
-        # Weaker word signals — match WHOLE words so "0 errors", "no error", and
+        # Weaker word signals - match WHOLE words so "0 errors", "no error", and
         # "invalidate" don't trip a false failure. (Still heuristic; see note.)
         # Tightened: "not found" and "invalid" appear in plenty of SUCCESSFUL
         # outputs ("0 invalid rows", "user not found, created new"), so they no
@@ -115,7 +115,7 @@ class ConsolidationMixin:
                 real_call_id = tc.get("id")
                 fn = tc.get("function", {})
                 tool_name = fn.get("name", "unknown_tool")
-                # Never ingest the memory tool's own calls as facts — that creates
+                # Never ingest the memory tool's own calls as facts - that creates
                 # a self-referential loop (memory about searching memory) that
                 # pollutes the store and runs away on resonance.
                 if tool_name == "lattice_store":
@@ -130,7 +130,7 @@ class ConsolidationMixin:
                 # from tool_name + raw arguments so BOTH the in-memory gate and the
                 # UNIQUE partial index on tool_episodes.call_id still reject
                 # history replays after a restart. (hash() is per-process
-                # randomized and would NOT survive a restart — use hashlib.)
+                # randomized and would NOT survive a restart - use hashlib.)
                 if real_call_id:
                     dedup_id = real_call_id
                 else:
@@ -207,10 +207,10 @@ class ConsolidationMixin:
     def _run_consolidation_epoch(self, session_id: str, force_blocking: bool = False, suppress_dream: bool = False) -> None:
         """Distill new facts from recent conversation using the reasoning model.
         Includes robust JSON parsing, embedding generation, HRR vectors, and entity extraction.
-        Purely cycle-driven — no timers."""
+        Purely cycle-driven - no timers."""
 
         if not self._write_enabled:
-            logger.debug("Consolidation skipped — writes disabled for this agent context")
+            logger.debug("Consolidation skipped - writes disabled for this agent context")
             return
 
         if force_blocking:
@@ -220,22 +220,22 @@ class ConsolidationMixin:
                 return
         else:
             if not self._consolidation_lock.acquire(blocking=False):
-                logger.debug("Consolidation epoch already running — skipping")
+                logger.debug("Consolidation epoch already running - skipping")
                 return
 
         # Cross-PROCESS serialization (concurrent overnight workers + gateway on
         # one profile DB): same skip/wait semantics as the in-process lock above.
-        # Fresh instance per finalize unit — see proc_lock module docstring.
+        # Fresh instance per finalize unit - see proc_lock module docstring.
         _flock = FinalizeLock(self._store.db_path)
         if not _flock.acquire(FINALIZE_LOCK_WAIT if force_blocking else 0.0):
             if force_blocking:
                 logger.error(
-                    "Finalize lock still held by another process after %.0fs — "
+                    "Finalize lock still held by another process after %.0fs - "
                     "skipping forced consolidation (episodes remain durable).",
                     FINALIZE_LOCK_WAIT)
             else:
                 logger.info(
-                    "Consolidation deferred — another process is finalizing this DB")
+                    "Consolidation deferred - another process is finalizing this DB")
             self._consolidation_lock.release()
             return
 
@@ -270,7 +270,7 @@ class ConsolidationMixin:
 
             # [SYNTHESIZED] provenance detection (label gauntlet 2026-07-11): a
             # session that READ its own memory (lattice_store reads, tracked
-            # in-process) and touched NO web tools is reflection, not research —
+            # in-process) and touched NO web tools is reflection, not research -
             # facts born from it restate or recombine stored knowledge. They get
             # source_ref "synthesized:<session>" below so recall can mark them and
             # no secondhand URL masquerades as firsthand provenance. Domain
@@ -285,7 +285,7 @@ class ConsolidationMixin:
                 synthesis_session = not any(_WEB_TOOL_RE.search(t or "") for t in _profile)
                 if synthesis_session:
                     logger.info("Synthesis session detected (%s): memory reads, "
-                                "zero web tools — facts will carry [SYNTHESIZED]",
+                                "zero web tools - facts will carry [SYNTHESIZED]",
                                 session_id)
 
             # 2. Build prompt for the reasoning model
@@ -312,7 +312,7 @@ class ConsolidationMixin:
                     s_i, e_i = rt.find('['), rt.rfind(']')
                     facts = json.loads(rt[s_i:e_i + 1] if (s_i != -1 and e_i != -1) else rt)
                 except json.JSONDecodeError:
-                    logger.debug("Strict JSON parsing failed — using regex fallback")
+                    logger.debug("Strict JSON parsing failed - using regex fallback")
                     cp = r'"content"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"'
                     kp = r'"category"\s*:\s*"([^"]+)"'
                     facts = []
@@ -386,7 +386,7 @@ class ConsolidationMixin:
                 source_ref = source_ref.strip()[:500] if isinstance(source_ref, str) and source_ref.strip() else None
                 # Synthesis stamp: in a memory-only reflection session the agent
                 # fetched nothing, so ANY ref the extractor emits is secondhand
-                # (echoed from recalled content — the fact #2913 class). Record
+                # (echoed from recalled content - the fact #2913 class). Record
                 # the truthful origin instead.
                 if synthesis_session:
                     source_ref = f"synthesized:{session_id}"
@@ -407,7 +407,7 @@ class ConsolidationMixin:
                             quotes_dropped += 1
                             logger.debug(
                                 "Quote attestation: DROPPED fact (fabricated specific) "
-                                "— %s | quote=%s", content[:60], source_quote[:60],
+                                "- %s | quote=%s", content[:60], source_quote[:60],
                             )
                             continue   # user policy: drop on hard-specific mismatch
                         if verdict == "unattested":
@@ -436,7 +436,7 @@ class ConsolidationMixin:
                     )
                     logger.debug(f"Fact '{content[:40]}...' → {action} (ID: {fid})")
                     # Tier-1 blind mirror (embedding/entities/HRR → semantic_he*) is NOT done
-                    # per-fact here anymore — it runs once at the end of the epoch via
+                    # per-fact here anymore - it runs once at the end of the epoch via
                     # self._blind_reconcile() (§14 6a / write-path completeness), the single
                     # mechanism that ALSO catches facts created store-side (abstraction/gist/
                     # procedural) and backfills a store on first blind-enable.
@@ -454,18 +454,18 @@ class ConsolidationMixin:
             # the just-written plaintext back, no Ollama). One mechanism for every write path.
             self._blind_reconcile()
 
-            # 6. Update cycle counter — atomic in-DB increment. Never write
+            # 6. Update cycle counter - atomic in-DB increment. Never write
             # back the process-cached value: other processes share this DB
             # and may have advanced the clock since we loaded it.
             self._memory_cycle = self._store.increment_cycle("memory_cycle")
             logger.info(
-                f"✅ Memory Cycle {self._memory_cycle} completed — "
+                f"✅ Memory Cycle {self._memory_cycle} completed - "
                 f"{len(extracted_facts)} facts processed"
                 + (f", {quotes_dropped} dropped (unverified specifics)" if quotes_dropped else "")
             )
  
             # Determine whether a dream cycle should follow, but don't decide
-            # inside the lock — we release first so on_session_end(force_blocking)
+            # inside the lock - we release first so on_session_end(force_blocking)
             # can acquire it quickly without timing out during LLM abstraction calls.
             trigger_dream = (self._memory_cycle % self._dream_every_n_consolidations == 0)
  
@@ -493,38 +493,38 @@ class ConsolidationMixin:
 
     # ====================== DREAM CYCLE (Hebbian Maintenance) ======================
     def _run_dream_cycle(self, wait_lock: bool = False) -> None:
-        """Full Hebbian Dream Cycle — decay, promotion, abstraction, conflict resolution.
+        """Full Hebbian Dream Cycle - decay, promotion, abstraction, conflict resolution.
 
         ``wait_lock``: when another PROCESS is finalizing this DB, a scheduled
-        dream (mid-session trigger, manual tool call) defers — the next trigger
+        dream (mid-session trigger, manual tool call) defers - the next trigger
         dreams. The session-end dream passes True and waits its turn so every
         session still gets its maintenance pass under N-way concurrency.
  
         Step order matters:
-          0. increment_tier_cycles  — advance tier-dwell counters (short/mid)
-          0.5 reencode_hrr_if_needed — one-shot encoding migration (self-gating)
-          0.6 reembed_if_needed     — one-shot re-embed on embed_model change (self-gating, P4d)
-          1. apply_cycle_decay      — bleed short/mid resonance (long exempt)
-          1.5 apply_staleness_decay — extra decay for weak+stale facts (gated; off by default)
-          2. apply_conflict_decay   — bleed conflicting facts; resurrect tie-breaker
-          3. promote_facts          — mid→long first, then short→mid; needs resonance + dwell
-          4. abstraction pass       — every N cycles, LLM generalization (gated)
-          4.5 distill_procedural    — every N cycles, generalize tool episodes → procedural facts (gated)
-          4.9 supersede_conflict_losers — retire conflict losers as history (gated)
-          4.95 consolidate_before_prune — gist dying earned facts (gated; off by default)
-          5. prune_weak_facts       — delete resonance <= 0 (superseded losers kept)
-          6. free_conflict_winners  — clear conflict lock from sole survivors
-          7. resolve_hrr_conflicts  — detect new conflicts in long-tier facts
-          8. prune_episodes         — keep only N most recent sessions (+ episode_max_rows cap)
-          8.5 prune_tool_episodes   — bound the raw tool-episode log (gated)
-          9. gc_orphan_entities     — drop entity rows no longer linked to any fact
-          10. enforce_long_tier_cap — evict weakest long facts beyond max_long_facts (gated)
-          11. memory-health audit   — read-only health snapshot every N cycles (gated)
-          12. _blind_reconcile      — mirror this cycle's new facts into the blind tables (blind mode only)
+          0. increment_tier_cycles  - advance tier-dwell counters (short/mid)
+          0.5 reencode_hrr_if_needed - one-shot encoding migration (self-gating)
+          0.6 reembed_if_needed     - one-shot re-embed on embed_model change (self-gating, P4d)
+          1. apply_cycle_decay      - bleed short/mid resonance (long exempt)
+          1.5 apply_staleness_decay - extra decay for weak+stale facts (gated; off by default)
+          2. apply_conflict_decay   - bleed conflicting facts; resurrect tie-breaker
+          3. promote_facts          - mid→long first, then short→mid; needs resonance + dwell
+          4. abstraction pass       - every N cycles, LLM generalization (gated)
+          4.5 distill_procedural    - every N cycles, generalize tool episodes → procedural facts (gated)
+          4.9 supersede_conflict_losers - retire conflict losers as history (gated)
+          4.95 consolidate_before_prune - gist dying earned facts (gated; off by default)
+          5. prune_weak_facts       - delete resonance <= 0 (superseded losers kept)
+          6. free_conflict_winners  - clear conflict lock from sole survivors
+          7. resolve_hrr_conflicts  - detect new conflicts in long-tier facts
+          8. prune_episodes         - keep only N most recent sessions (+ episode_max_rows cap)
+          8.5 prune_tool_episodes   - bound the raw tool-episode log (gated)
+          9. gc_orphan_entities     - drop entity rows no longer linked to any fact
+          10. enforce_long_tier_cap - evict weakest long facts beyond max_long_facts (gated)
+          11. memory-health audit   - read-only health snapshot every N cycles (gated)
+          12. _blind_reconcile      - mirror this cycle's new facts into the blind tables (blind mode only)
         """
         if not self._store or not self._write_enabled:
             logger.debug(
-                "Dream cycle skipped — store missing or writes disabled "
+                "Dream cycle skipped - store missing or writes disabled "
                 "for this agent context (non-primary)."
             )
             return
@@ -533,7 +533,7 @@ class ConsolidationMixin:
         # Cross-process serialization (see _run_consolidation_epoch / proc_lock).
         _flock = FinalizeLock(self._store.db_path)
         if not _flock.acquire(FINALIZE_LOCK_WAIT if wait_lock else 0.0):
-            logger.info("Dream cycle deferred — another process is finalizing this DB")
+            logger.info("Dream cycle deferred - another process is finalizing this DB")
             self._dream_lock.release()
             return
 
@@ -542,7 +542,7 @@ class ConsolidationMixin:
             # Atomic in-DB increment (multi-process safe; see increment_cycle).
             self._dream_cycle_count = self._store.increment_cycle("dream_cycle")
             # The dream's decay/pruning math and batch stamps run on the
-            # memory_cycle clock — refresh it from the DB too, so a stale
+            # memory_cycle clock - refresh it from the DB too, so a stale
             # cached value can't under-age facts in a long-lived process.
             self._memory_cycle = self._store.get_cycle_counts()[0]
             # Semantic ROLLBACK: stamp this cycle's generative writes (abstraction /
@@ -571,13 +571,13 @@ class ConsolidationMixin:
             #     blind mode / when nothing changed. Off the startup hot path.
             self._reembed_if_needed()
 
-            # 1. Exponential decay — stronger memories forget slower (contested facts held in
-            #    limbo when conflict_limbo is on — see step 2)
+            # 1. Exponential decay - stronger memories forget slower (contested facts held in
+            #    limbo when conflict_limbo is on - see step 2)
             self._store.apply_cycle_decay(protect_conflicts=self._conflict_limbo,
                                           peak_discount=self._surprise_decay_discount,
                                           importance_discount=self._importance_decay_discount)
 
-            # 1.5 Phase 2 'use it or lose it' — extra decay for weak AND long-
+            # 1.5 Phase 2 'use it or lose it' - extra decay for weak AND long-
             #     unconfirmed facts (gated; default off via stale_decay_boost=0).
             if self._stale_decay_boost > 0:
                 self._store.apply_staleness_decay(
@@ -585,7 +585,7 @@ class ConsolidationMixin:
                     self._freshness_halflife_cycles,
                 )
 
-            # 1.6 Procedural staleness — perishable tool-use knowledge fades if it
+            # 1.6 Procedural staleness - perishable tool-use knowledge fades if it
             #     stops being re-confirmed (conflict-excluded + long-tier-exempt, so
             #     otherwise immortal). Lets a superseded search/URL rule fade once a
             #     better/pinned rule wins recall. Gated (bleed <= 0 -> no-op).
@@ -598,7 +598,7 @@ class ConsolidationMixin:
                 if faded:
                     logger.debug("Procedural staleness: bled %d unconfirmed procedural fact(s)", faded)
 
-            # 2. Conflict resolution. Limbo (default): DON'T auto-bleed — hold contested facts in
+            # 2. Conflict resolution. Limbo (default): DON'T auto-bleed - hold contested facts in
             #    sustained resonance, flagged on recall, until the USER arbitrates (resolve_conflict).
             #    Limbo off: the original auto-bleed-to-resolution duel (floor>0 ⇒ non-lethal).
             if not self._conflict_limbo:
@@ -612,7 +612,7 @@ class ConsolidationMixin:
             if self._dream_cycle_count % self._abstraction_frequency == 0:
                 self._perform_abstraction_pass()
 
-            # 4.5 Procedural Memory Distillation — generalize raw tool episodes
+            # 4.5 Procedural Memory Distillation - generalize raw tool episodes
             #     into reusable 'procedural' facts (episodes -> distill -> facts,
             #     mirroring the conversational consolidation path).
             if (self._enable_tool_memory
@@ -634,11 +634,11 @@ class ConsolidationMixin:
                     and self._dream_cycle_count % self._gist_frequency == 0):
                 self._consolidate_before_prune()
 
-            # 5. Prune completely faded facts — non-superseded losers deleted here
+            # 5. Prune completely faded facts - non-superseded losers deleted here
             self._store.prune_weak_facts(self._forget_after_dormant_cycles,
                                          protect_conflicts=self._conflict_limbo)
  
-            # 6. Free conflict winners — NOW safe to call because losers are gone.
+            # 6. Free conflict winners - NOW safe to call because losers are gone.
             #    Uses LatticeStore.free_conflict_winners() which holds _lock internally.
             #    Previously this was an unguarded self._store._conn.execute() call here,
             #    which bypassed the lock and risked collision with parallel sessions.
@@ -656,7 +656,7 @@ class ConsolidationMixin:
                 self._store.flag_consolidation_debt(
                     self._dream_cycle_count, exclude_session=self._session_id)
 
-            # 8. Keep episode table bounded — session window (prune_keep_sessions)
+            # 8. Keep episode table bounded - session window (prune_keep_sessions)
             #    plus optional total-row cap (episode_max_rows, 0 = unlimited).
             self._store.prune_episodes(
                 keep_sessions=self._prune_keep_sessions,
@@ -676,14 +676,14 @@ class ConsolidationMixin:
             if self._max_long_facts > 0:
                 self._store.enforce_long_tier_cap(self._max_long_facts)
 
-            # 11. Cycle-based memory-health audit (read-only) — log a snapshot
+            # 11. Cycle-based memory-health audit (read-only) - log a snapshot
             #     every N dream cycles. Strictly dream-cycle-driven, no timers.
             if (self._health_check_every_n_dream_cycles > 0
                     and self._dream_cycle_count % self._health_check_every_n_dream_cycles == 0):
                 self._run_memory_health_audit()
 
             # 12. Blind-tier write-path completeness (§14 6a): mirror facts created store-side
-            #     during this cycle (abstraction / gist / procedural distillation — none of which
+            #     during this cycle (abstraction / gist / procedural distillation - none of which
             #     can mirror inline, the store holds no HE client) into the encrypted tables, and
             #     incrementally backfill on first blind-enable. No-op off the blind path. Runs
             #     AFTER prune so facts about to be deleted aren't mirrored.
@@ -701,7 +701,7 @@ class ConsolidationMixin:
             _flock.release()
             self._dream_lock.release()
 
-        # Consolidation-debt retry — MUST run after the locks above are released:
+        # Consolidation-debt retry - MUST run after the locks above are released:
         # the retry re-enters _run_consolidation_epoch, which takes its own
         # consolidation + finalize locks and would deadlock/skip inside the dream.
         if getattr(self, "_reconsolidate_zero_fact_sessions", False):
@@ -715,7 +715,7 @@ class ConsolidationMixin:
 
         The substrate never discards an experience it has not digested: a debt is a
         session with substantial episodes and zero born facts (flagged in dream step
-        7.9, its episodes exempt from pruning). Bounded on every axis — one session
+        7.9, its episodes exempt from pruning). Bounded on every axis - one session
         per dream cycle, reconsolidation_max_attempts retries per session, and the
         one-cycle seasoning delay in get_open_consolidation_debts. The receipt
         check (born facts on source_session) runs BEFORE the retry so a debt that
@@ -752,7 +752,7 @@ class ConsolidationMixin:
 
         Delegates to LatticeStore.reembed_if_needed, passing the live embedder
         (retriever._get_embedding) and the configured model. Self-gating via meta['embed_model']
-        — a no-op on every cycle except the first after an embed_model switch on an existing store
+        - a no-op on every cycle except the first after an embed_model switch on an existing store
         (then it re-embeds + rebuilds semantic_vec at the new dim, turnkey). Skipped in blind mode
         (the blind tier owns its own re-encryption path) and when there is no retriever. Non-fatal."""
         if self._encryption_mode == "blind":
@@ -770,7 +770,7 @@ class ConsolidationMixin:
     def _blind_reconcile(self, limit: int = 0) -> int:
         """Write-path completeness (roadmap §14 6a): mirror every fact that has a plaintext row but
         NO blind ciphertext into the encrypted tables (embedding/HRR/entities), read back from the
-        plaintext store — NO Ollama. Delegates to the BlindTier collaborator (blind_tier.py), which
+        plaintext store - NO Ollama. Delegates to the BlindTier collaborator (blind_tier.py), which
         owns the writers + entity store; a no-op off the blind path (``self._blind_tier`` is None).
         Called at the end of the consolidation epoch + the dream cycle. Returns embedding cts written."""
         bt = getattr(self, "_blind_tier", None)
@@ -779,7 +779,7 @@ class ConsolidationMixin:
     def _run_memory_health_audit(self) -> dict:
         """Read-only memory-health snapshot. Logs at INFO on the triggering dream
         cycle (so it lands in normal agent logs) and returns the dict. No side
-        effects — also reused by the memory_audit tool action.
+        effects - also reused by the memory_audit tool action.
         """
         if not self._store:
             return {}
@@ -801,7 +801,7 @@ class ConsolidationMixin:
                 health.get("tool_episodes_total", 0), health.get("tool_episodes_undistilled", 0),
                 health.get("consolidation_debt_open", 0),
                 health.get("consolidation_debt_exhausted", 0),
-                "  [DEGRADED — FTS-only]" if health.get("degraded") else "",
+                "  [DEGRADED - FTS-only]" if health.get("degraded") else "",
             )
             return health
         except Exception as e:
@@ -810,7 +810,7 @@ class ConsolidationMixin:
 
 
     def _perform_abstraction_pass(self) -> None:
-        """Memory Abstraction Layer — merges similar facts into higher-level generalizations."""
+        """Memory Abstraction Layer - merges similar facts into higher-level generalizations."""
         if self._store:
             self._store.perform_abstraction_pass(
                 self._reason_model,
@@ -827,7 +827,7 @@ class ConsolidationMixin:
 
 
     def _consolidate_before_prune(self) -> None:
-        """Phase 4 — gist dying-but-once-important facts before they prune.
+        """Phase 4 - gist dying-but-once-important facts before they prune.
 
         Delegates to LatticeStore.consolidate_before_prune, reusing the abstraction
         clustering thresholds + the live reasoning model. Gated by gist_before_prune
@@ -853,7 +853,7 @@ class ConsolidationMixin:
 
 
     def _extract_relations_for_fact(self, fact_id: int, content: str, entities: list) -> None:
-        """Phase 5a — extract & store relational triples for one new fact.
+        """Phase 5a - extract & store relational triples for one new fact.
 
         Delegates to LatticeStore.extract_and_store_relations (deterministic
         entity-grounded patterns + optional LLM pass). Passes the reasoning model
@@ -880,7 +880,7 @@ class ConsolidationMixin:
 
 
     def _generate_session_narrative(self, session_id: str) -> None:
-        """Phase 8 — write a durable one-paragraph narrative gist of the session.
+        """Phase 8 - write a durable one-paragraph narrative gist of the session.
 
         Delegates to LatticeStore.summarize_session (gather episodes → LLM → store +
         bound). Called from on_session_end after final consolidation, gated by
@@ -930,7 +930,7 @@ class ConsolidationMixin:
         """Delegate HRR conflict detection to LatticeStore.
 
         Scans long-tier facts with high entity overlap and low HRR content
-        similarity — those are likely contradictions. Pairs are grouped under
+        similarity - those are likely contradictions. Pairs are grouped under
         a conflict_group_id and enter the Duel-to-the-Death decay loop on
         the next dream cycle.
 
@@ -948,13 +948,13 @@ class ConsolidationMixin:
     def _conflict_adjudicator(self, content_a: str, content_b: str) -> "bool | None":
         """Reason-model second opinion for one conflict candidate pair.
 
-        Returns True (contradict — lock the group), False (compatible — skip),
-        or None (unknown — the store fails open and flags, preserving the old
+        Returns True (contradict - lock the group), False (compatible - skip),
+        or None (unknown - the store fails open and flags, preserving the old
         conservative behavior). Kept deliberately cheap: one short generate call
         at temperature 0, capped at 60s so a slow model cannot stall the dream
         cycle; any failure is a debug-level non-event."""
         prompt = (
-            "Do these two statements CONTRADICT each other — that is, can they "
+            "Do these two statements CONTRADICT each other - that is, can they "
             "NOT both be true at the same time?\n"
             "Statements about DIFFERENT subjects are NOT contradictions (two "
             "different functions can both exist). Statements about the same "

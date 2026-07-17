@@ -1,11 +1,11 @@
-# Resonant Lattice — Module Map
+# Resonant Lattice - Module Map
 
 Map of the current flat-module structure. It began as a behaviour-preserving split of two
 former "god files" (`store.py`, `__init__.py`) into flat sibling mixins (see `REFACTOR_NOTES.md`),
-and has since grown the 8-phase memory roadmap (P1–P8) and the encryption north star (E0–E7 +
+and has since grown the 8-phase memory roadmap (P1-P8) and the encryption north star (E0-E7 +
 provider wiring; see `ENCRYPTION_ROADMAP.md`). A full remediation (see `REMEDIATION_PLAN.md`) was performed
 for consistency, hygiene, resilience, and documentation. No subpackages; all sibling imports are flat.
-Line counts below are approximate and drift — they orient, they aren't a contract.
+Line counts below are approximate and drift - they orient, they aren't a contract.
 
 ## Load-path contract (unchanged)
 
@@ -19,7 +19,7 @@ Line counts below are approximate and drift — they orient, they aren't a contr
   package-relative. `store.py`, `retrieval.py`, `holographic.py`,
   `entity_extractor.py` remain importable by those exact names.
 
-## Store side — `LatticeStore` (composite of six mixins)
+## Store side - `LatticeStore` (composite of six mixins)
 
 `store.py` keeps `__init__`, the cycle counters, `get_stats`, `close`, and
 composes:
@@ -33,7 +33,7 @@ class LatticeStore(SchemaMixin, FactsMixin, DreamCycleMixin,
 | File | Class | Responsibility |
 |------|-------|----------------|
 | `store.py` (356) | `LatticeStore` | construction, `serialize_vector`/`_ENTITY_EXTRACTOR_AVAILABLE` re-exports, cycle counters, `get_stats`, `close` |
-| `store_common.py` (120) | — | shared leaf: `serialize_vector`, the `pysqlite3`-fallback `sqlite3`, and the `holographic`/`entity_extractor` optional-import blocks (`hrr`, `_HRR_AVAILABLE`, `_extract_entities_fn`, `_ENTITY_EXTRACTOR_AVAILABLE`). **Dependency-free of `LatticeStore`** so mixins never circular-import the composite. |
+| `store_common.py` (120) | - | shared leaf: `serialize_vector`, the `pysqlite3`-fallback `sqlite3`, and the `holographic`/`entity_extractor` optional-import blocks (`hrr`, `_HRR_AVAILABLE`, `_extract_entities_fn`, `_ENTITY_EXTRACTOR_AVAILABLE`). **Dependency-free of `LatticeStore`** so mixins never circular-import the composite. |
 | `store_schema.py` (865) | `SchemaMixin` | `_init_db`, all `_migrate_*` (incl. the `semantic_he*` + `reencrypt_audit` blind tables), `_stamp_meta`, `_validate_vector_dim` |
 | `store_facts.py` (429) | `FactsMixin` | `add_or_reinforce_fact`, `_find_semantic_match`, `_reinforce_fact`, `_link_entities`, `get_fact`, `get_facts_for_entity`, `adjust_resonance`, `reinforce_on_recall`, `set_pinned` (P4a A5 never-forget), `remove_fact`, and the blind read-back helpers `get_fact_embedding`/`get_fact_hrr_phases` |
 | `store_dream.py` (701) | `DreamCycleMixin` | decay, dwell, promotion, conflict bleed/resolution, pruning (all pinned-exempt, P4a), long-tier cap, HRR re-encode, `reembed_if_needed` (P4d embed_model-switch migration), `_phases_from_blob` |
@@ -43,13 +43,13 @@ class LatticeStore(SchemaMixin, FactsMixin, DreamCycleMixin,
 | `store_relations.py` (705) | `RelationsMixin` | Phase 5a: `extract_triples` (deterministic, entity-grounded), `_llm_extract_triples` (optional, default-off), `_encode_triple_blob`, `store_fact_relations`, `extract_and_store_relations`, `get_fact_relations`, `get_relations`. Phase 5b: `relational_recall` (graph SQL + HRR partial-probe fuzzy), `_parse_relational_query`. Phase 5c: `infer_relations` (bounded transitive chaining; never writes), `_compose_inference` |
 | `store_identity.py` (123) | `IdentityMixin` | Phase 7 deliberate self-model: `set_self_model`, `get_self_model`, `delete_self_model`, `seed_self_model` over the separate `agent_identity` table (autonomous ingest can never reach it) |
 | `store_narrative.py` (150) | `NarrativeMixin` | Phase 8 autobiographical layer: `add_session_summary`, `get_recent_narrative`, `prune_session_summaries`, `summarize_session` (LLM gist of a session) over the durable `session_summaries` table (survives episode pruning) |
-| `store_blind.py` (BlindMixin) | `BlindMixin` | STORE side of the blind tier — opaque-blob CRUD over `semantic_he*` + the `reencrypt_audit` log + the `facts_missing_blind` reconciliation worklist. See the Encryption section below. |
+| `store_blind.py` (BlindMixin) | `BlindMixin` | STORE side of the blind tier - opaque-blob CRUD over `semantic_he*` + the `reencrypt_audit` log + the `facts_missing_blind` reconciliation worklist. See the Encryption section below. |
 
 `retrieval.py` gains the blind classes (see below); `entity_extractor.py` is untouched.
 `holographic.py` gains `encode_triple` / `encode_triple_query` (Phase-5b relational) and
 `hrr_lift` (E4 blind HRR).
 
-## Provider side — `LatticeMemoryProvider` (composite of four mixins)
+## Provider side - `LatticeMemoryProvider` (composite of four mixins)
 
 ```
 class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
@@ -69,12 +69,12 @@ module-level name so the package's import surface is unchanged.
 | `self_write_gate.py` (78) | `is_self_referential_infra` + denylists | Phase-E self-write policy boundary |
 | `prompts.py` (99) | `DEFAULT_EXTRACTION_PROMPT`, `DEFAULT_CONSOLIDATION_PROMPT`, `DEFAULT_PROCEDURAL_PROMPT`, `DEFAULT_GIST_PROMPT`, `DEFAULT_RELATION_PROMPT`, `DEFAULT_NARRATIVE_PROMPT` | default LLM prompt strings (text only) |
 | `config_schema.py` (273) | `CONFIG_SCHEMA` | static `hermes memory setup` field list |
-| `tool_handler.py` (355) | `ToolHandlerMixin` + `LATTICE_STORE_SCHEMA` | `get_tool_schemas`, `handle_tool_call` (P4a: no agent `delete` — gated behind `agent_can_delete`, steered to `feedback`; + `pin`/`unpin`/`request_abstraction`). **Named `tool_handler`, not `tools`**, to avoid shadowing Hermes' `tools` package on `sys.path[0]`. |
+| `tool_handler.py` (355) | `ToolHandlerMixin` + `LATTICE_STORE_SCHEMA` | `get_tool_schemas`, `handle_tool_call` (P4a: no agent `delete` - gated behind `agent_can_delete`, steered to `feedback`; + `pin`/`unpin`/`request_abstraction`). **Named `tool_handler`, not `tools`**, to avoid shadowing Hermes' `tools` package on `sys.path[0]`. |
 | `consolidation.py` (716) | `ConsolidationMixin` | waking epoch, dream cycle, abstraction/distillation kicks, tool-action ingest, `_attest_quote`, `_reembed_if_needed` (P4d embed_model-switch), `_blind_reconcile` (blind write-path completeness) |
 | `recall.py` (150) | `RecallMixin` | `prefetch`, `queue_prefetch`, recall reinforcement, `<resonant_memory>` block (P4b: surfaces A22 peak / entry-cycle / `[PINNED]`) |
 | `lifecycle.py` (223) | `LifecycleMixin` | session switch/end, shutdown, `on_memory_write`/`on_pre_compress`/`on_delegation` |
 
-## Encryption / blind tier (branch `encryption-northstar` — see `ENCRYPTION_ROADMAP.md`)
+## Encryption / blind tier (branch `encryption-northstar` - see `ENCRYPTION_ROADMAP.md`)
 
 Added on the `encryption-northstar` branch (not in the structural-refactor baseline above).
 Two tiers under `encryption_mode` (`none` default | `at_rest` | `blind`). The **helper layer**
@@ -114,12 +114,12 @@ defines (`self._conn`, `self._lock`, config attrs) and call sibling methods via
 Run from the repo root. Current green: **97 unit tests**. The encryption/HE tests
 self-skip without `openfhe`/`cryptography`; HE crypto is node-validated separately.
 
-- `python resonant_lattice/test_resonant_lattice.py` — the unit suite (store, provider,
+- `python resonant_lattice/test_resonant_lattice.py` - the unit suite (store, provider,
   HE/crypto, evals), validated at the SQLite substrate.
-- `python tests/stub_loader.py` — stub Hermes loader: the provider loads + registers
+- `python tests/stub_loader.py` - stub Hermes loader: the provider loads + registers
   (`available=True`, tools present, a live `memory_audit` action) without the real framework.
-- `python tests/live_e2e.py --model <tag>` — real store + retriever end-to-end against
+- `python tests/live_e2e.py --model <tag>` - real store + retriever end-to-end against
   Ollama, validated at the SQLite substrate.
 - The blind tier's helper layer is node-validated over SSH (the "have the files been
-  synced — yes/no" workflow); the provider glue is harness-validated only (Hermes isn't
+  synced - yes/no" workflow); the provider glue is harness-validated only (Hermes isn't
   installable on the dev box/node). See `ENCRYPTION_ROADMAP.md` §10/§14.

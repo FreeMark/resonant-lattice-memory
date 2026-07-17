@@ -1,8 +1,8 @@
 """Test suite for the Resonant Lattice Memory plugin.
 
 Runs two layers:
-  • Entity-precision tests   — exercise the real entity_extractor (no heavy deps).
-  • Store-lifecycle tests     — exercise the real LatticeStore; auto-skipped if
+  • Entity-precision tests   - exercise the real entity_extractor (no heavy deps).
+  • Store-lifecycle tests     - exercise the real LatticeStore; auto-skipped if
                                 sqlite-vec or numpy is unavailable.
 
 Usage:
@@ -32,7 +32,7 @@ def _load(name):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Layer 1 — entity precision (always runs)
+# Layer 1 - entity precision (always runs)
 # ─────────────────────────────────────────────────────────────────────────────
 ee = _load("entity_extractor")
 
@@ -95,7 +95,7 @@ def test_hrr_rich_encoding_order_sensitivity():
 
 
 def test_hrr_triple_unbind_roundtrip():
-    """Phase 5a: a triple encoded with encode_triple is queryable by role —
+    """Phase 5a: a triple encoded with encode_triple is queryable by role -
     unbinding the object (or subject) role recovers that filler far better than
     a random atom. This is exactly the algebra Phase 5b relational recall uses."""
     try:
@@ -118,7 +118,7 @@ def test_hrr_triple_unbind_roundtrip():
     assert hg.similarity(T, hg.encode_triple("alice", "works_at", "acme", dim=dim)) > 0.999
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Layer 2 — LatticeStore lifecycle (skipped if deps missing)
+# Layer 2 - LatticeStore lifecycle (skipped if deps missing)
 # ─────────────────────────────────────────────────────────────────────────────
 try:
     import sqlite_vec  # noqa: F401
@@ -207,7 +207,7 @@ def test_reinforce_threshold_clamped_to_similarity():
     s = store_mod.LatticeStore(
         db_path=os.path.join(tempfile.mkdtemp(), "clamp.db"),
         similarity_threshold=0.80,
-        reinforce_threshold=0.50,  # too low — must be raised
+        reinforce_threshold=0.50,  # too low - must be raised
     )
     assert s.reinforce_threshold == 0.80, s.reinforce_threshold
     s.close()
@@ -345,7 +345,7 @@ class _FakeBlind:
     (scan -> score -> decrypt -> rank -> materialize) is validated on Windows without
     openfhe. Same duck-typed interface; encrypt = the unit vector's bytes, cosine_score
     = a real dot product, decrypt = identity. Actual CKKS correctness is E2.4 on the
-    node — here the scores are exact cosines, so the ranking is an exact reference."""
+    node - here the scores are exact cosines, so the ranking is an exact reference."""
 
     def __init__(self, dim):
         self._dim = dim
@@ -388,7 +388,7 @@ def test_store_cosine_schema_and_dedup():
 
 def test_store_he_vector_blob_substrate():
     """E2.2: semantic_he holds opaque per-fact ct blobs, no plaintext recoverable,
-    CASCADE-cleaned with the fact. Pure SQLite — no openfhe needed."""
+    CASCADE-cleaned with the fact. Pure SQLite - no openfhe needed."""
     if not _STORE_OK:
         print(f"  SKIP store tests: {_SKIP_REASON}"); return
     s = _fresh_store(vector_dim=8)
@@ -403,7 +403,7 @@ def test_store_he_vector_blob_substrate():
     assert s.count_he_vectors() == 2
     assert s.get_he_vector(fid_a) == ct_a
     assert dict(s.iter_he_vectors()) == {fid_a: ct_a, fid_b: ct_b}
-    # the stored blob is exactly the ct — the plaintext embedding never leaks into it
+    # the stored blob is exactly the ct - the plaintext embedding never leaks into it
     assert store_mod.serialize_vector(_emb(s, "beta")) not in s.get_he_vector(fid_b)
     # INSERT OR REPLACE keeps a single ct per fact
     ct_a2 = os.urandom(2048)
@@ -446,14 +446,14 @@ def test_blind_scan_batch_autotune():
     """A1: resolve_scan_batch DEFAULTS to the latency-optimal target and only SHRINKS on small
     or busy hosts (latency is flat across batch size, so a bigger page just wastes RAM and
     starves concurrency). Honors an explicit override and never exceeds the corpus count. Pure
-    arithmetic — no store, no openfhe, nothing hardcoded to a host."""
+    arithmetic - no store, no openfhe, nothing hardcoded to a host."""
     import store_blind as sb
     TGT, MN = sb._SCAN_BATCH_TARGET, sb._SCAN_BATCH_MIN
     GB = 1 << 30
     # explicit override wins, but never exceeds the corpus count
     assert sb.resolve_scan_batch(512, 1_000_000, 10_000, 8 * GB) == 512
     assert sb.resolve_scan_batch(512, 1_000_000, 100, 8 * GB) == 100
-    # roomy host: default to the target — does NOT inflate to fill RAM (the bug the vault caught)
+    # roomy host: default to the target - does NOT inflate to fill RAM (the bug the vault caught)
     assert sb.resolve_scan_batch(0, 1_000_000, 100_000, 8 * GB) == TGT
     assert sb.resolve_scan_batch(0, 100_000, 1_000_000, 256 * GB) == TGT     # huge RAM, small ct -> still target
     # tight host: shrink below target, floored at MIN
@@ -507,7 +507,7 @@ def test_store_blind_retriever_orchestration():
 
 def test_store_he_blind_vs_plaintext_topk():
     """E2.4: REAL CKKS blind recall must rank identically to the plaintext
-    LatticeRetriever on a fixture — the make-or-break HE proof. Self-skips without
+    LatticeRetriever on a fixture - the make-or-break HE proof. Self-skips without
     openfhe, so it is inert on Windows and runs for real in the node's ~/he venv.
 
     Fixture vectors are built with strictly-separated cosines to the query (linspace
@@ -572,7 +572,7 @@ def test_store_he_blind_vs_plaintext_topk():
 
 def test_he_blind_argmax_pipeline():
     """E3 core: homomorphic blind argmax (CKKS<->TFHE scheme switching) returns the
-    correct one-hot WITHOUT decrypting scores — store side uses the public key only.
+    correct one-hot WITHOUT decrypting scores - store side uses the public key only.
     Self-skips without openfhe; proven on the node (N=8, dim=16, ~2.7s)."""
     try:
         import he_crypto
@@ -641,11 +641,11 @@ def test_he_pre_and_threshold_audit():
 
 
 def test_he_recall_pre_split():
-    """0a: BlindRecallPRE — the unified recall+PRE engine (E2 cosine + E6 PRE in one
+    """0a: BlindRecallPRE - the unified recall+PRE engine (E2 cosine + E6 PRE in one
     serializable context). The store scores cosine AND re-encrypts the score ct to the
     agent with no secret; the agent reads the re-encrypted result but NOT the raw store ct;
     the master reads anything (god-mode). Self-skips without openfhe; the full 3-process
-    SERIALIZED split (load_eval/load_client/load_user) is node-proven 2026-06-19 — here the
+    SERIALIZED split (load_eval/load_client/load_user) is node-proven 2026-06-19 - here the
     logic runs in one process with live keys (re-deserializing eval keys would collide with
     generate()'s global eval-key store)."""
     try:
@@ -666,7 +666,7 @@ def test_he_recall_pre_split():
 
     user, _key_blobs, secret_blobs = he_crypto.BlindRecallPRE.generate(dim=DIM)
     # white-box AGENT role sharing the live context (single process: don't re-deserialize
-    # eval keys). Only the agent's PRIVATE key is deserialized — that does not touch the
+    # eval keys). Only the agent's PRIVATE key is deserialized - that does not touch the
     # global eval-key store.
     agent = he_crypto.BlindRecallPRE(user._cc, DIM, user.batch)
     agent._pub = user._pub
@@ -694,7 +694,7 @@ def test_he_recall_pre_split():
 
 
 def test_he_argmax_ckks_pipeline():
-    """0a: BlindArgmaxCKKS — pure-CKKS comparison argmax (no FHEW scheme switching, so its
+    """0a: BlindArgmaxCKKS - pure-CKKS comparison argmax (no FHEW scheme switching, so its
     mult+rotation keys serialize and the store/client split works where the FHEW BlindArgmax
     segfaults). The store builds a one-hot over the encrypted score vector with public+eval
     keys only. Covers a power-of-two and a padded (non-power-of-two) count. Self-skips
@@ -762,7 +762,7 @@ def test_hrr_lift_identity():
 def test_he_hrr_similarity_via_lift():
     """E4 4a: HRR phase-cosine similarity == cosine of the (cos,sin)/sqrt(dim) lift, so the
     EXISTING blind store (BlindRecallPRE cosine over the 2*dim lift) computes HRR similarity
-    with NO new crypto. Validated vs holographic.similarity on real CKKS — relational recall
+    with NO new crypto. Validated vs holographic.similarity on real CKKS - relational recall
     (P5) + conflict similarity become blind via the same E2 inner product. Self-skips without
     openfhe."""
     try:
@@ -791,7 +791,7 @@ def test_he_hrr_similarity_via_lift():
 
 def test_store_he_hrr_table_substrate():
     """E4 4b: semantic_he_hrr stores per-fact HRR-lift ciphertext INDEPENDENTLY of semantic_he,
-    CASCADE-cleaned, allowlist-guarded. Pure SQLite — no openfhe."""
+    CASCADE-cleaned, allowlist-guarded. Pure SQLite - no openfhe."""
     if not _STORE_OK:
         print(f"  SKIP he_hrr table: {_SKIP_REASON}"); return
     s = _fresh_store(vector_dim=8)
@@ -816,11 +816,11 @@ def test_store_he_hrr_table_substrate():
 
 
 def test_he_blind_hrr_recall():
-    """E4 4b + 2b-ii(a): blind HRR recall — BlindWriter stores encrypted HRR LIFTS in
+    """E4 4b + 2b-ii(a): blind HRR recall - BlindWriter stores encrypted HRR LIFTS in
     semantic_he_hrr, then BlindRetriever.blind_hrr_search ranks a phase probe by HRR similarity
     homomorphically, matching the plaintext holographic.similarity ranking. Option A: the retriever
     is built with a SEPARATE embed-dim recall client as ``blind`` and the 2·hrr_dim client as
-    ``blind_hrr`` — proving blind_hrr_* uses ``blind_hrr`` (the lift would mis-encrypt under the
+    ``blind_hrr`` - proving blind_hrr_* uses ``blind_hrr`` (the lift would mis-encrypt under the
     smaller recall context). Needs a store + openfhe -> node."""
     if not _STORE_OK:
         print(f"  SKIP blind hrr: {_SKIP_REASON}"); return
@@ -852,7 +852,7 @@ def test_he_blind_hrr_recall():
     probe = hg.encode_fact("user prefers dark themes", ["user"], HDIM)
     plain_rank = sorted(fid_vec, key=lambda f: hg.similarity(probe, fid_vec[f]), reverse=True)
     # Option A: a DISTINCT embed-dim recall client as `blind`; the 2*HDIM lift client as `blind_hrr`.
-    # blind_hrr_* must use blind_hrr — encrypting a 2*HDIM lift under the EMBDIM recall ctx would fail.
+    # blind_hrr_* must use blind_hrr - encrypting a 2*HDIM lift under the EMBDIM recall ctx would fail.
     recall_blind, _rkb, _rsb = he_crypto.BlindRecallPRE.generate(dim=EMBDIM)
     br = BlindRetriever(s, "http://x", "nomic", blind=recall_blind, min_similarity=-1.0, blind_hrr=blind)
     blind_scores = dict(br.blind_hrr_scores(probe))
@@ -867,7 +867,7 @@ def test_he_blind_hrr_recall():
 
 
 def test_he_blind_maintenance():
-    """E5 5a: blind dream-cycle maintenance on encrypted resonance — homomorphic DECAY (scalar
+    """E5 5a: blind dream-cycle maintenance on encrypted resonance - homomorphic DECAY (scalar
     mult, exact) + threshold COMPARE (promotion/eviction via a Chebyshev step -> an encrypted
     0/1 indicator, store-side, no secret). Resonance is scaled to ~[0,1]; classification is
     exact outside the transition band. Self-skips without openfhe; node-proven."""
@@ -893,7 +893,7 @@ def test_he_blind_maintenance():
 
 def test_store_he_meta_table_substrate():
     """E5 5b: semantic_he_meta exists, allowlisted, independent of semantic_he, CASCADE-cleaned.
-    Pure SQLite — no openfhe."""
+    Pure SQLite - no openfhe."""
     if not _STORE_OK:
         print(f"  SKIP he_meta table: {_SKIP_REASON}"); return
     s = _fresh_store(vector_dim=8)
@@ -909,7 +909,7 @@ def test_store_he_meta_table_substrate():
 
 
 def test_he_blind_maintainer():
-    """E5 5b: blind dream-cycle maintenance over a real store — BlindMaintainer stores encrypted
+    """E5 5b: blind dream-cycle maintenance over a real store - BlindMaintainer stores encrypted
     resonance in semantic_he_meta, the store DECAYS it blind (no plaintext read), and the client
     SETTLES promotion/eviction by decrypting + thresholding, matching plaintext. Needs a store +
     openfhe -> node ~/he venv."""
@@ -1006,7 +1006,7 @@ def test_blind_entity_key_derivation_wiring():
     entity tests use a raw os.urandom key, so this DERIVATION path is otherwise uncovered).
     Proves: (1) a BlindEntityStore built from a passphrase-derived key round-trips on the
     substrate, and (2) re-deriving from the SAME passphrase+keystore (a fresh session/process)
-    decrypts blobs the first session wrote — the reopen property the provider relies on. Needs a
+    decrypts blobs the first session wrote - the reopen property the provider relies on. Needs a
     store + argon2 + cryptography."""
     if not _STORE_OK:
         print(f"  SKIP entity key derivation: {_SKIP_REASON}"); return
@@ -1029,7 +1029,7 @@ def test_blind_entity_key_derivation_wiring():
     blob = store.get_he_vector(fid, table="semantic_he_entities")
     assert blob and b"numpy" not in blob and b"sqlite" not in blob       # opaque on the substrate
     # REOPEN (second session): re-derive from the same passphrase + persisted keystore and
-    # decrypt the blob the first session wrote — the property _resolve_blind_entities needs.
+    # decrypt the blob the first session wrote - the property _resolve_blind_entities needs.
     k2 = crypto_keys.derive_entity_key(passphrase, keystore)
     assert bytes(k1) == bytes(k2)                                        # deterministic derivation
     bes2 = BlindEntityStore(store,
@@ -1164,7 +1164,7 @@ def test_blind_content_reconcile_and_hmac():
 
 def test_blind_sealed_text_surfaces():
     """§5-1b: BlindSealedStore mirrors episode / triple / summary TEXT into their own AEAD tables
-    via BlindTier.reconcile — each keyed by its SOURCE row (not fact id), opaque, idempotent, and
+    via BlindTier.reconcile - each keyed by its SOURCE row (not fact id), opaque, idempotent, and
     CASCADE-dropped with the source. crypto_keys.derive_sealed_keys yields all five sealed keys in
     ONE master pass. Needs a store + argon2 + cryptography."""
     if not _STORE_OK:
@@ -1227,7 +1227,7 @@ def test_blind_visitor_parity():
     triples) + session summaries from the §5-1 sealed ciphertext with PARITY to the plaintext store,
     so a cognition pass re-routed through it cannot change outcomes (identical inputs -> identical
     LLM-stubbed outputs). Also proves the view is truly BLIND-SOURCED: tampering the plaintext
-    content column does NOT change what the visitor returns (it reads ciphertext, not plaintext) —
+    content column does NOT change what the visitor returns (it reads ciphertext, not plaintext) -
     the property the §5-4 seal relies on. Needs a store + argon2 + cryptography."""
     if not _STORE_OK:
         print(f"  SKIP visitor parity: {_SKIP_REASON}"); return
@@ -1296,7 +1296,7 @@ def test_get_passphrase_returns_wipeable_bytearray():
     """#4 hygiene fix: get_passphrase returns a MUTABLE bytearray so the provider resolvers'
     ``finally: if isinstance(passphrase, bytearray): secure_zero(...)`` guards actually fire
     (it previously returned immutable bytes, so the wipe silently never ran). Proves: (1) an
-    env-sourced passphrase is a bytearray, (2) every consumer accepts it — a key derived from
+    env-sourced passphrase is a bytearray, (2) every consumer accepts it - a key derived from
     the bytearray equals one from the equivalent bytes (all derivations coerce via
     bytes(passphrase) at the KDF), (3) secure_zero zeroes it in place. Needs argon2."""
     import crypto_keys, os
@@ -1323,10 +1323,10 @@ def test_get_passphrase_returns_wipeable_bytearray():
 
 
 def test_blind_reconcile_readback_helpers():
-    """Write-path completeness (§14 6a) store read-back helpers — the data source for the provider
+    """Write-path completeness (§14 6a) store read-back helpers - the data source for the provider
     _blind_reconcile pass. Proves (pure SQLite, no openfhe): get_fact_embedding round-trips the
     stored vector exactly; get_fact_hrr_phases returns the stored HRR; facts_missing_blind is the
-    LEFT-JOIN worklist (all facts missing until a blind row exists, then they drop off — the
+    LEFT-JOIN worklist (all facts missing until a blind row exists, then they drop off - the
     idempotent driver that catches abstraction/gist/procedural/builtin facts + backfill). Needs a
     store + numpy."""
     if not _STORE_OK:
@@ -1367,7 +1367,7 @@ def test_blind_reconcile_readback_helpers():
 def test_facts_missing_blind_source_filter():
     """Write-path completeness (§14 6a) poison-pill guard: a fact whose plaintext SOURCE is absent
     must NOT sit forever in the capped reconciliation worklist. A fact added with hrr_vector=None
-    has a NULL hrr_vector, so it can NEVER produce an HRR ciphertext — facts_missing_blind on
+    has a NULL hrr_vector, so it can NEVER produce an HRR ciphertext - facts_missing_blind on
     semantic_he_hrr must EXCLUDE it (else it permanently saturates the LIMIT window and starves
     facts that DO have an HRR lift), while the embedding worklist still includes it. Pure SQLite."""
     if not _STORE_OK:
@@ -1389,7 +1389,7 @@ def test_facts_missing_blind_source_filter():
 
 
 def test_entity_mirror_refresh_on_reinforce():
-    """Entity-set staleness fix: the AEAD entity set is the one MUTABLE blind source — reinforcement
+    """Entity-set staleness fix: the AEAD entity set is the one MUTABLE blind source - reinforcement
     links new entities to an existing fact, so 'mirror once when missing' goes stale.
     facts_needing_entity_mirror must re-list a fact after a NEW link lands (entities_dirty), and
     NOT after an idempotent re-link of the same entities (no wasted re-encrypt). Pure SQLite."""
@@ -1458,7 +1458,7 @@ def test_prune_forget_policy_demote_then_delete():
 
 def test_conflict_limbo_holds_until_arbitration():
     """Conflict-limbo (A9/A13): a CONTESTED fact (active conflict group) is held in sustained
-    resonance — protected from cycle decay AND prune even at resonance 0 — so it never fades before
+    resonance - protected from cycle decay AND prune even at resonance 0 - so it never fades before
     the user arbitrates; an UNCONTESTED faded fact is still pruned. resolve_conflict then supersedes
     the loser (kept as history) and frees the winner. Pure SQLite."""
     if not _STORE_OK:
@@ -1489,7 +1489,7 @@ def test_conflict_limbo_holds_until_arbitration():
 
 def test_surprise_weighted_decay_retention():
     """A11 surprise/importance-weighted retention: with peak_discount>0 a fact that ever mattered
-    (high max_resonance_seen — e.g. a surprising one-off that entered high via novelty_boost) fades
+    (high max_resonance_seen - e.g. a surprising one-off that entered high via novelty_boost) fades
     SLOWER than a mundane same-resonance fact, so the unique one-off is retained longer; with the
     discount off they decay identically. Pure SQLite."""
     if not _STORE_OK:
@@ -1546,7 +1546,7 @@ def test_procedural_seed_durable_and_idempotent():
 def test_blind_reconcile_backfill():
     """Write-path completeness (§14 6a) END-TO-END: facts created WITHOUT a blind mirror (the
     abstraction/gist/procedural/backfill case) are reconciled by reading their plaintext
-    embedding/HRR/entities back and mirroring into semantic_he*/_hrr/_entities — then blind recall
+    embedding/HRR/entities back and mirroring into semantic_he*/_hrr/_entities - then blind recall
     ranks == plaintext. Replicates the provider _blind_reconcile loop inline (the provider can't run
     live; same store helpers + writers it uses) over real CKKS. Needs a store + openfhe + crypto."""
     if not _STORE_OK:
@@ -1572,7 +1572,7 @@ def test_blind_reconcile_backfill():
         hv = hg.encode_fact(c, ["user"], HD)
         _, fid = s.add_or_reinforce_fact(c, v, "general", "t", hrr_vector=hv, entities=["user"])
         fid_vec[fid] = v
-    # NO blind rows yet — exactly the post-abstraction / first-blind-enable state.
+    # NO blind rows yet - exactly the post-abstraction / first-blind-enable state.
     assert s.count_he_vectors("semantic_he") == 0
     assert s.facts_missing_blind("semantic_he") == sorted(fid_vec)
     # Build the blind clients + writers the provider would hold (Option A: separate embed/HRR ctx).
@@ -1632,7 +1632,7 @@ def test_eval_replay_smoke():
     """Phase-1 harness replay: drives the REAL store/retriever over the example corpus with
     deterministic embeddings (no Ollama). Asserts the pipeline runs end-to-end, produces a
     well-formed per-turn result for every turn, and metrics compute. Recall VALUE is not asserted
-    (pseudo-embeds aren't semantic — real Ollama runs measure that); this proves the plumbing."""
+    (pseudo-embeds aren't semantic - real Ollama runs measure that); this proves the plumbing."""
     if not _STORE_OK:
         print(f"  SKIP eval replay: {_SKIP_REASON}"); return
     import eval_corpus, eval_replay, eval_metrics
@@ -1655,7 +1655,7 @@ def test_eval_replay_smoke():
 def test_eval_reference_corpus():
     """Phase-1 reference corpus loads + validates (every expect_top/expect_recall/poison key is
     introduced by some fact) and replays end-to-end; relevance_ordering + tool metrics are present.
-    Real-embedding scoring is the eval_run/Ollama path (not asserted here — this is the plumbing)."""
+    Real-embedding scoring is the eval_run/Ollama path (not asserted here - this is the plumbing)."""
     if not _STORE_OK:
         print(f"  SKIP reference corpus: {_SKIP_REASON}"); return
     import os as _os
@@ -1680,7 +1680,7 @@ def test_blind_tier_collaborator():
     the AEAD entity store from a passphrase+keystore; reconcile() mirrors all 3 blind tables from
     plaintext; decorate_retriever() yields a BlindRetriever whose ranking == plaintext; and the
     inactive tier (no recall context) is a clean no-op. This is the wiring the old inline
-    register/_blind_reconcile did — now directly testable. Needs a store + openfhe + crypto."""
+    register/_blind_reconcile did - now directly testable. Needs a store + openfhe + crypto."""
     if not _STORE_OK:
         print(f"  SKIP blind tier: {_SKIP_REASON}"); return
     try:
@@ -1846,7 +1846,7 @@ def test_blind_multi_keystore_setup_and_load():
     assert he_ks["keysets"]["hrr"]["meta"]["dim"] == 2 * HRRD
     assert he_ks["keysets"]["maint"]["meta"]["depth"] == he_crypto._MAINT_BLIND_DEPTH  # LIGHT (decay-only)
     assert set(clients) == {"recall", "hrr", "maint"}
-    # live ops — each keyset computes correctly in the one setup process (by-tag coexistence)
+    # live ops - each keyset computes correctly in the one setup process (by-tag coexistence)
     def _unit(n, s):
         v = np.random.default_rng(s).standard_normal(n); return (v / np.linalg.norm(v)).tolist()
     for name, dim in (("recall", EMBED), ("hrr", 2 * HRRD)):
@@ -1876,7 +1876,7 @@ def test_blind_multi_keystore_setup_and_load():
 
 
 def test_blind_end_to_end_recall():
-    """0c: end-to-end blind tier over a REAL store — the keystore-loaded client + BlindWriter
+    """0c: end-to-end blind tier over a REAL store - the keystore-loaded client + BlindWriter
     fill semantic_he, then BlindRetriever recall ranks identically to a plaintext cosine
     reference. Exercises the exact components the provider wires
     (setup_or_load_blind_client -> BlindWriter -> BlindRetriever) over real CKKS. Needs a
@@ -1930,7 +1930,7 @@ def test_blind_end_to_end_recall():
 
 
 def test_blind_policy_scope_limiter():
-    """E6 §7.2: the pure-Python scope policy that bounds what PRE provenance cannot —
+    """E6 §7.2: the pure-Python scope policy that bounds what PRE provenance cannot -
     top-k ceiling, per-cycle query cap, per-cycle re-encryption cap, audit log. Runs
     everywhere (no openfhe/SQLite)."""
     import blind_policy as bp
@@ -1968,7 +1968,7 @@ def test_blind_policy_scope_limiter():
 
 
 def test_blind_reencrypt_gate():
-    """E6 6c: the store-side BlindReEncryptGate binds re-encryptions to a single-use token —
+    """E6 6c: the store-side BlindReEncryptGate binds re-encryptions to a single-use token -
     spends down to the authorized budget, then refuses over-spend, unknown tokens, and
     replay. Pure policy, runs everywhere."""
     import blind_policy as bp
@@ -1991,7 +1991,7 @@ def test_blind_reencrypt_gate():
 
 def test_store_reencrypt_audit_substrate():
     """E6 6c: the reencrypt_audit table persists re-encryption grants (substrate-checkable).
-    Pure SQLite — no openfhe."""
+    Pure SQLite - no openfhe."""
     if not _STORE_OK:
         print(f"  SKIP reencrypt audit: {_SKIP_REASON}"); return
     s = _fresh_store(vector_dim=8)
@@ -2234,7 +2234,7 @@ def test_store_relation_extraction_gate_and_noise():
 def test_store_relation_extraction_elided_subject_guard():
     """Phase 5a precision: in coordination ('X verb1 Y and verb2 Z') the second
     verb's subject is elided. Rather than emit a CONFIDENT WRONG triple with the
-    prior clause's object as subject, the triple is dropped — but the well-formed
+    prior clause's object as subject, the triple is dropped - but the well-formed
     first clause, and genuinely separate clauses, still extract correctly."""
     if not _STORE_OK:
         print("  SKIP"); return
@@ -2302,7 +2302,7 @@ def test_store_relational_recall_graph():
 def test_store_relational_recall_multiword_free_query():
     """Phase 5b: a free-text question naming a MULTI-WORD entity ('Acme Robotics')
     resolves the whole phrase as one anchor (not just split tokens), so it matches
-    the stored multi-word subject/object — without depending on spaCy."""
+    the stored multi-word subject/object - without depending on spaCy."""
     if not _STORE_OK:
         print("  SKIP"); return
     s = _fresh_store()
@@ -2369,7 +2369,7 @@ def _seed_chain(s):
 
 def test_store_infer_transitive_and_no_write():
     """Phase 5c: a 2-hop chain surfaces a labelled inference with its supporting
-    path and a decayed confidence — and inference NEVER writes to the DB."""
+    path and a decayed confidence - and inference NEVER writes to the DB."""
     if not _STORE_OK:
         print("  SKIP"); return
     s = _seed_chain(_fresh_store())
@@ -2450,7 +2450,7 @@ def test_store_self_model_roundtrip_and_seed():
 
 def test_store_self_model_isolated_from_ingest():
     """Phase 7 anti-fabrication invariant: the autonomous ingest path
-    (add_or_reinforce_fact) is structurally unable to touch the self-model — it
+    (add_or_reinforce_fact) is structurally unable to touch the self-model - it
     lives in a separate table. Even self/infra-looking facts never leak into it."""
     if not _STORE_OK:
         print("  SKIP"); return
@@ -2732,7 +2732,7 @@ def test_store_conflict_parallel_subject_veto():
     """Regression (2026-07-07 false-positive class): template-parallel facts about
     DIFFERENT subjects must NOT be locked as conflicts. Self-validating: the test
     first proves each pair passes the heuristic gates (overlap >= 0.5, sim in band)
-    and IS flagged with the veto disabled — then proves the veto spares all four."""
+    and IS flagged with the veto disabled - then proves the veto spares all four."""
     if not _STORE_OK:
         print("  SKIP"); return
     hg = _load("holographic")
@@ -2825,7 +2825,7 @@ def test_store_conflict_adjudicator_gate():
 
 def _add_procedural_fact(s, content, tier="short"):
     """Add a category='procedural' tool heuristic, detection-ready (no entities
-    or relations needed — the procedural pass is lexical)."""
+    or relations needed - the procedural pass is lexical)."""
     _, fid = s.add_or_reinforce_fact(content, _emb(s, content), "procedural",
                                      "sess1", entities=[])
     s._conn.execute("UPDATE semantic_facts SET tier=? WHERE id=?", (tier, fid))
@@ -2837,7 +2837,7 @@ def test_store_procedural_conflict_deterministic_lane():
     """Procedural tool-superstition sweep (2026-07-09 nemo field finding): the
     dream-cycle's '[tool]' heuristics contradict by paraphrase and were invisible
     to the general pass (category-excluded). Lane 1: same tool + OPPOSITE stance
-    (avoid vs prefer) + a shared specific topic stem locks a conflict group —
+    (avoid vs prefer) + a shared specific topic stem locks a conflict group -
     while same-stance and different-tool pairs are spared."""
     if not _STORE_OK:
         print("  SKIP"); return
@@ -2847,7 +2847,7 @@ def test_store_procedural_conflict_deterministic_lane():
         "raw.githubusercontent.com URLs pointing to three.js source files.")
     b = _add_procedural_fact(s, "[web_extract] For raw.githubusercontent.com "
         "JavaScript files, always set use_llm_processing: true.", tier="mid")
-    # Opposite stance but DIFFERENT tool — must NOT pair across tools.
+    # Opposite stance but DIFFERENT tool - must NOT pair across tools.
     d = _add_procedural_fact(s, "[web_search] Avoid raw.githubusercontent.com "
         "site restrictions when searching for three.js source files.")
     s.resolve_hrr_conflicts()
@@ -2859,7 +2859,7 @@ def test_store_procedural_conflict_deterministic_lane():
     ).fetchone()["conflict_since_cycle"]
     assert since is not None
     s.close()
-    # Same stance, same tool, same topic — consistent advice, must NOT duel
+    # Same stance, same tool, same topic - consistent advice, must NOT duel
     # (fresh store so no opposite-stance partner exists to absorb either).
     s1 = _fresh_store()
     c1 = _add_procedural_fact(s1, "[web_extract] Avoid using web_extract on "
@@ -2885,7 +2885,7 @@ def test_store_procedural_conflict_adjudicator_lane():
     """Lane 2: same-stance paraphrase contradictions (the real 'bundle many URLs
     per call' vs 'prefer a single URL per invocation' pair from the nemo DB)
     carry no opposite polarity, so only the reason-model adjudicator can pair
-    them — and ONLY an explicit True locks (None/False/error skip: precision-
+    them - and ONLY an explicit True locks (None/False/error skip: precision-
     first, NOT fail-open like the general pass, because superstition is
     self-inflicted rather than adversarial)."""
     if not _STORE_OK:
@@ -2913,7 +2913,7 @@ def test_store_procedural_conflict_adjudicator_lane():
     s.resolve_hrr_conflicts(adjudicator=lambda x, y: False)
     assert _conflict_gid(s, a) is None and _conflict_gid(s, b) is None
     s.close()
-    # None (ambiguous) → spared — the procedural lane is NOT fail-open.
+    # None (ambiguous) → spared - the procedural lane is NOT fail-open.
     s = _fresh_store(); a, b = _pair(s)
     s.resolve_hrr_conflicts(adjudicator=lambda x, y: None)
     assert _conflict_gid(s, a) is None and _conflict_gid(s, b) is None
@@ -2949,7 +2949,7 @@ def test_store_busy_timeout_set():
 def test_finalize_lock_contention():
     """FinalizeLock (cross-process finalize mutex): a held lock rejects
     non-blocking and timed attempts from a second holder, and release hands it
-    over. Uses two instances (two file descriptors) — flock/msvcrt locks are
+    over. Uses two instances (two file descriptors) - flock/msvcrt locks are
     per-open-file-description, so this is real contention. Also proves the
     lock holds across REAL process boundaries via a subprocess."""
     import subprocess
@@ -2985,7 +2985,7 @@ def test_finalize_lock_contention():
 
 def test_store_dismiss_conflict():
     """Phase 6 second verb: dismiss_conflict unlocks ALL members of a false-positive
-    group symmetrically — no supersession, no winner, confirm stamp + small
+    group symmetrically - no supersession, no winner, confirm stamp + small
     saturating bump. Substrate-checked."""
     if not _STORE_OK:
         print("  SKIP"); return
@@ -3053,7 +3053,7 @@ def test_conflict_adjudicator_response_parsing():
     p._ollama_endpoint_reason = "http://localhost:0"
 
     # Patch the EXACT namespace the method resolves _ollama_post_with_retry in
-    # (its own __globals__) — patching a separately-loaded consolidation module
+    # (its own __globals__) - patching a separately-loaded consolidation module
     # object is load-order/platform dependent and misses on some environments.
     g = p._conflict_adjudicator.__func__.__globals__
     orig = g["_ollama_post_with_retry"]
@@ -3061,7 +3061,7 @@ def test_conflict_adjudicator_response_parsing():
         cases = [
             ('{"contradict": true}', True),
             ('{"contradict": false}', False),
-            ('Sure! {"contradict": FALSE} — they are compatible.', False),
+            ('Sure! {"contradict": FALSE} - they are compatible.', False),
             ('true', True),
             ('nonsense with no verdict at all', None),
             ('true or false, hard to say', None),   # ambiguous → None
@@ -3177,7 +3177,7 @@ def test_mirror_path_relation_hook():
 
     assert calls.get("added"), calls
     # Self-authored provenance labeling: legibility (category), epistemics
-    # (quote_status), provenance (source_ref) — three separate signals.
+    # (quote_status), provenance (source_ref) - three separate signals.
     assert calls["added"][1] == "mental_note", calls
     assert calls["added"][2] == "self_authored", calls
     assert calls["added"][3] == "agent:MEMORY.md", calls
@@ -3188,7 +3188,7 @@ def test_mirror_path_relation_hook():
 
 def test_freshness_penalty_curve():
     """Phase 2: the recall freshness nudge is gentle, bounded, monotonic, and
-    fully off when disabled (pure math — no Ollama)."""
+    fully off when disabled (pure math - no Ollama)."""
     if not _STORE_OK:
         print("  SKIP"); return
     R = _load("retrieval").LatticeRetriever
@@ -3265,7 +3265,7 @@ def test_store_novelty_initial_resonance():
 
 
 def test_store_max_resonance_seen_peak():
-    """Phase 3: max_resonance_seen is a high-water mark — rises on reinforce and
+    """Phase 3: max_resonance_seen is a high-water mark - rises on reinforce and
     feedback, never falls on decay."""
     if not _STORE_OK:
         print("  SKIP"); return
@@ -3291,7 +3291,7 @@ def test_store_max_resonance_seen_peak():
 
 
 def _add_with_hrr(s, text, entities=None, category="g"):
-    """Add a fact carrying a real (content-derived) HRR vector — needed for the
+    """Add a fact carrying a real (content-derived) HRR vector - needed for the
     Phase-4 clustering/gist tests. Pseudo-embeddings stay random per text (so no
     accidental dedup merge), while the HRR vector reflects real content similarity."""
     hg = _load("holographic")
@@ -3323,7 +3323,7 @@ def test_cluster_by_hrr_entity():
 
 
 def test_store_gist_candidate_selection():
-    """Phase 4: only dying facts that EARNED their place are gist candidates —
+    """Phase 4: only dying facts that EARNED their place are gist candidates -
     trivia, living facts, superseded history, abstractions, and already-preserved
     facts are all excluded. Validated at the substrate (no LLM)."""
     if not _STORE_OK:
@@ -3390,7 +3390,7 @@ def test_store_memory_health_snapshot():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# source_quote attestation — pure two-channel verifier (always runs; no deps)
+# source_quote attestation - pure two-channel verifier (always runs; no deps)
 # ─────────────────────────────────────────────────────────────────────────────
 def _load_attestor():
     """Load the pure verifier from attestation.py (a leaf module with no Hermes
@@ -3403,7 +3403,7 @@ def _load_attestor():
 def test_quote_attestation_verdicts():
     attest = _load_attestor()
     transcript = ("USER: I run ollama on port 11434 and my GPU is an RTX 3090 Ti.\n"
-                  "ASSISTANT: Noted — Charlie Brown will deploy it in rural Indiana.")
+                  "ASSISTANT: Noted - Charlie Brown will deploy it in rural Indiana.")
     # Trivial typo in prose → still attested (specifics intact).
     assert attest("i run ollama on prot 11434", transcript, []) in ("attested", "soft"), "trivial typo"
     # Critical typo in a number → specific_mismatch (the whole point).
@@ -3439,7 +3439,7 @@ def test_quote_attestation_single_digit_anchor():
     A single number like 'purchase 3' was previously skipped entirely (len<2),
     so a faithful single-number quote could only ever reach 'soft'. Now a lone
     digit PRESENT in the transcript confirms the quote ('attested'), while a lone
-    digit ABSENT is kept-and-flagged (NOT 'specific_mismatch') — lone digits and
+    digit ABSENT is kept-and-flagged (NOT 'specific_mismatch') - lone digits and
     word<->digit normalization make an absent-single-digit drop unsafe."""
     attest = _load_attestor()
     t = "USER: please purchase 3 units of the widget for the team."
@@ -3466,8 +3466,8 @@ def test_quote_attestation_long_transcript():
     assert len(long_t) >= 4000, len(long_t)
     # Verbatim lift from the MIDDLE of a long transcript → grounded.
     assert attest(lifted, long_t, []) in ("attested", "soft"), "verbatim long"
-    # Lift WITH a typo (coverage broken + whole-transcript ratio collapsed) — the
-    # case the inert-ratio code wrongly rejected — is still grounded.
+    # Lift WITH a typo (coverage broken + whole-transcript ratio collapsed) - the
+    # case the inert-ratio code wrongly rejected - is still grounded.
     typo = lifted.replace("general availability", "general avzilability")
     assert attest(typo, long_t, []) in ("attested", "soft"), "typo long (was unattested pre-fix)"
     # A fabricated quote against the same long transcript is NOT grounded.
@@ -3476,7 +3476,7 @@ def test_quote_attestation_long_transcript():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Provider shutdown sequencing — LifecycleMixin has no Hermes deps, so it loads
+# Provider shutdown sequencing - LifecycleMixin has no Hermes deps, so it loads
 # standalone (always runs; no sqlite-vec/numpy needed).
 # ─────────────────────────────────────────────────────────────────────────────
 def test_shutdown_drains_dream_before_close():
@@ -3514,7 +3514,7 @@ def test_shutdown_drains_dream_before_close():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Layer 3 — Encryption (E0: encrypted-at-rest). crypto_keys unit tests need only
+# Layer 3 - Encryption (E0: encrypted-at-rest). crypto_keys unit tests need only
 # argon2-cffi; the substrate test spawns a subprocess with the SQLCipher binding
 # signal set, because store_common selects the binding once, at import time.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3587,7 +3587,7 @@ def test_crypto_keys_he_secret_wrap():
     ct_bytes = base64.b64decode(wrapped["ct_b64"])
     assert secret not in ct_bytes and len(ct_bytes) > len(secret)  # encrypted + tagged
     assert bytes(ck.unwrap_he_secret(wrapped, wk1)) == secret
-    # Wrong key fails LOUDLY (GCM auth tag) — never returns garbage plaintext.
+    # Wrong key fails LOUDLY (GCM auth tag) - never returns garbage plaintext.
     other = ck.derive_he_wrap_key(b"correct horse", ck.create_keystore(b"correct horse"))
     for bad_input, label in (
         (lambda: ck.unwrap_he_secret(wrapped, other), "wrong key"),
@@ -3746,7 +3746,7 @@ def test_store_encryption_at_rest_substrate():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Phase 4 — A5 pin (never-forget), A21 no-delete, A22 metadata, re-embed migration
+# Phase 4 - A5 pin (never-forget), A21 no-delete, A22 metadata, re-embed migration
 # ─────────────────────────────────────────────────────────────────────────────
 def test_store_pin_protects_from_decay():
     """P4a/A5: a pinned fact is exempt from cycle decay AND staleness decay; an
@@ -3831,8 +3831,8 @@ def test_store_set_pinned_roundtrip_no_inflation():
 
 
 def test_store_recall_metadata_surfaced():
-    """P4b/A22: search results carry the confidence picture — peak_resonance (peak),
-    learned_at_cycle (entry), pinned (bool) — and the raw max_resonance_seen column
+    """P4b/A22: search results carry the confidence picture - peak_resonance (peak),
+    learned_at_cycle (entry), pinned (bool) - and the raw max_resonance_seen column
     is renamed away in the model-facing payload."""
     if not _STORE_OK:
         print("  SKIP"); return
@@ -3861,7 +3861,7 @@ def test_store_recall_metadata_surfaced():
 
 
 def test_store_reembed_if_needed():
-    """P4d: re-embed migration self-gates on meta['embed_model'] — absent stamps
+    """P4d: re-embed migration self-gates on meta['embed_model'] - absent stamps
     (no spurious re-embed), same model no-ops, a genuine switch re-embeds every
     fact, and a dimension change rebuilds semantic_vec at the new dim."""
     if not _STORE_OK:
@@ -3907,7 +3907,7 @@ def test_store_reembed_if_needed():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Conflict quarantine (recall containment) — pure, dependency-free
+# Conflict quarantine (recall containment) - pure, dependency-free
 # ─────────────────────────────────────────────────────────────────────────────
 _recall_mod = _load("recall")
 
@@ -4089,7 +4089,7 @@ def test_store_canonical_tool_dispatch():
     th = _load("tool_handler")
     handler = th.ToolHandlerMixin.__new__(th.ToolHandlerMixin)
     handler._store = _fresh_store()
-    handler._retriever = object()   # truthy — handler only checks it exists
+    handler._retriever = object()   # truthy - handler only checks it exists
     handler._write_enabled = True
     handler._memory_cycle = 7
     try:
@@ -4267,7 +4267,7 @@ def test_reason_gate_serializes():
 
     This is the invariant that keeps the memory layer to one reasoning-model call
     at a time (default) so it consumes a single slot on a shared/rate-limited
-    endpoint and never starves the primary agent. Pure threading — no LLM/DB.
+    endpoint and never starves the primary agent. Pure threading - no LLM/DB.
     """
     import reason_gate
     import threading, time
@@ -4316,7 +4316,7 @@ def test_store_cycle_counter_multiprocess_atomicity():
     """Two store instances on ONE DB file (the gateway and one-shot hermes runs
     share a profile DB) must not clobber each other's cycle counters.
 
-    Regression: nemo 2026-07-09 — dream_cycle went 38 -> 22 when a long-lived
+    Regression: nemo 2026-07-09 - dream_cycle went 38 -> 22 when a long-lived
     gateway (started when the counter was ~21) wrote back its process-cached
     counter over the value that overnight one-shot runs had advanced.
     increment_cycle() is an atomic in-DB read-modify-write, so a stale cache
@@ -4520,7 +4520,7 @@ def test_synthesized_label_epoch_stamping():
     that READ its own memory (in-process lattice-read flag) and touched NO web
     tools. A session with web tools keeps the extractor's ref (firsthand); a
     session that never read memory keeps it too (conversation provenance).
-    Domain category is preserved — unlike mental_note. Runs the REAL epoch with a
+    Domain category is preserved - unlike mental_note. Runs the REAL epoch with a
     faked reason-model response."""
     try:
         prov = _load("__init__")
@@ -4679,7 +4679,7 @@ def test_authority_block_lifts_pinned_rules():
     block = p._compute_prefetch("payment approval", "s-now")
     assert "<authority_rules>" in block and "</authority_rules>" in block, block
     assert "<resonant_memory>" in block, block
-    # Split on closing tag — do NOT split on the string "<resonant_memory>" inside
+    # Split on closing tag - do NOT split on the string "<resonant_memory>" inside
     # other prose (would falsely partition the block).
     auth_section = block.split("</authority_rules>")[0]
     fallible = block.split("<resonant_memory>", 1)[1]
@@ -4764,5 +4764,5 @@ if __name__ == "__main__":
             print(f"[ERR ] {t.__name__}: {e}")
             failed += 1
     print(f"\n{passed} passed, {failed} failed, {skipped} skipped"
-          + ("" if _STORE_OK else "  (store tests skipped — sqlite-vec/numpy not installed)"))
+          + ("" if _STORE_OK else "  (store tests skipped - sqlite-vec/numpy not installed)"))
     sys.exit(1 if failed else 0)

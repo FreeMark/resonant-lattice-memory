@@ -1,4 +1,4 @@
-"""store_episodes.py — EpisodesMixin: conversational (L1) + procedural
+"""store_episodes.py - EpisodesMixin: conversational (L1) + procedural
 (tool) episode logs and their bounded pruning.
 
 Mixed into LatticeStore; relies on the composite for self._conn/_lock."""
@@ -31,7 +31,7 @@ class EpisodesMixin:
     def prune_episodes(self, keep_sessions: int = 20, max_rows: int = 0) -> None:
         """Delete episode rows outside the N most recent sessions.
 
-        Uses GROUP BY + MAX(id) to identify the most recent sessions —
+        Uses GROUP BY + MAX(id) to identify the most recent sessions -
         avoids the undefined behavior of ORDER BY inside SELECT DISTINCT.
 
         `max_rows` (0 = unlimited) additionally caps the TOTAL episode count,
@@ -39,7 +39,7 @@ class EpisodesMixin:
         growing the table without bound (the session filter alone can't).
 
         CONSOLIDATION-DEBT EXEMPTION: sessions flagged as open debt (substantial
-        episodes, zero banked facts — see flag_consolidation_debt) are never
+        episodes, zero banked facts - see flag_consolidation_debt) are never
         pruned by either clause. Their episodes are the only remaining evidence
         of an undigested experience; deleting them made the TanStack loss
         unrecoverable. The exemption lifts as soon as the debt settles.
@@ -93,7 +93,7 @@ class EpisodesMixin:
         """Flag sessions with >= min_episodes episode rows and zero born facts.
 
         Pure SQL, idempotent (a session is flagged once, ever). ``exclude_session``
-        keeps the CURRENT session out — its consolidation may simply not have run
+        keeps the CURRENT session out - its consolidation may simply not have run
         yet. A concurrent process's live session can still be flagged early; that
         false positive self-heals because the retry path re-checks born facts
         before spending any LLM call and settles it 'organic'. Returns rows added.
@@ -245,7 +245,7 @@ class EpisodesMixin:
             )
             self._conn.commit()
             if (cur.rowcount or 0) == 0:
-                return -1  # duplicate call_id — replay rejected by DB
+                return -1  # duplicate call_id - replay rejected by DB
             return cur.lastrowid
 
 
@@ -275,7 +275,7 @@ class EpisodesMixin:
 
 
     def session_tool_names(self, session_id: str) -> set:
-        """Distinct tool names this session invoked — its tool profile.
+        """Distinct tool names this session invoked - its tool profile.
 
         Used by synthesis detection (zero web tools + lattice reads = reflection).
         lattice_store itself is deliberately absent from tool_episodes; its read

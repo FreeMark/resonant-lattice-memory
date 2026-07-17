@@ -135,7 +135,7 @@ def main():
     suite.hard("pinned TRUE policy is ALWAYS marked pinned (agent can distinguish authoritative)",
                pinned_flag == n, f"{pinned_flag}/{n}")
     # IMPROVED (soft): the pinned ranking boost lifts the authoritative policy above
-    # most poison; query-optimized poison can still out-rank a minority — the
+    # most poison; query-optimized poison can still out-rank a minority - the
     # [PINNED] marker above is the guarantee, ranking is a help not a promise.
     suite.soft("pinned TRUE policy ranks at/above the poison for the majority (>=60%)",
                above >= 0.6 * n, f"{above}/{n}")

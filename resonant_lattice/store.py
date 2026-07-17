@@ -1,5 +1,5 @@
 """
-store.py — Resonant Lattice Memory Neuroplastic Store
+store.py - Resonant Lattice Memory Neuroplastic Store
 
 Core storage engine for the Hebbian dual-layer memory system.
 Features:
@@ -42,7 +42,7 @@ except Exception:
 
 # Behaviour-preserving structural split: LatticeStore's methods live in sibling
 # mixins, composed here. Mixins use FLAT sibling imports (never package-relative)
-# and never import LatticeStore — they rely on attributes the composite defines.
+# and never import LatticeStore - they rely on attributes the composite defines.
 from store_schema import SchemaMixin
 from store_facts import FactsMixin
 from store_dream import DreamCycleMixin
@@ -105,7 +105,7 @@ class LatticeStore(SchemaMixin, FactsMixin, DreamCycleMixin, AbstractionMixin,
         # Procedural tool-superstition sweep (see DreamCycleMixin, the
         # procedural-contradiction pass in resolve_hrr_conflicts): pair
         # same-tool '[web_extract] ...' heuristics that contradict by
-        # paraphrase — invisible to the general pass, which excludes them.
+        # paraphrase - invisible to the general pass, which excludes them.
         self.detect_procedural_conflicts = bool(detect_procedural_conflicts)
         # Parallel-subject veto for HRR conflict detection (see
         # DreamCycleMixin._parallel_subject_veto): skip template-parallel facts
@@ -148,9 +148,9 @@ class LatticeStore(SchemaMixin, FactsMixin, DreamCycleMixin, AbstractionMixin,
             )
         self.similarity_threshold = similarity_threshold   # recall/search/dedup cutoff
         # Silent-merge gate: only fold a NEW fact into an existing one at
-        # near-identity. The 0.78–0.95 band (close but not identical) often holds
+        # near-identity. The 0.78-0.95 band (close but not identical) often holds
         # contradictory updates ("prefers dark" vs "prefers light"), which must be
-        # stored separately so conflict detection can see them — not dropped.
+        # stored separately so conflict detection can see them - not dropped.
         # Effective threshold is max(configured, similarity_threshold) so a mis-set
         # low reinforce cannot reopen silent-merge of mid-band updates.
         _req_reinforce = float(reinforce_threshold)
@@ -171,7 +171,7 @@ class LatticeStore(SchemaMixin, FactsMixin, DreamCycleMixin, AbstractionMixin,
         # Encrypted-at-rest (E0): unlock the SQLCipher DB with the raw key as the
         # VERY FIRST statement, before any other SQL. The binding is sqlcipher3
         # (selected in store_common via RESONANT_LATTICE_DB_ENCRYPTED). We take
-        # ownership of the key buffer and wipe it once SQLCipher holds it — PRAGMA
+        # ownership of the key buffer and wipe it once SQLCipher holds it - PRAGMA
         # key takes no bound parameter, so the hex value is formatted in (hex only,
         # no injection surface). db_key is None in the plaintext path (no change).
         if db_key is not None:
@@ -197,7 +197,7 @@ class LatticeStore(SchemaMixin, FactsMixin, DreamCycleMixin, AbstractionMixin,
         # write this DB (WAL serializes writers). 30s outlasts any single
         # finalize write burst, so a colliding episode INSERT retries silently
         # instead of throwing 'database is locked'. This is lock-retry plumbing
-        # at the SQLite layer — cognition stays cycle-driven, nothing here
+        # at the SQLite layer - cognition stays cycle-driven, nothing here
         # schedules or fires memory work.
         try:
             self._conn.execute("PRAGMA busy_timeout=30000")
@@ -212,11 +212,11 @@ class LatticeStore(SchemaMixin, FactsMixin, DreamCycleMixin, AbstractionMixin,
             logger.error("sqlite-vec failed to load: %s", e)
             raise
  
-        self._validate_vector_dim()   # NEW — detect dim mismatch on reopen
+        self._validate_vector_dim()   # NEW - detect dim mismatch on reopen
         self._init_db()
-        self._migrate_schema()         # NEW — ALTER-add cycles_in_tier; cosine-rebuild vec table
-        self._stamp_meta()             # NEW — record/validate hrr_dim + encoding version
-        self._load_or_init_cycle_counters()   # NEW — persist memory/dream cycle counters across restarts
+        self._migrate_schema()         # NEW - ALTER-add cycles_in_tier; cosine-rebuild vec table
+        self._stamp_meta()             # NEW - record/validate hrr_dim + encoding version
+        self._load_or_init_cycle_counters()   # NEW - persist memory/dream cycle counters across restarts
                 
     def _load_or_init_cycle_counters(self) -> None:
         """Ensure memory_cycle and dream_cycle exist in meta (defaults to 0 on first run)."""
@@ -313,7 +313,7 @@ class LatticeStore(SchemaMixin, FactsMixin, DreamCycleMixin, AbstractionMixin,
                 "SELECT COUNT(*) FROM tool_episodes WHERE distilled = 0"
             ).fetchone()[0]
             # Abstraction provenance health: count abstractions that have lost ALL
-            # supporting evidence (the staleness == 1.0 case) via one GROUP BY —
+            # supporting evidence (the staleness == 1.0 case) via one GROUP BY -
             # a cheap proxy for the high-staleness signal, no per-abstraction
             # recomputation.
             prov = self._conn.execute(
@@ -333,7 +333,7 @@ class LatticeStore(SchemaMixin, FactsMixin, DreamCycleMixin, AbstractionMixin,
                 if (r["total_sources"] or 0) > 0 and (r["active_sources"] or 0) == 0
             )
             # Consolidation debt: undigested sessions (episodes without born facts).
-            # 'open' = awaiting retry, 'exhausted' = retries used up with 0 facts —
+            # 'open' = awaiting retry, 'exhausted' = retries used up with 0 facts -
             # the number a human should look at.
             debt = {
                 r[0]: r[1] for r in self._conn.execute(
@@ -381,7 +381,7 @@ class LatticeStore(SchemaMixin, FactsMixin, DreamCycleMixin, AbstractionMixin,
 
     def set_cycle_counts(self, memory_cycle: Optional[int] = None,
                          dream_cycle: Optional[int] = None) -> None:
-        """Persist cycle counters — pass ONLY the counter you changed.
+        """Persist cycle counters - pass ONLY the counter you changed.
 
         Consolidation epochs and dream cycles run on different threads under
         different locks. Writing both keys from both paths let a slow writer

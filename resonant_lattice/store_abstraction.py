@@ -1,4 +1,4 @@
-"""store_abstraction.py — AbstractionMixin: LLM-driven generalization and
+"""store_abstraction.py - AbstractionMixin: LLM-driven generalization and
 procedural distillation, provenance/explainability, shared JSON cleanup.
 
 Mixed into LatticeStore; calls sibling-mixin methods via self."""
@@ -133,7 +133,7 @@ class AbstractionMixin:
             cluster_text = "\n".join(fact_texts)
 
             # Use the config prompt if provided, otherwise fallback to default
-            base_prompt = prompt if prompt else "You are an expert memory abstraction engine for an AI agent.\n\nGiven the following group of related long-term facts, synthesize 1-2 higher-level abstractions that capture the general pattern WITHOUT erasing what makes each fact true in its OWN situation.\n\nRules:\n- Abstraction is CONTEXTUALIZATION, not erasure. When the facts give different answers in different conditions, state the DEFAULT and PRESERVE the exceptions as scoped conditions (e.g. 'X by default; Y when <condition>'). The conditions that make each fact correct are the POINT — keep them.\n- Do NOT collapse facts that hold in distinct contexts into one detail-free claim, and NEVER invent a generalization the facts do not support.\n- Concise but meaningful; one principle per object\n- Output ONLY a valid JSON array (no extra text)\n- Each object must have keys: \"content\" and \"category\" (use \"abstract\")"
+            base_prompt = prompt if prompt else "You are an expert memory abstraction engine for an AI agent.\n\nGiven the following group of related long-term facts, synthesize 1-2 higher-level abstractions that capture the general pattern WITHOUT erasing what makes each fact true in its OWN situation.\n\nRules:\n- Abstraction is CONTEXTUALIZATION, not erasure. When the facts give different answers in different conditions, state the DEFAULT and PRESERVE the exceptions as scoped conditions (e.g. 'X by default; Y when <condition>'). The conditions that make each fact correct are the POINT - keep them.\n- Do NOT collapse facts that hold in distinct contexts into one detail-free claim, and NEVER invent a generalization the facts do not support.\n- Concise but meaningful; one principle per object\n- Output ONLY a valid JSON array (no extra text)\n- Each object must have keys: \"content\" and \"category\" (use \"abstract\")"
             
             # Append the cluster text
             final_prompt = f"{base_prompt}\n\nFACTS:\n{cluster_text}\n\nJSON OUTPUT:"
@@ -247,7 +247,7 @@ class AbstractionMixin:
                     logger.debug("Created abstraction: %s…", content[:60])
 
                 except sqlite3.IntegrityError:
-                    # Duplicate content (UNIQUE collision) — abstraction already
+                    # Duplicate content (UNIQUE collision) - abstraction already
                     # exists. Roll back the aborted statement so the shared
                     # connection is left clean for the next iteration.
                     self._conn.rollback()
@@ -259,7 +259,7 @@ class AbstractionMixin:
                     logger.debug("Abstraction insert failed, rolled back: %s", e)
  
         if abstractions_created > 0:
-            logger.info("✅ Abstraction pass complete — %d new abstract facts", abstractions_created)
+            logger.info("✅ Abstraction pass complete - %d new abstract facts", abstractions_created)
         else:
             logger.debug("Abstraction pass completed with no new abstractions")
 
@@ -272,7 +272,7 @@ class AbstractionMixin:
         Shared, LLM-free, deterministic grouping used by Phase-4 pre-prune gisting.
         Mirrors the inline clustering in perform_abstraction_pass (kept inline there
         to avoid disturbing the proven path; this is the extracted, unit-tested
-        version — a future refactor can point the abstraction pass here too). An
+        version - a future refactor can point the abstraction pass here too). An
         entity-only match still needs a low semantic floor (sim >= 0.30) so a single
         shared entity doesn't merge unrelated facts. `rows` are mapping-like with
         id/hrr_vector; returns a list of clusters (each a list of the input rows).
@@ -355,12 +355,12 @@ class AbstractionMixin:
         max_clusters: int = 3,
         dedup_threshold: float = 0.82,
     ) -> int:
-        """Phase 4 — gist-preserving forgetting (hippocampal→neocortical analogue).
+        """Phase 4 - gist-preserving forgetting (hippocampal→neocortical analogue).
 
         Run in the dream cycle BEFORE prune_weak_facts: cluster the dying-but-
         once-important facts and LLM-summarise each cluster into ONE category='gist'
         fact (clearly framed as a remembered summary, NOT verbatim), recording
-        provenance in abstraction_sources. The originals are then pruned normally —
+        provenance in abstraction_sources. The originals are then pruned normally -
         their detail is gone, but their MEANING survives in the gist. Because each
         gisted source becomes an abstraction_sources row, it is excluded from re-
         gisting on the next cycle even if it lingers above the prune threshold.
@@ -448,7 +448,7 @@ class AbstractionMixin:
                 if not isinstance(gists, list):
                     gists = []
 
-                # One gist per cluster — take the first valid object.
+                # One gist per cluster - take the first valid object.
                 for g in gists:
                     if not isinstance(g, dict):
                         continue
@@ -469,7 +469,7 @@ class AbstractionMixin:
         with self._lock:
             for content, emb, cluster in pending:
                 # Dedup against EXISTING facts, but NEVER against this gist's own
-                # still-present source facts — a gist is by construction similar to
+                # still-present source facts - a gist is by construction similar to
                 # the dying facts it summarises (they prune moments later). Only a
                 # NON-source near-duplicate should block it. The abstraction_sources
                 # re-gist guard + UNIQUE content already prevent duplicate gists.
@@ -487,7 +487,7 @@ class AbstractionMixin:
                         logger.debug("HRR encoding failed for gist: %s", e)
                 try:
                     # Gists enter the long tier at the promotion bar: durable (long
-                    # is decay-exempt) but not artificially maximal — the preserved
+                    # is decay-exempt) but not artificially maximal - the preserved
                     # meaning should survive, then earn/lose its keep like any fact.
                     cur = self._conn.execute(
                         """
@@ -521,18 +521,18 @@ class AbstractionMixin:
                     logger.debug("Created gist from %d fading facts: %s…",
                                  len(cluster), content[:60])
                 except sqlite3.IntegrityError:
-                    self._conn.rollback()  # duplicate content (UNIQUE) — already gisted
+                    self._conn.rollback()  # duplicate content (UNIQUE) - already gisted
                 except Exception as e:
                     self._conn.rollback()
                     logger.debug("Gist insert failed, rolled back: %s", e)
 
         if created:
-            logger.info("🌫️  Gist consolidation — preserved %d fading theme(s) as gists", created)
+            logger.info("🌫️  Gist consolidation - preserved %d fading theme(s) as gists", created)
         return created
 
 
     def _get_embedding_for_abstraction(self, text: str, ollama_endpoint: str) -> Optional[List[float]]:
-        """Internal helper — uses self.embed_model (was hardcoded)."""
+        """Internal helper - uses self.embed_model (was hardcoded)."""
         try:
             payload = {"model": self.embed_model, "prompt": text}   # ← was "nomic-embed-text"
             req = urllib.request.Request(
@@ -683,7 +683,7 @@ class AbstractionMixin:
                 batches.append((tr["tool_name"], tr["n"], tr["succ"] or 0,
                                 [dict(s) for s in samples], ids))
 
-        # ── Phase 2: LLM distillation + embeddings (NO lock — network I/O) ───
+        # ── Phase 2: LLM distillation + embeddings (NO lock - network I/O) ───
         pending: List[Tuple[str, Optional[List[float]], str]] = []
         consumed_ids: List[int] = []
         for tool_name, n, succ, samples, ids in batches:
@@ -711,9 +711,9 @@ class AbstractionMixin:
                     response_text = result.get("response", "[]").strip()
             except Exception as e:
                 logger.warning("Procedural distillation LLM call failed for %s: %s", tool_name, e)
-                continue  # don't consume ids — retry this batch next cycle
+                continue  # don't consume ids - retry this batch next cycle
 
-            # Attempted this batch — consume it regardless of yield so we don't reprocess.
+            # Attempted this batch - consume it regardless of yield so we don't reprocess.
             consumed_ids.extend(ids)
 
             response_text = self._clean_llm_json(response_text)
@@ -780,7 +780,7 @@ class AbstractionMixin:
             self._conn.commit()
 
         if created:
-            logger.info("✅ Procedural distillation — %d procedural facts from tool use", created)
+            logger.info("✅ Procedural distillation - %d procedural facts from tool use", created)
         return created
 
             

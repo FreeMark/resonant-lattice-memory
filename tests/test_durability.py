@@ -24,7 +24,7 @@ CRASH_CHILD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_crash_c
 def main():
     if not C.ollama_up():
         print("Ollama not reachable (embeddings)."); return 2
-    suite = C.Suite("Durability — concurrency + crash/restart", model="(no LLM)")
+    suite = C.Suite("Durability - concurrency + crash/restart", model="(no LLM)")
 
     # ---- CONCURRENCY ----
     s, R, _, db = C.make_store("concurrency.db")
@@ -53,7 +53,7 @@ def main():
     elapsed = time.time() - t0
     alive = [t for t in threads if t.is_alive()]
     suite.report("concurrency", f"{len(done)}/{N_THREADS} threads done, {len(errors)} errors, {elapsed:.1f}s")
-    suite.hard("no deadlock — all threads completed", not alive and len(done) == N_THREADS, f"alive={len(alive)}")
+    suite.hard("no deadlock - all threads completed", not alive and len(done) == N_THREADS, f"alive={len(alive)}")
     suite.hard("no thread raised under concurrent add+recall", not errors, str(errors[:3]))
     rows = s._conn.execute("SELECT COUNT(*) FROM semantic_facts").fetchone()[0]
     suite.hard("every concurrent write landed (no lost rows)", rows == N_THREADS * PER,

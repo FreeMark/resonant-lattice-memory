@@ -12,7 +12,7 @@ Two backends, tried in order:
   * a one-shot binary (``rlm_gpu_recall``) that re-bridges the corpus per call (about 29 s).
 
 Trust boundary (unchanged from the blind store): the GPU (untrusted evaluator) receives only
-public material — the crypto context, storage public key, and public eval/rotation keys — plus
+public material - the crypto context, storage public key, and public eval/rotation keys - plus
 the encrypted corpus and the encrypted query. The master secret is used only to decrypt the
 already-homomorphically-computed scalar scores on the trusted host; the GPU never sees a secret
 and never decrypts.

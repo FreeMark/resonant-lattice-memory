@@ -1,4 +1,4 @@
-"""store_batches.py — BatchMixin: semantic write-batch provenance + rollback.
+"""store_batches.py - BatchMixin: semantic write-batch provenance + rollback.
 
 Mixed into LatticeStore. A consolidation epoch / dream cycle opens a batch; every
 fact written while it is open is stamped with batch_id (in store_facts'
@@ -8,7 +8,7 @@ self._lock, self.get_cycle_counts; uses self._active_batch_id (set here, read in
 store_facts via getattr so an un-batched write is simply NULL-stamped).
 
 Scope: rollback removes the NEW facts a batch wrote. It does not restore rows that
-the same dream cycle decayed or pruned (those are separate forgetting paths) — its
+the same dream cycle decayed or pruned (those are separate forgetting paths) - its
 job is to undo bad WRITES, which is the durable-pollution risk."""
 
 import logging
@@ -90,7 +90,7 @@ class BatchMixin:
 
     def rollback_write_batch(self, batch_id):
         """Delete the (non-pinned) facts a batch wrote and mark it rolled_back. Pinned
-        facts are KEPT — a deliberate user lock overrides a batch rollback — and reported.
+        facts are KEPT - a deliberate user lock overrides a batch rollback - and reported.
         The AFTER DELETE trigger cleans the vector/FTS/entity rows; relation rows cascade.
         Returns {batch_id, deleted, kept_pinned, status} or {error}."""
         with self._lock:

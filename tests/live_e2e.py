@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""live_e2e.py — comprehensive live end-to-end exercise of resonant_lattice.
+"""live_e2e.py - comprehensive live end-to-end exercise of resonant_lattice.
 
 Builds a REAL LatticeStore + LatticeRetriever (real nomic-embed-text embeddings),
 turns ON the behaviour behind every default-OFF roadmap flag, and drives a
@@ -70,7 +70,7 @@ def embed_dim():
 
 
 # Deterministic backbone facts (the relation graph used for model-independent
-# assertions — extraction of these triples does not depend on the LLM).
+# assertions - extraction of these triples does not depend on the LLM).
 PLANTED = [
     ("Maya works at Acme Robotics", ["maya", "acme robotics"]),
     ("Acme Robotics is located in Boston", ["acme robotics", "boston"]),
@@ -96,14 +96,14 @@ def main():
     args = ap.parse_args()
     model = args.model
 
-    print(f"\n{'='*70}\nLIVE E2E — reason model: {model}\n{'='*70}")
+    print(f"\n{'='*70}\nLIVE E2E - reason model: {model}\n{'='*70}")
     results = {}
     hard_fail = []
 
     def check(name, cond, detail=""):
         ok = bool(cond)
         results[name] = ok
-        print(f"  [{'PASS' if ok else 'FAIL'}] {name}" + (f" — {detail}" if detail else ""))
+        print(f"  [{'PASS' if ok else 'FAIL'}] {name}" + (f" - {detail}" if detail else ""))
         if not ok:
             hard_fail.append(name)
 
@@ -114,7 +114,7 @@ def main():
         print(f"\n[warmup] {model} responded in {time.time()-t0:.1f}s (cold-load included)")
     except Exception as e:
         print(f"[warmup] FAILED: {e}")
-        print("Cannot reach the model — aborting this run.")
+        print("Cannot reach the model - aborting this run.")
         return 2
 
     store_mod = _load("store")
@@ -156,7 +156,7 @@ def main():
     timings = {}
 
     # ── 1. LLM fact extraction (consolidation core) ──────────────────────
-    print("\n— P-ingest: LLM fact extraction from transcript —")
+    print("\n- P-ingest: LLM fact extraction from transcript -")
     t = time.time()
     extracted = []
     try:
@@ -179,7 +179,7 @@ def main():
         print(f"     • {c[:80]}")
 
     # ── 2. Plant the deterministic backbone (+ LLM triple pass) ──────────
-    print("\n— P5a: planted facts + relation extraction (deterministic + LLM) —")
+    print("\n- P5a: planted facts + relation extraction (deterministic + LLM) -")
     t = time.time()
     for content, ents in PLANTED:
         ingest(content, ents)
@@ -194,7 +194,7 @@ def main():
               for r in s.get_relations(subject="maya")))
 
     # ── 3. Relational recall (P5b) ───────────────────────────────────────
-    print("\n— P5b: relational recall —")
+    print("\n- P5b: relational recall -")
     rr = s.relational_recall(subject="maya", relation="works_at")
     print(f"   relational_recall(maya, works_at, ?) → {[(x['object'], x['match']) for x in rr]}")
     check("P5b graph recall returns acme robotics",
@@ -204,7 +204,7 @@ def main():
           f"{[(x['subject'], x['relation'], x['object']) for x in fq]}")
 
     # ── 4. Transitive inference (P5c) + no-write invariant ───────────────
-    print("\n— P5c: bounded transitive inference (+ no-write invariant) —")
+    print("\n- P5c: bounded transitive inference (+ no-write invariant) -")
     fr0 = s._conn.execute("SELECT COUNT(*) FROM fact_relations").fetchone()[0]
     sf0 = s._conn.execute("SELECT COUNT(*) FROM semantic_facts").fetchone()[0]
     inf = s.infer_relations("maya", max_hops=3)
@@ -220,7 +220,7 @@ def main():
           f"fact_relations {fr0}->{fr1}, semantic_facts {sf0}->{sf1}")
 
     # ── 5. Self-model (P7) + isolation from ingest ───────────────────────
-    print("\n— P7: deliberate self-model (+ ingest isolation) —")
+    print("\n- P7: deliberate self-model (+ ingest isolation) -")
     s.set_self_model("name", "Hermes", current_cycle=s._current_memory_cycle())
     s.set_self_model("relationship_with_user", "long-term collaborator (Maya)",
                      current_cycle=s._current_memory_cycle())
@@ -232,7 +232,7 @@ def main():
     check("P7 curated name intact", (s.get_self_model("name") or {}).get("value") == "Hermes")
 
     # ── 6. Promote to long + abstraction (P4 reuse) + conflict (P6) ──────
-    print("\n— Hebbian cycle: promote → abstraction → conflict scan —")
+    print("\n- Hebbian cycle: promote → abstraction → conflict scan -")
     for fid_row in s._conn.execute("SELECT id FROM semantic_facts").fetchall():
         s.adjust_resonance(fid_row["id"], 8)          # push resonance up
     for _ in range(3):                                 # advance dwell + promote
@@ -279,13 +279,13 @@ def main():
     for a in abstractions:
         print(f"     • {a['content'][:90]}")
 
-    # conflict scan (best-effort — heuristic may or may not fire on synthetic data)
+    # conflict scan (best-effort - heuristic may or may not fire on synthetic data)
     s.resolve_hrr_conflicts()
     pend = s.get_pending_conflicts(min_age_cycles=0)
     print(f"   pending conflict groups after scan: {len(pend)}")
 
     # ── 7. Narrative (P8) ────────────────────────────────────────────────
-    print("\n— P8: session narrative —")
+    print("\n- P8: session narrative -")
     for line in TRANSCRIPT.strip().split("\n"):
         role, content = line.split(": ", 1)
         s.add_episode("live-sess", role.lower(), content)
@@ -303,7 +303,7 @@ def main():
           bool(narr) and narr[0]["ended_cycle"] == 1)
 
     # ── 8. Substrate dump ────────────────────────────────────────────────
-    print("\n— Substrate snapshot —")
+    print("\n- Substrate snapshot -")
     for tbl in ("semantic_facts", "fact_relations", "agent_identity",
                 "session_summaries", "entities"):
         n = s._conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
@@ -313,15 +313,15 @@ def main():
           f"entities={health['total_entities']} conflicts={health['active_conflict_groups']}")
     s.close()
 
-    print(f"\n— LLM timings ({model}) —")
+    print(f"\n- LLM timings ({model}) -")
     for k, v in timings.items():
         print(f"   {k:14s} {v:6.1f}s")
 
     print(f"\n{'='*70}")
     if hard_fail:
-        print(f"RESULT [{model}]: RED — hard invariants failed: {hard_fail}")
+        print(f"RESULT [{model}]: RED - hard invariants failed: {hard_fail}")
         return 1
-    print(f"RESULT [{model}]: GREEN — all {len(results)} hard invariants held")
+    print(f"RESULT [{model}]: GREEN - all {len(results)} hard invariants held")
     return 0
 
 

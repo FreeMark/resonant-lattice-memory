@@ -1,11 +1,11 @@
-"""blind_tier.py — BlindTier: the Tier-1 blind store as ONE cohesive collaborator.
+"""blind_tier.py - BlindTier: the Tier-1 blind store as ONE cohesive collaborator.
 
-The SEAM between the COGNITION layer (tiers / decay / conflict / abstraction / dream cycles — all of
+The SEAM between the COGNITION layer (tiers / decay / conflict / abstraction / dream cycles - all of
 which run on the plaintext store regardless of encryption mode) and the blind-store implementation.
 Before this, the provider carried six ``self._blind*`` fields, two resolver methods, a retriever
 swap, and the reconcile pass spread across ``__init__`` + ``consolidation``. BlindTier owns all of
 it, so the provider holds ONE optional ``self._blind_tier`` and the entire blind-vs-plaintext
-divergence lives behind a single boundary — and the future §5 change ("blind ciphertext becomes the
+divergence lives behind a single boundary - and the future §5 change ("blind ciphertext becomes the
 source of truth") is localized here rather than scattered through the provider.
 
 Today the blind tier is a MIRROR alongside the plaintext store (embedding → ``semantic_he``,
@@ -15,7 +15,7 @@ AEAD entity store is independent (argon2 + cryptography only) and comes up even 
 an openfhe-less host still gets entity-at-rest protection.
 
 crypto_keys / he_crypto are imported LAZILY (openfhe only on the blind path). Module-level imports
-are the dependency-free ``store_common`` (holographic + _HRR_AVAILABLE) only. Helper layer — like
+are the dependency-free ``store_common`` (holographic + _HRR_AVAILABLE) only. Helper layer - like
 retrieval / crypto_keys / he_crypto, this file is UNTRACKED by the acceptance harness."""
 
 import logging
@@ -53,7 +53,7 @@ class BlindTier:
                 reconcile_batch=200) -> "Optional[BlindTier]":
         """Bring up the blind tier for ``encryption_mode=blind``. Returns a BlindTier holding
         whatever subset came up, or None if NOTHING did (neither the HE contexts nor the entity
-        store). Every failure is logged + non-fatal — the caller falls back to plaintext recall and
+        store). Every failure is logged + non-fatal - the caller falls back to plaintext recall and
         a no-op reconcile rather than disabling memory. ``db_path`` is accepted for symmetry/logging;
         ``keystore_path`` / ``he_keystore_path`` are the already-resolved sidecar paths."""
         contexts = cls._resolve_contexts(store, keystore_path, he_keystore_path, hrr_dim)
@@ -67,7 +67,7 @@ class BlindTier:
             # HRR write mirror: encrypted (cos,sin) lift -> semantic_he_hrr (E4 4b), sized 2*hrr_dim.
             if hrr_client is not None:
                 hrr_writer = BlindWriter(store, hrr_client, table="semantic_he_hrr")
-            logger.info("\U0001f512 Blind tier ACTIVE — homomorphic recall over semantic_he "
+            logger.info("\U0001f512 Blind tier ACTIVE - homomorphic recall over semantic_he "
                         "(+ HRR lift mirror to semantic_he_hrr).")
         else:
             logger.warning("encryption_mode=blind but the blind tier is unavailable (see prior errors); "
@@ -77,14 +77,14 @@ class BlindTier:
         # entity-at-rest protection holds even on a host without openfhe.
         entities = cls._resolve_entities(store, keystore_path)
         if entities is not None:
-            logger.info("\U0001f512 Blind entity sets ACTIVE — AEAD-encrypted names in "
+            logger.info("\U0001f512 Blind entity sets ACTIVE - AEAD-encrypted names in "
                         "semantic_he_entities (client-side overlap, store learns nothing).")
         # §5-1 sealed surfaces: AEAD content + keyed dedup identity (§5-1) and the episode / triple
         # / summary text mirrors (§5-1b). Pure AEAD/HMAC (no openfhe), like entities → set up
         # INDEPENDENTLY of the HE contexts, and all keys derived in ONE master pass.
         content, content_hmac_fn, sealed = cls._resolve_sealed(store, keystore_path)
         if content is not None:
-            logger.info("\U0001f512 Blind sealed surfaces ACTIVE — AEAD content in semantic_he_content "
+            logger.info("\U0001f512 Blind sealed surfaces ACTIVE - AEAD content in semantic_he_content "
                         "(+ keyed content_hmac) and episode/triple/summary text mirrors (§5-1/§5-1b).")
         if contexts is None and entities is None and content is None:
             return None
@@ -94,7 +94,7 @@ class BlindTier:
 
     @staticmethod
     def _resolve_contexts(store, keystore_path, he_keystore_path, hrr_dim):
-        """Set up or load ALL HE contexts from the MULTI-keyset keystore — ``recall``
+        """Set up or load ALL HE contexts from the MULTI-keyset keystore - ``recall``
         (BlindRecallPRE @ embed-dim), ``hrr`` (BlindRecallPRE @ 2*hrr_dim), ``maint`` (light
         decay-only BlindMaintenance). Returns the ``{recall, hrr, maint}`` client dict, or None.
         Needs argon2 + openfhe + a passphrase; creates the at-rest keystore (salt/master) + the
@@ -122,7 +122,7 @@ class BlindTier:
                 keystore = crypto_keys.create_keystore(passphrase)
                 crypto_keys.save_keystore(keystore_path, keystore)
                 logger.warning("Blind-tier keystore CREATED at %s. The passphrase is the ONLY "
-                               "way to recover this memory — there is NO recovery.", keystore_path)
+                               "way to recover this memory - there is NO recovery.", keystore_path)
             else:
                 keystore = crypto_keys.load_keystore(keystore_path)
             clients, _he_ks, created = crypto_keys.setup_or_load_blind_contexts(
@@ -150,7 +150,7 @@ class BlindTier:
         argon2 + cryptography + a passphrase + the keystore; **no openfhe** (pure AEAD), so entity-
         at-rest protection is independent of the HE recall contexts and comes up even when openfhe
         is absent. The derived entity key is held for the session inside the encrypt/decrypt
-        closures — the trusted-client RAM key, like the HE secret."""
+        closures - the trusted-client RAM key, like the HE secret."""
         import crypto_keys
         if not crypto_keys.kdf_available():
             logger.error("blind entity store requires argon2-cffi; entity encryption disabled.")
@@ -169,7 +169,7 @@ class BlindTier:
                 keystore = crypto_keys.create_keystore(passphrase)
                 crypto_keys.save_keystore(keystore_path, keystore)
                 logger.warning("Blind-tier keystore CREATED at %s. The passphrase is the ONLY "
-                               "way to recover this memory — there is NO recovery.", keystore_path)
+                               "way to recover this memory - there is NO recovery.", keystore_path)
             else:
                 keystore = crypto_keys.load_keystore(keystore_path)
             ent_key = crypto_keys.derive_entity_key(passphrase, keystore)  # verifies key-check
@@ -197,8 +197,8 @@ class BlindTier:
         ``semantic_he_content``), the content-HMAC function (keyed dedup identity, 3e), and the
         §5-1b BlindSealedStores for episode/triple/summary text. Returns
         ``(content_store, content_hmac_fn, sealed_dict)`` or ``(None, None, {})``. Needs argon2 +
-        cryptography + a passphrase + the keystore; **no openfhe** (pure AEAD/HMAC), so — like
-        entities — it comes up independently of the HE recall contexts. ALL keys are derived in ONE
+        cryptography + a passphrase + the keystore; **no openfhe** (pure AEAD/HMAC), so - like
+        entities - it comes up independently of the HE recall contexts. ALL keys are derived in ONE
         master pass (``derive_sealed_keys``) and held for the session inside the encrypt/decrypt
         closures (trusted-client RAM keys, like the entity key)."""
         import crypto_keys
@@ -216,7 +216,7 @@ class BlindTier:
                 keystore = crypto_keys.create_keystore(passphrase)
                 crypto_keys.save_keystore(keystore_path, keystore)
                 logger.warning("Blind-tier keystore CREATED at %s. The passphrase is the ONLY "
-                               "way to recover this memory — there is NO recovery.", keystore_path)
+                               "way to recover this memory - there is NO recovery.", keystore_path)
             else:
                 keystore = crypto_keys.load_keystore(keystore_path)
             keys = crypto_keys.derive_sealed_keys(passphrase, keystore)   # verifies key-check
@@ -283,7 +283,7 @@ class BlindTier:
                               gpu_backend=gpu_backend)
 
     def visitor(self):
-        """Return a §5-2 BlindVisitor over this tier's sealed stores — the client-visitor read
+        """Return a §5-2 BlindVisitor over this tier's sealed stores - the client-visitor read
         surface that serves the dream cycle's per-fact working set (content / entities / triples /
         summaries / episodes) from ciphertext. None-safe: whatever subset of stores is up is what the
         visitor can serve. The step toward §5-3/§5-4 where the passes read through this instead of the
@@ -295,9 +295,9 @@ class BlindTier:
     def reconcile(self, store=None, limit: int = 0) -> int:
         """Write-path completeness (roadmap §14 6a): mirror every fact that has a plaintext row but
         NO blind ciphertext into the encrypted tables, reading its embedding/HRR/entities back from
-        the plaintext store (semantic_vec / semantic_facts.hrr_vector / fact_entities — NO Ollama).
+        the plaintext store (semantic_vec / semantic_facts.hrr_vector / fact_entities - NO Ollama).
 
-        The single mechanism for ALL write paths — catches facts created OUTSIDE the consolidation
+        The single mechanism for ALL write paths - catches facts created OUTSIDE the consolidation
         epoch (abstraction / gist / procedural distillation; the builtin-memory mirror) and BACKFILLS
         a store on first blind-enable. Also mirrors the §5-1 sealed CONTENT surface into
         ``semantic_he_content`` and backfills the keyed ``content_hmac`` dedup identity. Idempotent
@@ -333,7 +333,7 @@ class BlindTier:
                     logger.debug("Blind reconcile entity mirror failed for %s (non-fatal): %s", fid, e)
         # §5-1 sealed content: mirror the AEAD content surface + backfill the keyed dedup identity.
         # Two independent idempotent worklists (a fact can have the ct without the hmac or vice
-        # versa), both reading the plaintext row back — NO Ollama.
+        # versa), both reading the plaintext row back - NO Ollama.
         if self.content is not None:
             for fid in st.facts_missing_blind("semantic_he_content", eff_limit):
                 try:

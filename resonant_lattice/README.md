@@ -2,7 +2,7 @@
 
 A **neuroplastic, Hebbian long-term memory provider** for the hermes-agent framework. Instead of a flat
 notes file, the agent gets a living memory that *strengthens what it uses, forgets what it doesn't,
-abstracts patterns, resolves contradictions, and remembers its own history* — all driven by a **logical
+abstracts patterns, resolves contradictions, and remembers its own history* - all driven by a **logical
 cycle clock**, never wall-clock time. It runs **fully local** (SQLite + Ollama), and can optionally
 encrypt itself at rest or run as a **homomorphic "blind store"** on hardware you don't fully trust.
 
@@ -28,7 +28,7 @@ Five principles run through every design decision:
 
 1. **Cycles, not seconds.** Nothing is time-based. Memory advances on a *memory cycle* (consolidation)
    and a *dream cycle* (maintenance) that tick with the conversation. This is what lets small local
-   models stay coherent — and what makes expensive homomorphic maintenance affordable.
+   models stay coherent - and what makes expensive homomorphic maintenance affordable.
 2. **Local-first / sovereign.** Your memory lives in one SQLite file on your machine, embedded by a
    local model. No data leaves the box. The encryption tiers push this further: you hold the only key.
 3. **Anti-fabrication is sacred.** Recalled memory is framed as *fallible candidates*, never ground
@@ -82,9 +82,9 @@ Heavier/LLM-bound phases (Gist forgetting P4, Relational reasoning P5, Self-mode
 | **Gist forgetting (P4)** | Before pruning, dying-but-once-important clusters are summarised into a `gist` so meaning survives detail loss. | OFF (recommended ON) |
 | **Relational reasoning (P5)** | Extracts `(subject, relation, object)` triples; graph + HRR fuzzy relational recall; bounded transitive `infer` (never stored). | OFF (recommended ON) |
 | **Conflicts as conversation (P6)** | Contradictions duel automatically, but mature unresolved ones are surfaced for explicit `resolve_conflict`. | ON |
-| **Self-model (P7)** | A curated `agent_identity` store the autonomous ingest path physically cannot write — only the explicit `set_self_model` action. | OFF (recommended ON) |
+| **Self-model (P7)** | A curated `agent_identity` store the autonomous ingest path physically cannot write - only the explicit `set_self_model` action. | OFF (recommended ON) |
 | **Narrative (P8)** | A one-paragraph autobiographical session summary (survives episode pruning), surfaced as cross-session "recent history." | OFF (recommended ON) |
-| **Agent control & confidence (P4)** | The agent **influences** memory, never destroys it: `pin`/`unpin` mark a fact *identity-level* — exempt from **all** forgetting (decay, prune, eviction); to retire a wrong fact it uses `unhelpful` feedback (fades to dormancy, **recoverable**), not delete. Recall surfaces the full **A22 confidence picture** — current resonance, **peak** ("ever important"), and **entry cycle**. A one-shot **re-embed migration** makes switching the embedder on an existing store turnkey. | ON |
+| **Agent control & confidence (P4)** | The agent **influences** memory, never destroys it: `pin`/`unpin` mark a fact *identity-level* - exempt from **all** forgetting (decay, prune, eviction); to retire a wrong fact it uses `unhelpful` feedback (fades to dormancy, **recoverable**), not delete. Recall surfaces the full **A22 confidence picture** - current resonance, **peak** ("ever important"), and **entry cycle**. A one-shot **re-embed migration** makes switching the embedder on an existing store turnkey. | ON |
 | **Tool/procedural memory** | Tool calls are logged as episodes and distilled into reusable `procedural` facts (failures become avoidance rules). A `procedural_seed` grounds the agent from day one. | ON |
 | **Anti-fabrication** | Source-quote attestation, a self-write policy gate, and fallible-candidate framing throughout. | ON |
 
@@ -93,11 +93,11 @@ Heavier/LLM-bound phases (Gist forgetting P4, Relational reasoning P5, Self-mode
 Both tiers derive everything from a **single master passphrase** (`hermes memory setup`); the passphrase
 is destroyed after setup and re-derived on demand. Selected via `encryption_mode` (default `none`).
 
-- **Tier 0 — `at_rest`.** Whole-DB **SQLCipher** transparent encryption under a passphrase-derived
+- **Tier 0 - `at_rest`.** Whole-DB **SQLCipher** transparent encryption under a passphrase-derived
   Argon2id key. Zero functionality loss (pages decrypt only in RAM); the file is opaque without the key.
-- **Tier 1 — `blind`.** A **homomorphic blind store** for running on hardware you don't fully trust: a
+- **Tier 1 - `blind`.** A **homomorphic blind store** for running on hardware you don't fully trust: a
   fact's **embedding, HRR lift, and entity set** are stored as **CKKS/AEAD ciphertext** (`semantic_he` /
-  `semantic_he_hrr` / `semantic_he_entities`), and recall runs **homomorphically** — the store computes
+  `semantic_he_hrr` / `semantic_he_entities`), and recall runs **homomorphically** - the store computes
   cosine similarity on ciphertext it can never decrypt. Keys are held in a multi-keyset HE keystore
   (recall @ embed-dim + HRR @ 2·hrr_dim + a light maintenance context); the agent decrypts only query
   results re-encrypted to it (proxy re-encryption); the user re-derives the master for god-mode audit.
@@ -106,7 +106,7 @@ is destroyed after setup and re-derived on demand. Selected via `encryption_mode
 
 ## Architecture
 
-Flat sibling mixins, no subpackages — see **`MODULE_MAP.md`** for the full map.
+Flat sibling mixins, no subpackages - see **`MODULE_MAP.md`** for the full map.
 
 - **`LatticeStore`** = composite of store mixins (`store_schema`, `store_facts`, `store_dream`,
   `store_abstraction`, `store_episodes`, `store_entities`, `store_relations`, `store_identity`,
@@ -130,10 +130,10 @@ pip install numpy sqlite-vec
 ollama pull nomic-embed-text          # embeddings (768-d)
 ollama pull ibm/granite4.1:8b         # reasoning (consolidation/abstraction)
 
-# Tier 0 — encrypted-at-rest (optional)
+# Tier 0 - encrypted-at-rest (optional)
 pip install argon2-cffi sqlcipher3-wheels
 
-# Tier 1 — homomorphic blind store (optional; Linux)
+# Tier 1 - homomorphic blind store (optional; Linux)
 pip install openfhe cryptography argon2-cffi
 ```
 
@@ -143,17 +143,17 @@ back cleanly. HRR degrades gracefully without numpy.
 ## Recommended model stack
 
 The three model slots reward **different** strengths, so role-specialized models beat one model
-everywhere (validated by benchmark — tool-grounding, abstraction-fidelity, and embedder precision/recall
+everywhere (validated by benchmark - tool-grounding, abstraction-fidelity, and embedder precision/recall
 on a real-fact corpus):
 
 | Slot | Recommended | Why |
 |---|---|---|
 | **Primary LLM** (the agent itself) | `gemma4:12b` | Robust tool-calling under pressure; long-context; fast. Set in hermes, not here. |
-| **Memory inference** (`reason_model`) | `gemma4:26b` or `qwen3.6:27b` | Reliable contextualizing **abstraction** + grounded extraction. Small models (e.g. `gemma4:12b`) can pass extraction but **fail the abstraction JSON** — don't use one here. |
+| **Memory inference** (`reason_model`) | `gemma4:26b` or `qwen3.6:27b` | Reliable contextualizing **abstraction** + grounded extraction. Small models (e.g. `gemma4:12b`) can pass extraction but **fail the abstraction JSON** - don't use one here. |
 | **Memory embedding** (`embed_model`) | `embeddinggemma:300m` | Best precision-per-byte (lowest poison-leak, full recall), drop-in 768-d, tiny. `qwen3-embedding:4b` for top ranking if you accept 2560-d. |
 
 **Consolidation is off the hot path** (cycle-driven, background), so `reason_model` can point at a
-**flagship cloud API endpoint** while primary inference and embeddings stay **fully local and private** —
+**flagship cloud API endpoint** while primary inference and embeddings stay **fully local and private** -
 you pay only for the occasional dream-cycle abstraction, and get flagship-quality generalization baked
 into memory at a fraction of the token cost. (With the `blind` tier, that cloud call can even run over
 *encrypted* memory.) The embedder choice is no longer a lock-in: changing `embed_model` triggers a
@@ -169,8 +169,8 @@ The agent (and you) drive memory through one tool, `lattice_store`, with an `act
 | `search` | Hybrid recall (vector + keyword). Each hit carries the A22 confidence picture: resonance, `peak_resonance`, `learned_at_cycle`, `pinned`. |
 | `get_fact` | Fetch the exact stored row by ID (authoritative; `found:false` ⇒ not stored). |
 | `fact_history` | A fact's temporal/supersedion history. |
-| `feedback` | `helpful`/`unhelpful` Hebbian adjustment. **There is deliberately no agent `delete`** — to retire a wrong/stale fact use `feedback: unhelpful` (it fades to dormancy, recoverable). |
-| `pin` / `unpin` | Mark a fact *identity-level* / never-forget (exempt from all decay, prune, and eviction) — or release it. Protective only; never inflates resonance. |
+| `feedback` | `helpful`/`unhelpful` Hebbian adjustment. **There is deliberately no agent `delete`** - to retire a wrong/stale fact use `feedback: unhelpful` (it fades to dormancy, recoverable). |
+| `pin` / `unpin` | Mark a fact *identity-level* / never-forget (exempt from all decay, prune, and eviction) - or release it. Protective only; never inflates resonance. |
 | `request_abstraction` | Run a generalization pass **now** (cluster related long facts → contextualized abstractions), instead of waiting for the periodic dream-cycle one. |
 | `force_consolidation` / `force_dream_cycle` | Run a cycle on demand. |
 | `stats` / `memory_audit` | Counts and a read-only health snapshot. |
@@ -187,7 +187,7 @@ The agent (and you) drive memory through one tool, `lattice_store`, with an `act
 Run from the repo root:
 
 ```bash
-python resonant_lattice/test_resonant_lattice.py        # unit suite (97 tests) — pure SQLite/HRR substrate
+python resonant_lattice/test_resonant_lattice.py        # unit suite (97 tests) - pure SQLite/HRR substrate
 python tests/live_e2e.py --model ibm/granite4.1:8b      # real store+retriever end-to-end vs Ollama
 ```
 
@@ -220,7 +220,7 @@ See the plan for per-phase details and rationale.
 
 ## Sample configuration (all parameters)
 
-All settings are **local** (no secrets/credentials live here — the encryption passphrase comes from the
+All settings are **local** (no secrets/credentials live here - the encryption passphrase comes from the
 `RESONANT_LATTICE_PASSPHRASE` env var or `hermes memory setup`). Put these under
 `plugins.resonant_lattice` in your hermes `config.yaml`. Every key is optional; the values shown are the
 **defaults**. Omit a key to take its default.
@@ -233,7 +233,7 @@ plugins:
   resonant_lattice:
 
     # ── Models & endpoints ────────────────────────────────────────────────
-    # The three slots are independent — see "Recommended model stack" below. Consolidation/
+    # The three slots are independent - see "Recommended model stack" below. Consolidation/
     # abstraction is off the hot path, so reason_model can point at a stronger (even cloud) endpoint
     # while primary inference + embeddings stay local. Changing embed_model on an EXISTING store is
     # turnkey: the next dream cycle re-embeds every fact to the new model (rebuilding the vector
@@ -268,18 +268,18 @@ plugins:
     recall_bump: 0.34                   # resonance added per recall (gated once/cycle/fact)
     hrr_dim: 1024                       # HRR phase-vector dimension
 
-    # ── Freshness — Phase 2 (decoupled from strength) ─────────────────────
+    # ── Freshness - Phase 2 (decoupled from strength) ─────────────────────
     freshness_halflife_cycles: 50       # cycles for confirmation freshness to halve in the ranking nudge (0 = off)
     surface_freshness_in_recall: true   # annotate recall with "[confirmed ~N cycles ago]"
     stale_decay_boost: 0.0              # extra decay for weak AND long-unconfirmed facts (0 = off)
 
-    # ── Salience — Phase 3 (novelty at ingestion) ────────────────────────
+    # ── Salience - Phase 3 (novelty at ingestion) ────────────────────────
     novelty_enabled: true               # boost a novel fact's starting resonance so a one-shot sticks
     novelty_boost: 2.0                  # max extra starting resonance for a fully-novel fact
 
-    # ── Conflicts — Phase 6 + detection ───────────────────────────────────
+    # ── Conflicts - Phase 6 + detection ───────────────────────────────────
     conflict_limbo: true                # A9/A13: hold a CONTESTED fact in sustained-resonance limbo (no decay/prune/auto-bleed) until the USER arbitrates via resolve_conflict; false restores the auto-bleed duel
-    conflict_decay_floor: 0.0           # resonance floor during the conflict duel (0 = lethal; >0 = non-lethal) — only when conflict_limbo is false
+    conflict_decay_floor: 0.0           # resonance floor during the conflict duel (0 = lethal; >0 = non-lethal) - only when conflict_limbo is false
     keep_superseded: true               # retire conflict losers as tier='superseded' history instead of deleting
     max_superseded_history: 2000        # cap on retained superseded (belief-history) facts
     surface_conflicts: true             # gently flag a mature unresolved conflict in recall (once/cycle)
@@ -297,7 +297,7 @@ plugins:
     cluster_entity_overlap: 0.55        # entity overlap to cluster facts together
     abstraction_dedup_threshold: 0.82   # cosine above which a new abstraction is a duplicate
 
-    # ── Gist-preserving forgetting — Phase 4 (default OFF; LLM-bound) ──────
+    # ── Gist-preserving forgetting - Phase 4 (default OFF; LLM-bound) ──────
     gist_before_prune: false            # summarise dying-but-once-important clusters before pruning
     gist_floor: 0.0                     # resonance at/below which a fact counts as 'dying'
     gist_min_peak_resonance: 4.0        # how strong a fact must have been once (max_resonance_seen) to earn a gist
@@ -305,18 +305,18 @@ plugins:
     gist_min_cluster_size: 2            # min related dying facts to form a gist (a fading THEME, not one fact)
     gist_max_clusters: 3                # max gist clusters per pass
 
-    # ── Relational reasoning — Phase 5 (default OFF) ──────────────────────
+    # ── Relational reasoning - Phase 5 (default OFF) ──────────────────────
     enable_relations: false             # extract (subject, relation, object) triples during consolidation
     relation_min_confidence: 0.5        # min extraction confidence for a triple to be stored (0-1)
     relation_extract_llm: false         # augment deterministic triple extraction with an LLM pass (extra Ollama call)
     relation_recall_hrr_floor: 0.4      # HRR partial-binding floor for fuzzy relational matches (~0.69 all slots, ~0.34 one)
     max_inference_hops: 2               # max chain length for the `infer` action (derived, never stored)
 
-    # ── Self-model — Phase 7 (default OFF) ────────────────────────────────
+    # ── Self-model - Phase 7 (default OFF) ────────────────────────────────
     enable_self_model: false            # maintain a curated agent_identity store (autonomous ingest can never write it)
     self_model_seed: {}                 # optional {key: value} seed applied on first run (INSERT-OR-IGNORE)
 
-    # ── Narrative / autobiography — Phase 8 (default OFF) ─────────────────
+    # ── Narrative / autobiography - Phase 8 (default OFF) ─────────────────
     enable_narrative: false             # write a one-paragraph session summary at session end (survives episode pruning)
     narrative_keep: 30                  # max session summaries retained
     narrative_min_episodes: 2           # min episodes before a session earns a summary
@@ -361,7 +361,7 @@ plugins:
     extraction_prompt: |
       Analyze this dialogue log and extract only NEW, durable facts, user preferences, or goal
       states that are EXPLICITLY supported by the log.
-      GROUNDING RULES (critical — violating them corrupts memory):
+      GROUNDING RULES (critical - violating them corrupts memory):
       - Do NOT invent or infer specifics (names, numbers, dates, IDs, paths, settings, versions)
         that are not literally present in the log. If a detail is not in the log, leave it out.
       - For EVERY fact, include "source_quote": the shortest snippet copied VERBATIM from the log
@@ -387,7 +387,7 @@ plugins:
       You are a memory consolidation engine for an AI agent. The facts below are FADING from memory
       (their resonance has decayed toward zero) but they mattered once. Before they are forgotten
       entirely, write ONE concise GIST that preserves their shared MEANING while letting the specific
-      details go — the way human memory keeps the gist of an experience long after the details blur.
+      details go - the way human memory keeps the gist of an experience long after the details blur.
 
       Rules:
       - Capture the common theme/meaning, not the particulars (drop exact numbers, dates, IDs, paths)
@@ -398,7 +398,7 @@ plugins:
 
     relation_prompt: |
       Extract the explicit (subject, relation, object) triples STATED in the text below. Capture only
-      relationships LITERALLY present — never infer, chain, or add outside world knowledge (that is
+      relationships LITERALLY present - never infer, chain, or add outside world knowledge (that is
       done elsewhere, deliberately, and never stored as fact).
 
       Rules:
@@ -410,7 +410,7 @@ plugins:
 
     narrative_prompt: |
       Summarise the session below as ONE short paragraph of durable autobiographical memory for an AI
-      agent — what the user and assistant worked on and decided together, the kind of throughline worth
+      agent - what the user and assistant worked on and decided together, the kind of throughline worth
       remembering at the start of the next session.
 
       Rules:
@@ -437,5 +437,5 @@ plugins:
       - Output 1-4 rules, or [] if nothing generalizable can be learned
 ```
 
-> **Note on prompts:** the YAML above shows each prompt's *default* text for completeness — you only need
+> **Note on prompts:** the YAML above shows each prompt's *default* text for completeness - you only need
 > to include a `*_prompt` key if you want to **override** it. The canonical defaults live in `prompts.py`.

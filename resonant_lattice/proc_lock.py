@@ -1,26 +1,26 @@
-"""proc_lock.py — cross-process finalize serialization for one memory DB.
+"""proc_lock.py - cross-process finalize serialization for one memory DB.
 
 The consolidation epoch and the dream cycle are each guarded in-process by a
 threading lock, but nothing coordinates ACROSS processes: a long-lived gateway
 and concurrent `hermes -z` overnight workers all open the same profile DB from
 separate processes. Concurrent dream cycles from two processes can interleave
 Hebbian maintenance (double decay, racing promotions/prunes, duplicate conflict
-groups) — the same multi-process bug class as the cycle-counter clock rollback
+groups) - the same multi-process bug class as the cycle-counter clock rollback
 fixed in store.increment_cycle().
 
 FinalizeLock is an advisory file lock (`<db>.finalize.lock`, flock on POSIX,
 msvcrt.locking on Windows) taken for the DURATION of one finalize unit (one
 consolidation epoch, or one dream cycle). Scheduled mid-session work tries the
 lock non-blocking and defers when another process is finalizing (episodes are
-durable — they distill on the next trigger, mirroring the in-process skip
+durable - they distill on the next trigger, mirroring the in-process skip
 semantics). Forced session-end work waits its turn.
 
 Locks are per-open-file-description, so two FinalizeLock instances contend
-even inside one process — callers construct a fresh instance per finalize unit
+even inside one process - callers construct a fresh instance per finalize unit
 and never share one across threads.
 
 FAIL-OPEN: if the lock FILE cannot even be created (exotic permissions or a
-read-only filesystem), acquire() warns once and proceeds unlocked — the
+read-only filesystem), acquire() warns once and proceeds unlocked - the
 pre-existing behavior. Memory that consolidates unprotected beats memory that
 silently stops consolidating.
 """
@@ -60,9 +60,9 @@ class FinalizeLock:
         try:
             fd = os.open(self._path, os.O_CREAT | os.O_RDWR)
         except OSError as e:
-            # Can't even create the lock file — fail OPEN (see module docstring).
+            # Can't even create the lock file - fail OPEN (see module docstring).
             logger.warning(
-                "FinalizeLock unavailable (%s) — proceeding without cross-process "
+                "FinalizeLock unavailable (%s) - proceeding without cross-process "
                 "serialization for this finalize.", e)
             self._unlocked_fallback = True
             return None
@@ -75,7 +75,7 @@ class FinalizeLock:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             os.close(fd)
-            return False   # held by another finalize — normal contention
+            return False   # held by another finalize - normal contention
         self._fd = fd
         return True
 

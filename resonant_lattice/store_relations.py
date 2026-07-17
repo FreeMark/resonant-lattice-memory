@@ -1,16 +1,16 @@
-"""store_relations.py — RelationsMixin: Phase-5a (subject, relation, object)
+"""store_relations.py - RelationsMixin: Phase-5a (subject, relation, object)
 triple extraction, storage, and bound-HRR encoding.
 
 Mixed into LatticeStore; relies on the composite for self._conn/_lock, self.hrr_dim,
 self._extract_entities, and self._clean_llm_json (AbstractionMixin staticmethod).
 
-Design stance (anti-fabrication / precision first — garbage triples are the named
+Design stance (anti-fabrication / precision first - garbage triples are the named
 Phase-5 risk, and 5b/5c consume these): a deterministic, ENTITY-GROUNDED pattern
 extractor is the default. A triple's confidence is boosted when its subject/object
 resolve to recognized entities and penalized when neither does, so the default
 relation_min_confidence gate keeps ungrounded noise out. An optional LLM pass
 (default OFF) can augment recall; its output runs through the SAME grounding +
-confidence gate. Inference is NOT done here — these are extracted, not derived.
+confidence gate. Inference is NOT done here - these are extracted, not derived.
 """
 
 import json
@@ -42,17 +42,17 @@ _LEADING_DETERMINERS = (
     "their ", "our ", "its ", "this ", "that ",
 )
 
-# Clause connectors — an argument span is cut here so a captured phrase never
+# Clause connectors - an argument span is cut here so a captured phrase never
 # straddles a conjunction ("acme and bob" → the clause nearest the verb).
 _CONNECTORS = re.compile(r"\b(?:and|or|but|then)\b|[;,]", re.IGNORECASE)
 
 # A connector immediately BEFORE the verb ("... and lives in ...") signals an
 # elided subject (coordination): the real subject belongs to the prior clause.
-# A connector earlier in the span ("... and Alice works at ...") is fine — a real
+# A connector earlier in the span ("... and Alice works at ...") is fine - a real
 # subject still sits between it and the verb. Only the trailing case is dropped.
 _TRAILING_CONNECTOR = re.compile(r"(?:\b(?:and|or|but|then)\b|[;,])\s*$", re.IGNORECASE)
 
-# One captured argument: 1–4 word tokens (word chars, apostrophes, hyphens, dots).
+# One captured argument: 1-4 word tokens (word chars, apostrophes, hyphens, dots).
 _ARG = r"[\w][\w'\-.]*(?:\s+[\w'\-.]+){0,3}"
 
 
@@ -108,12 +108,12 @@ _QUERY_NON_ANCHORS = frozenset({
 # Phase 5c: relations whose composition with ITSELF is still meaningful, so a
 # same-relation chain may be labelled with that transitive closure (Seattle
 # located_in WA, WA located_in USA => located_in). Mixed-relation chains are NEVER
-# given a composed relation name — they are surfaced as a path only.
+# given a composed relation name - they are surfaced as a path only.
 _TRANSITIVE_RELATIONS = frozenset({"located_in", "part_of", "lives_in"})
 
 # Phase 5b free-query relation detection: map a verb keyword in a question to a
 # canonical relation (the same vocabulary _REL_PATTERNS produces). HIGH PRIORITY
-# FIRST — "works on" is checked before the generic "works" so it wins.
+# FIRST - "works on" is checked before the generic "works" so it wins.
 _QUERY_REL_KEYWORDS: List[Tuple["re.Pattern", str]] = [
     (re.compile(r"\bworks?\s+on\b", re.IGNORECASE), "works_on"),
     (re.compile(r"\b(?:works?|working|employed)\b", re.IGNORECASE), "works_at"),
@@ -210,10 +210,10 @@ class RelationsMixin:
         (a region matched by a specific relation is not re-parsed by the generic
         is_a). Returns a list of {subject, relation, object, confidence} dicts,
         deduped and capped. Confidence reflects entity grounding; the caller gates
-        on relation_min_confidence. Read-only / pure — does not touch the DB.
+        on relation_min_confidence. Read-only / pure - does not touch the DB.
 
         When ``vocabulary`` is given (a closed relation set for the agent's domain),
-        only patterns whose relation is IN the vocabulary are applied — so a domain
+        only patterns whose relation is IN the vocabulary are applied - so a domain
         that supplies ["uses","part_of","runs_on",...] keeps the deterministic
         uses/part_of matches but drops the generic is_a/has noise (the
         "grok is_a bottleneck" / "memory has tidied" misparses). Empty/None = legacy
@@ -251,7 +251,7 @@ class RelationsMixin:
                 # Elided-subject guard: in "X verb1 Y and verb2 Z" the second verb's
                 # real subject (X) is elided, so the captured subject span ENDS with
                 # the connector (the verb directly follows "and"). We can't recover X,
-                # and emitting (Y, verb2, Z) would be a CONFIDENT WRONG triple — drop
+                # and emitting (Y, verb2, Z) would be a CONFIDENT WRONG triple - drop
                 # it (precision over recall; anti-fabrication).
                 if _TRAILING_CONNECTOR.search(m.group("subj")):
                     continue
@@ -280,7 +280,7 @@ class RelationsMixin:
 
         Turns triple extraction from open generation ("invent a snake_case relation")
         into classification ("pick a relation from THIS list, name real things, or
-        return []") — the task a small local model does reliably. Optional domain
+        return []") - the task a small local model does reliably. Optional domain
         ``examples`` are appended verbatim (few-shot). Validated at scale to yield a
         near-100%-canonical, recurring relation set."""
         vocab_line = ", ".join(vocabulary)
@@ -316,7 +316,7 @@ class RelationsMixin:
 
         When ``vocabulary`` is given, the prompt is a schema-constrained slot-filler
         over that closed set (unless an explicit ``prompt`` overrides it) AND every
-        extracted relation is validated to be IN the vocabulary — off-list relations
+        extracted relation is validated to be IN the vocabulary - off-list relations
         (the free-form run-on noise a generic prompt produces) are dropped. This is
         what makes relations RECUR (a traversable graph) instead of each being a
         one-off. Empty/None vocabulary = legacy free-form behaviour.
@@ -338,7 +338,7 @@ class RelationsMixin:
         else:
             base_prompt = (
                 "Extract explicit (subject, relation, object) triples STATED in the text "
-                "below. Only facts literally present — never infer or add world knowledge. "
+                "below. Only facts literally present - never infer or add world knowledge. "
                 "relation is a short snake_case verb phrase. Output ONLY a JSON array of "
                 'objects with keys "subject", "relation", "object", or [] if none.'
             )
@@ -440,7 +440,7 @@ class RelationsMixin:
             return cur.rowcount or 0
 
     # Relations whose OBJECT is a value/attribute (a number, a flag, a path), not a
-    # graph node — so the object is NOT required to resolve to a known entity.
+    # graph node - so the object is NOT required to resolve to a known entity.
     _ATTRIBUTE_RELATIONS = frozenset({"set_to", "produces"})
 
     def _canonicalize_triples(self, triples: List[Dict], content: str,
@@ -453,7 +453,7 @@ class RelationsMixin:
         - ``aliases`` maps a surface form to its canonical node (e.g. '46' / '.46' /
           'node' -> 'node .46'; 'nemotron-3-super:cloud' -> 'nemotron'). Applied to
           subject and object after extraction, so the SAME real thing becomes ONE
-          node — which is what lets triples share nodes and chains form. Keys are
+          node - which is what lets triples share nodes and chains form. Keys are
           matched case-insensitively, as a whole value OR a whole-word substring.
         - ``require_entity`` (strict binding): a component<->component triple is kept
           only if BOTH args resolve to a known entity (from the fact's entity set +
@@ -606,7 +606,7 @@ class RelationsMixin:
                       limit: int = 100) -> List[Dict]:
         """Exact-match triple lookup over the graph (Phase-5a substrate read).
 
-        Plain SQL filter on the normalized subject/object/relation columns — this
+        Plain SQL filter on the normalized subject/object/relation columns - this
         is the index-backed primitive Phase 5b builds HRR-fuzzy recall and bounded
         inference on top of. By default joins to live facts (superseded belief-
         history excluded). Read-only.
@@ -759,7 +759,7 @@ class RelationsMixin:
 
         Returns (relation, anchors): a canonical relation if a known verb is
         detected, and the query's entities as role-agnostic anchors (we do NOT
-        guess subject vs object — the recall's anchor matching and HRR ranking
+        guess subject vs object - the recall's anchor matching and HRR ranking
         handle either orientation, so a role misguess can't drop a real answer).
         """
         if not query or not query.strip():
@@ -777,7 +777,7 @@ class RelationsMixin:
         # question but need spaCy to be caught by the entity layer's regex (which
         # requires 2+ words). Pull them here so questions work without spaCy.
         have = {a.lower() for a in anchors}
-        # (1) Multi-word capitalized SPANS ("Acme Robotics") — almost always real
+        # (1) Multi-word capitalized SPANS ("Acme Robotics") - almost always real
         # entities regardless of position, so take them from the FULL query and
         # add the whole phrase as one anchor (matching a stored multi-word
         # subject/object). Mark the component words seen so they don't also leak in
@@ -789,7 +789,7 @@ class RelationsMixin:
             have.add(low)
             for w in low.split():
                 have.add(w)
-        # (2) Single capitalized tokens ("Free") — exclude the sentence-initial one
+        # (2) Single capitalized tokens ("Free") - exclude the sentence-initial one
         # (query[1:]) and question/aux words to avoid false anchors.
         for tok in re.findall(r"\b([A-Z][a-zA-Z]{1,})\b", query[1:]):
             low = tok.lower()
@@ -812,7 +812,7 @@ class RelationsMixin:
         an inferred connection mark→seattle, with the supporting path attached.
 
         CRITICAL anti-fabrication invariants (this is where discipline matters most):
-          • Pure read + compute — NEVER writes to fact_relations or semantic_facts.
+          • Pure read + compute - NEVER writes to fact_relations or semantic_facts.
             Inferences are returned, never persisted, never quote_status='attested'.
           • Every result carries inferred=True, the full `path` of REAL stored
             triples it rests on, hop count, and a confidence that DECAYS per hop
@@ -821,9 +821,9 @@ class RelationsMixin:
           • A composed `relation` name is asserted ONLY when every hop shares one
             relation that is transitively closeable (_TRANSITIVE_RELATIONS); mixed
             chains get relation=None and are surfaced as a path for the agent to
-            interpret — we never invent a relation the data doesn't support.
+            interpret - we never invent a relation the data doesn't support.
 
-        Only multi-hop paths (len ≥ 2 edges) are returned — a 1-edge path is just a
+        Only multi-hop paths (len ≥ 2 edges) are returned - a 1-edge path is just a
         stored fact (use ``relational`` for those). ``max_hops`` is the maximum path
         length in edges: 1 disables multi-hop (returns []); 2+ allows derived chains
         up to that length. If ``object`` is given, only chains terminating at it are

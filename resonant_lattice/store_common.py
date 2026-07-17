@@ -1,5 +1,5 @@
 """
-store_common.py — shared low-level helpers for the LatticeStore mixins.
+store_common.py - shared low-level helpers for the LatticeStore mixins.
 
 Dependency-free of LatticeStore (and of every store_* mixin) ON PURPOSE: the
 test harness loads ``store`` via ``spec_from_file_location`` without registering
@@ -9,12 +9,12 @@ shared primitives through this leaf module avoids that entirely.
 
 Holds: the ``serialize_vector`` helper, the encryption-aware ``sqlite3`` binding
 selection (pysqlite3 / stdlib, or ``sqlcipher3`` when encrypted-at-rest is signalled
-via ``RESONANT_LATTICE_DB_ENCRYPTED``) — centralised so every module that catches
-``sqlite3.IntegrityError`` shares the same exception type the connection raises —
+via ``RESONANT_LATTICE_DB_ENCRYPTED``) - centralised so every module that catches
+``sqlite3.IntegrityError`` shares the same exception type the connection raises -
 and the optional-dependency import blocks for HRR (holographic) and the entity
 extractor.
 
-NOTE: ``sqlite_vec`` is intentionally NOT imported here — it stays a hard import
+NOTE: ``sqlite_vec`` is intentionally NOT imported here - it stays a hard import
 in store.py so importing the store still fails (and the store tests still skip)
 when sqlite-vec is unavailable.
 """

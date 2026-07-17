@@ -1,4 +1,4 @@
-"""crypto_keys.py — passphrase-derived key hierarchy for the encrypted-at-rest tier (E0).
+"""crypto_keys.py - passphrase-derived key hierarchy for the encrypted-at-rest tier (E0).
 
 Dependency-free of LatticeStore and every store_* mixin ON PURPOSE (a leaf, like
 store_common.py): the store imports it, never the reverse, so it can be loaded by the
@@ -18,13 +18,13 @@ E0 derives only the rest-db-key today.
 
 KEYSTORE SIDECAR (`<db>.keys`, JSON) holds ONLY non-secret material: KDF version, Argon2id
 params, the random salt, and the key-check value (an HKDF output of the master under a
-distinct info label — it reveals neither the master nor the DB key, and only enables the
+distinct info label - it reveals neither the master nor the DB key, and only enables the
 same offline passphrase-guessing an attacker could already mount against the ciphertext,
 which Argon2id is there to make expensive). The master secret and the DB key are NEVER
 written to disk; they are re-derived from the passphrase on demand.
 
 Secrets live in `bytearray`s so they can be wiped (`secure_zero`) and best-effort page-locked
-(`try_mlock`) — true zeroization is not guaranteed under CPython, so this is defence-in-depth,
+(`try_mlock`) - true zeroization is not guaranteed under CPython, so this is defence-in-depth,
 not a guarantee. The honest threat boundary is in ENCRYPTION_ROADMAP.md §2/§7.
 
 Heavy/optional deps are imported lazily-guarded (mirrors store_common): importing this module
@@ -83,7 +83,7 @@ _KEY_CHECK_LEN = 16
 _HE_WRAP_KEY_LEN = 32     # AES-256-GCM key for wrapping the HE secret
 _GCM_NONCE_BYTES = 12     # 96-bit nonce, the GCM standard
 
-# HKDF info labels — distinct per purpose so subkeys are cryptographically independent.
+# HKDF info labels - distinct per purpose so subkeys are cryptographically independent.
 _INFO_DB_KEY = b"resonant-lattice/rest-db-key/v1"
 _INFO_KEY_CHECK = b"resonant-lattice/key-check/v1"
 # Tier-1 HE secret-wrapping subkey: sibling of the rest-db-key under the SAME master, so the
@@ -92,7 +92,7 @@ _INFO_HE_SECRET_WRAP = b"resonant-lattice/he-secret-wrap/v1"
 # Tier-1 entity-set encryption subkey (E7 7b): another distinct sibling under the same master.
 _INFO_ENTITY = b"resonant-lattice/entity-set/v1"
 
-# AES-GCM associated data — authenticates the wrap-format version, so a blob from a future
+# AES-GCM associated data - authenticates the wrap-format version, so a blob from a future
 # format cannot be silently unwrapped under this one.
 HE_WRAP_VERSION = 1
 _HE_WRAP_AAD = b"resonant-lattice/he-secret-wrap/v1"
@@ -465,7 +465,7 @@ def wrap_he_secret(secret_blob: bytes, wrap_key: bytes) -> Dict:
     """AES-256-GCM-encrypt the serialized HE secret key under `wrap_key`.
 
     Returns a JSON-serialisable dict (version/alg/nonce/ciphertext) safe to persist next to
-    the public/eval key blobs — it is ciphertext, not a secret. A fresh random nonce is used
+    the public/eval key blobs - it is ciphertext, not a secret. A fresh random nonce is used
     per call; the wrap-format version is bound as associated data so it is authenticated.
     """
     if not _AEAD_AVAILABLE:
@@ -562,7 +562,7 @@ def he_key_blobs_from_keystore(ks: Dict) -> Dict[str, bytes]:
 
 
 def he_keystore_is_secret_free(ks: Dict) -> bool:
-    """Audit guard: the HE keystore carries NO unwrapped secret — only public/eval blobs and
+    """Audit guard: the HE keystore carries NO unwrapped secret - only public/eval blobs and
     AES-GCM-WRAPPED secrets (which are ciphertext, safe to persist)."""
     if set(ks) - {"version", "meta", "key_blobs_b64", "wrapped_secrets"}:
         return False
@@ -582,7 +582,7 @@ def setup_or_load_blind_client(passphrase: bytes, keystore: Dict, he_keystore_pa
     master + agent secrets under the master-derived wrap key, persist the HE keystore, and
     return the live ``generate()`` instance (no re-deserialize -> no global eval-key
     collision). Later runs: load the public/eval blobs + unwrap the requested role's secret
-    and rebuild the client. ``role`` picks which secret the client holds — 'user' (master,
+    and rebuild the client. ``role`` picks which secret the client holds - 'user' (master,
     god-mode) or 'agent' (use-key; raw-DB reads are rejected). ``he_crypto`` is imported
     lazily so openfhe is pulled ONLY on the blind path."""
     import he_crypto  # lazy: openfhe only here (blind tier)
@@ -596,7 +596,7 @@ def setup_or_load_blind_client(passphrase: bytes, keystore: Dict, he_keystore_pa
             ks = create_he_keystore(key_blobs, wrapped, meta)
             save_he_keystore(he_keystore_path, ks)
             logger.warning("Blind-tier HE keystore CREATED at %s. The passphrase is the ONLY "
-                           "way to recover the HE secret — there is NO recovery.", he_keystore_path)
+                           "way to recover the HE secret - there is NO recovery.", he_keystore_path)
             return client, ks, True
         ks = load_he_keystore(he_keystore_path)
         key_blobs = he_key_blobs_from_keystore(ks)
@@ -617,19 +617,19 @@ def setup_or_load_blind_client(passphrase: bytes, keystore: Dict, he_keystore_pa
 # The blind tier needs SEVERAL purpose-built HE contexts at once (decided + node-proven
 # 2026-06-19): recall+PRE @ embed-dim, HRR recall+PRE @ 2·hrr-dim, and a LIGHT decay-only
 # maintenance context. One sidecar holds all of them as NAMED keysets, each a self-contained
-# {public/eval blobs + wrapped secrets + meta} — exactly the single-keyset shape, nested under
+# {public/eval blobs + wrapped secrets + meta} - exactly the single-keyset shape, nested under
 # `keysets`. They coexist in one runtime process: OpenFHE's global eval-key store keys by
 # context tag, and each engine's generate() now serializes its eval keys BY TAG (he_crypto), so
 # one setup process can keygen all keysets with isolated blobs (node-proven). The maint keyset is
 # generated LIGHT (he_crypto._MAINT_BLIND_DEPTH=1, ~0.8MB vs ~63MB) because the provider path
-# decays FROM ORIGIN — see he_crypto._MAINT_BLIND_DEPTH for the why.
+# decays FROM ORIGIN - see he_crypto._MAINT_BLIND_DEPTH for the why.
 HE_MULTI_KEYSTORE_VERSION = 2
 _HE_KEYSET_NAMES = ("recall", "hrr", "maint")
 
 
 def create_multi_he_keystore(keysets: Dict[str, Dict]) -> Dict:
     """Build a JSON-serialisable MULTI-keyset HE keystore from ``{name: entry}`` where each entry
-    is ``{"key_blobs": {k: bytes}, "wrapped_secrets": {name: wrapped_dict}, "meta": {...}}`` — the
+    is ``{"key_blobs": {k: bytes}, "wrapped_secrets": {name: wrapped_dict}, "meta": {...}}`` - the
     public/eval blobs are b64-encoded, the wrapped secrets are already JSON-safe ciphertext."""
     out = {"version": HE_MULTI_KEYSTORE_VERSION, "keysets": {}}
     for name, ent in keysets.items():
@@ -676,18 +676,18 @@ def multi_he_keystore_is_secret_free(ks: Dict) -> bool:
 def setup_or_load_blind_contexts(passphrase: bytes, keystore: Dict, he_keystore_path: str, *,
                                  embed_dim: int, hrr_dim: int, maint_batch: int = 8,
                                  role: str = "user"):
-    """Return ``({"recall":client, "hrr":client, "maint":client}, he_keystore, created)`` — the
+    """Return ``({"recall":client, "hrr":client, "maint":client}, he_keystore, created)`` - the
     Option A multi-keyset blind tier.
 
       * ``recall`` = ``BlindRecallPRE`` @ ``embed_dim`` (encrypted-embedding cosine + PRE).
       * ``hrr``    = ``BlindRecallPRE`` @ ``2*hrr_dim`` (the HE dim of the HRR (cos,sin) lift).
       * ``maint``  = ``BlindMaintenance`` LIGHT (decay-only, ``_MAINT_BLIND_DEPTH``) over scalars.
 
-    First run (no HE keystore): generate all three in ONE process — by-tag eval-key serialization
-    (he_crypto) keeps the blobs isolated and the live instances usable — AES-GCM-WRAP every secret
+    First run (no HE keystore): generate all three in ONE process - by-tag eval-key serialization
+    (he_crypto) keeps the blobs isolated and the live instances usable - AES-GCM-WRAP every secret
     under the master wrap key, persist, and return the live instances (no re-deserialize). Later
     runs: load + unwrap the requested ``role``'s secret per keyset and rebuild the clients. ``role``
-    picks the PRE secret for recall/HRR — 'user' (master, god-mode) | 'agent' (use-key, raw-DB reads
+    picks the PRE secret for recall/HRR - 'user' (master, god-mode) | 'agent' (use-key, raw-DB reads
     rejected); maint has a single client secret (needed for settle/get_resonance). ``he_crypto`` is
     imported lazily so openfhe is pulled ONLY on the blind path."""
     import he_crypto  # lazy: openfhe only here (blind tier)
@@ -717,7 +717,7 @@ def setup_or_load_blind_contexts(passphrase: bytes, keystore: Dict, he_keystore_
             ks = create_multi_he_keystore(keysets)
             save_he_keystore(he_keystore_path, ks)
             logger.warning("Blind-tier MULTI HE keystore CREATED at %s (recall/hrr/maint). The "
-                           "passphrase is the ONLY way to recover the HE secrets — NO recovery.",
+                           "passphrase is the ONLY way to recover the HE secrets - NO recovery.",
                            he_keystore_path)
             return {"recall": recall, "hrr": hrr, "maint": maint}, ks, True
 
@@ -752,10 +752,10 @@ def setup_or_load_blind_contexts(passphrase: bytes, keystore: Dict, he_keystore_
 # ── Tier-1 entity-set encryption at rest (E7 7b, client-side no-leak) ────────────
 # Per-fact entity NAMES are AEAD-encrypted to an OPAQUE blob with a RANDOM nonce, so the
 # untrusted store can't read them AND identical entity sets are indistinguishable on disk
-# (no deterministic token, so the store learns NO entity co-occurrence — user posture
+# (no deterministic token, so the store learns NO entity co-occurrence - user posture
 # 2026-06-19). Overlap / conflict detection are CLIENT-side ops on the decrypted sets.
 def derive_entity_key(passphrase: bytes, keystore: Dict, *, verify: bool = True) -> bytearray:
-    """Re-derive the 32-byte AES-256-GCM key for entity-set encryption (Tier-1 hierarchy) —
+    """Re-derive the 32-byte AES-256-GCM key for entity-set encryption (Tier-1 hierarchy) -
     a distinct HKDF sibling of the rest-db-key / HE-wrap key under the SAME master. The
     returned bytearray is the caller's to wipe (`secure_zero`)."""
     salt = base64.b64decode(keystore["salt_b64"])
@@ -776,7 +776,7 @@ def encrypt_entities(entities, key: bytes) -> bytes:
     """AES-256-GCM-encrypt a fact's entity-name list to an OPAQUE blob (``version||nonce||ct``).
 
     Names are normalized (strip/lower) + deduped + sorted before encryption (so the plaintext
-    is canonical), then encrypted under a fresh RANDOM nonce — identical entity sets yield
+    is canonical), then encrypted under a fresh RANDOM nonce - identical entity sets yield
     DIFFERENT ciphertext, so the store sees no equality/co-occurrence. Overlap is a client op
     after `decrypt_entities`."""
     if not _AEAD_AVAILABLE:
@@ -814,7 +814,7 @@ def decrypt_entities(blob: bytes, key: bytes) -> list:
 # §5 flips the blind store from "encrypted vectors beside plaintext" to holding the CONTENT
 # itself. §5-1 adds AEAD ciphertext mirrors of the natural-language surfaces (fact content +
 # quote/source, and later episodes / relation triples / session summaries) beside the existing
-# vector tables — additive and non-destructive (the plaintext stays authoritative until the
+# vector tables - additive and non-destructive (the plaintext stays authoritative until the
 # §5-4 seal). Each surface gets its OWN master-derived AEAD key (a distinct HKDF sibling, like
 # the entity key), so compromising one domain key can't read another. Same opaque
 # ``version||nonce||ct`` shape + random nonce as encrypt_entities: identical content yields
@@ -831,7 +831,7 @@ SEALED_WRAP_VERSION = 1
 # The dedup IDENTITY (3e): content UNIQUE -> content_hmac UNIQUE. A keyed HMAC-SHA256 of the
 # NORMALIZED content, so the store can still reject an exact-duplicate insert (equal hmacs
 # match) but, lacking the key, can NOT dictionary-attack the content or learn anything beyond
-# "a duplicate exists" — which the plaintext ``content UNIQUE`` already leaks today. A distinct
+# "a duplicate exists" - which the plaintext ``content UNIQUE`` already leaks today. A distinct
 # HKDF sibling from the content AEAD key. §5-1 computes + stores it beside the plaintext content
 # (non-authoritative); §5-4 makes ``content_hmac UNIQUE`` the identity when the plaintext
 # content column is nulled at seal.
@@ -840,7 +840,7 @@ _INFO_CONTENT_HMAC = b"resonant-lattice/content-hmac/v1"
 
 def _derive_labeled_key(passphrase: bytes, keystore: Dict, info: bytes,
                         length: int = _HE_WRAP_KEY_LEN, *, verify: bool = True) -> bytearray:
-    """Argon2id(master) -> HKDF(info, length) subkey, key-check-verified — the shared body of the
+    """Argon2id(master) -> HKDF(info, length) subkey, key-check-verified - the shared body of the
     Tier-1 subkey derivations (a sibling of derive_db_key / derive_entity_key under the SAME
     master, distinguished only by its HKDF info label). The returned bytearray is the caller's to
     ``secure_zero``. Raises WrongPassphraseError if ``verify`` and the key-check fails."""
@@ -861,21 +861,21 @@ def _derive_labeled_key(passphrase: bytes, keystore: Dict, info: bytes,
 def derive_sealed_key(passphrase: bytes, keystore: Dict, domain: str, *,
                       verify: bool = True) -> bytearray:
     """Re-derive the 32-byte AES-256-GCM key for a §5-1 sealed surface (``domain`` in
-    content|episode|triple|summary) — a distinct HKDF sibling per domain under the SAME master."""
+    content|episode|triple|summary) - a distinct HKDF sibling per domain under the SAME master."""
     if domain not in _INFO_SEALED:
         raise ValueError(f"unknown sealed domain {domain!r} (expected {tuple(_INFO_SEALED)})")
     return _derive_labeled_key(passphrase, keystore, _INFO_SEALED[domain], verify=verify)
 
 
 def derive_content_hmac_key(passphrase: bytes, keystore: Dict, *, verify: bool = True) -> bytearray:
-    """Re-derive the content-dedup HMAC key (3e) — its own HKDF sibling, independent of the
+    """Re-derive the content-dedup HMAC key (3e) - its own HKDF sibling, independent of the
     content AEAD key so neither reveals the other."""
     return _derive_labeled_key(passphrase, keystore, _INFO_CONTENT_HMAC, verify=verify)
 
 
 def derive_sealed_keys(passphrase: bytes, keystore: Dict, *, verify: bool = True) -> Dict[str, bytearray]:
-    """Derive ALL §5-1 sealed keys in ONE master pass — a single (expensive) Argon2id followed by
-    cheap HKDF per subkey — and return ``{content, episode, triple, summary, hmac}`` bytearrays.
+    """Derive ALL §5-1 sealed keys in ONE master pass - a single (expensive) Argon2id followed by
+    cheap HKDF per subkey - and return ``{content, episode, triple, summary, hmac}`` bytearrays.
     The blind tier calls this once at setup instead of paying a separate Argon2id per key (the
     granular ``derive_sealed_key`` / ``derive_content_hmac_key`` stay for tests + focused use). Each
     value is the caller's to ``secure_zero``. Raises WrongPassphraseError if ``verify`` and the
@@ -901,14 +901,14 @@ def derive_sealed_keys(passphrase: bytes, keystore: Dict, *, verify: bool = True
 
 def normalize_content(text: str) -> str:
     """Canonical form for the content-dedup HMAC: strip + collapse internal whitespace, case
-    PRESERVED (fact-content case can be semantically load-bearing). Deliberately mild — §5-1
+    PRESERVED (fact-content case can be semantically load-bearing). Deliberately mild - §5-1
     keeps the plaintext ``content UNIQUE`` authoritative, so this only needs to be STABLE; §5-4
     makes ``content_hmac UNIQUE`` the identity and can revisit normalization then."""
     return " ".join((text or "").split())
 
 
 def content_hmac(text: str, hmac_key: bytes) -> str:
-    """Keyed HMAC-SHA256 hex of the normalized content — the store's blind dedup identity (3e)."""
+    """Keyed HMAC-SHA256 hex of the normalized content - the store's blind dedup identity (3e)."""
     if len(hmac_key) != _HE_WRAP_KEY_LEN:
         raise ValueError(f"hmac_key must be {_HE_WRAP_KEY_LEN} bytes, got {len(hmac_key)}")
     return hmac.new(bytes(hmac_key), normalize_content(text).encode("utf-8"),
@@ -918,7 +918,7 @@ def content_hmac(text: str, hmac_key: bytes) -> str:
 def encrypt_sealed(payload, key: bytes, domain: str) -> bytes:
     """AES-256-GCM-encrypt a §5-1 content surface to an OPAQUE ``version||nonce||ct`` blob.
 
-    ``payload`` is JSON-serialized canonically (``sort_keys``) before encryption — a dict for
+    ``payload`` is JSON-serialized canonically (``sort_keys``) before encryption - a dict for
     fact content (``{content, category, source_quote, source_ref}``), or a string for the
     episode / triple / summary text surfaces. A fresh RANDOM nonce per call means identical
     payloads yield DIFFERENT ciphertext (no equality leakage on the store). ``domain`` binds the
@@ -965,12 +965,12 @@ def get_passphrase(explicit: Optional[str] = None, *, prompt: bool = False,
     """Resolve the passphrase from, in order: explicit arg, env var, optional prompt.
 
     Returns a MUTABLE ``bytearray`` (or None if no source yields one) so the caller can
-    ``secure_zero`` it once the keys are derived — the same wipeable-secret contract as
+    ``secure_zero`` it once the keys are derived - the same wipeable-secret contract as
     ``derive_db_key``'s returned key. Every consumer feeds it through ``_derive_master``,
     which does ``bytes(passphrase)`` at the KDF boundary, so a bytearray is accepted
     everywhere a passphrase is taken. (Previously this returned immutable ``bytes``, so the
     ``isinstance(..., bytearray)`` wipe guards in the provider resolvers silently never fired.)
-    NOTE: an env-sourced passphrase still lives in ``os.environ`` for the process lifetime —
+    NOTE: an env-sourced passphrase still lives in ``os.environ`` for the process lifetime -
     wiping our buffer is defence-in-depth, not a full scrub. E1 replaces this with sealed
     sources (TPM2 / once-per-boot SSH unlock).
     """

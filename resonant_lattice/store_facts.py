@@ -1,4 +1,4 @@
-"""store_facts.py — FactsMixin: fact storage, dedup/reinforce, entity links,
+"""store_facts.py - FactsMixin: fact storage, dedup/reinforce, entity links,
 single-fact + entity-scoped reads, resonance feedback.
 
 Mixed into LatticeStore; uses self._conn/_lock/config attrs and the sibling
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class FactsMixin:
 
     def _current_memory_cycle(self) -> int:
-        """Current memory_cycle from the meta table — the logical clock used to
+        """Current memory_cycle from the meta table - the logical clock used to
         stamp temporal fields (Phase 1). Single source of truth; never wall-clock.
 
         One indexed PK lookup. Acquires self._lock (an RLock, so this is safe both
@@ -37,14 +37,14 @@ class FactsMixin:
         """Guard the near-identity silent merge against ENTITY contamination.
 
         Two facts can be >= reinforce_threshold similar in EMBEDDING yet be about
-        DIFFERENT entities — "Acme Corp's fee is 4050 cents" vs "Acme Inc's fee is
+        DIFFERENT entities - "Acme Corp's fee is 4050 cents" vs "Acme Inc's fee is
         9000 cents" (the embedder barely separates 'Corp' from 'Inc'). Folding the
         second into the first would silently conflate two companies AND discard the
-        second amount — a critical failure for a money agent.
+        second amount - a critical failure for a money agent.
 
         Returns True only when it is safe to merge: the new fact names the SAME
         subject as the existing one (entity sets equal, or one a subset of the
-        other — a re-statement with more/less detail). Disjoint or diverging entity
+        other - a re-statement with more/less detail). Disjoint or diverging entity
         sets => different subjects => do NOT merge (caller stores it separately).
         Conservative: if either side has no entities to disambiguate on, fall back
         to the legacy merge (preserves existing behaviour for entity-less facts).
@@ -101,7 +101,7 @@ class FactsMixin:
 
         source_quote / source_ref / quote_status (Phase D grounding + attestation)
         are recorded ONLY on a fresh INSERT. On reinforcement of an existing fact
-        the first-seen provenance is kept — we don't overwrite the original
+        the first-seen provenance is kept - we don't overwrite the original
         supporting evidence with a later match's quote. All are optional with safe
         defaults, so existing callers and the (action, fact_id) return contract are
         unchanged.
@@ -115,8 +115,8 @@ class FactsMixin:
 
             # 1. Semantic similarity check first (fast vector lookup).
             #    Fetch the top-1 neighbour (threshold 0.0) so the SAME lookup both
-            #    gates the silent merge at near-identity (reinforce_threshold — a
-            #    *changed* fact in the 0.78–0.95 band is stored separately so it can
+            #    gates the silent merge at near-identity (reinforce_threshold - a
+            #    *changed* fact in the 0.78-0.95 band is stored separately so it can
             #    be flagged as a conflict, not dropped as a reinforcement) AND
             #    yields Phase-3 novelty (no extra query).
             top = self._find_semantic_match(embedding, threshold=0.0)
@@ -136,7 +136,7 @@ class FactsMixin:
             # is no neighbour at all). A surprising fact imprints harder on first
             # contact; a near-duplicate barely moves. Bounded to [0,1]. NOTE: with
             # novelty_boost a fully-novel one-shot can clear promotion_threshold
-            # even when base initial_resonance is below it (the intended effect —
+            # even when base initial_resonance is below it (the intended effect -
             # see the initial_resonance<promotion_threshold warning in store.py).
             novelty = 1.0 - (top["similarity"] if top else 0.0)
             novelty = max(0.0, min(1.0, novelty))
@@ -165,7 +165,7 @@ class FactsMixin:
                      getattr(self, "_active_batch_id", None)),
                 )
                 fact_id = cur.lastrowid
-                # Store embedding (skipped in degraded mode — vec dim mismatch,
+                # Store embedding (skipped in degraded mode - vec dim mismatch,
                 # FTS-only fallback so the insert can't raise on a bad dim).
                 if not self.degraded:
                     self._conn.execute(
@@ -213,7 +213,7 @@ class FactsMixin:
             return None
         cutoff = self.similarity_threshold if threshold is None else threshold
         vec_bytes = serialize_vector(embedding)
-        # Phase 1b: superseded facts are retired history — never a dedup/reinforce
+        # Phase 1b: superseded facts are retired history - never a dedup/reinforce
         # target. If the nearest neighbour is superseded the gate returns no match,
         # so a re-asserted belief enters as a fresh live fact (and may re-conflict
         # with the current winner) rather than reinforcing a retired row.
@@ -236,7 +236,7 @@ class FactsMixin:
     def _reinforce_fact(self, fact_id: int) -> None:
         """Long-Term Potentiation.
 
-        Phase 1: also refreshes last_confirmed_cycle to the current memory_cycle —
+        Phase 1: also refreshes last_confirmed_cycle to the current memory_cycle -
         a reinforcement (semantic or exact match) is a confirmation, so this is
         the freshness signal Phase 2 reads. Legacy rows with NULL temporal stamps
         get back-stamped here on their next reinforcement.
@@ -263,7 +263,7 @@ class FactsMixin:
         one bulk INSERT OR IGNORE to ensure rows exist, one SELECT to resolve
         ids, one executemany to link. NOTE: this method COMMITS on completion
         (callers must already hold self._lock). It is therefore not safe to
-        nest inside a larger transaction you intend to roll back — the commit
+        nest inside a larger transaction you intend to roll back - the commit
         here will land the entity rows regardless.
         """
         if not entities:
@@ -284,7 +284,7 @@ class FactsMixin:
             [(fact_id, r["entity_id"]) for r in rows],
         )
         # Blind-tier: if a genuinely NEW (fact, entity) link landed, the fact's AEAD entity set
-        # in semantic_he_entities is now stale — flag it so _blind_reconcile re-mirrors it (the
+        # in semantic_he_entities is now stale - flag it so _blind_reconcile re-mirrors it (the
         # entity set is the one mutable blind source; embedding/HRR are immutable). The
         # total_changes delta catches only real inserts, so an idempotent re-link of the same
         # entities on exact-match reinforcement does NOT trigger a wasted re-encrypt.
@@ -296,7 +296,7 @@ class FactsMixin:
 
             
     def get_fact(self, fact_id: int) -> Optional[Dict]:
-        """Fetch a single fact by exact ID — direct lookup, no neighbours.
+        """Fetch a single fact by exact ID - direct lookup, no neighbours.
 
         Returns the row as a dict, or None if no fact has that id. This is the
         mechanical counterpart to semantic search: callers needing to confirm a
@@ -321,7 +321,7 @@ class FactsMixin:
 
         Returns the fact's temporal row plus:
           - 'superseded_by_chain': the forward chain of facts that replaced it,
-            following superseded_by until NULL — the path toward current belief
+            following superseded_by until NULL - the path toward current belief
             (each hop is a later winner that itself lost a subsequent conflict).
           - 'replaced': the facts this one superseded (its predecessors), newest
             first.
@@ -377,7 +377,7 @@ class FactsMixin:
         """Pin/unpin a fact as identity-level / never-forget (A5, P4a). Returns True if a row matched.
 
         A pinned fact is excluded from EVERY forgetting path (cycle decay, staleness decay,
-        dormant-prune, long-tier-cap eviction) — the one kind of memory the system will not let
+        dormant-prune, long-tier-cap eviction) - the one kind of memory the system will not let
         fade. Pinning is purely PROTECTIVE: it does not touch resonance_count, so it can never be
         used to inflate a fact into runaway immortality; the system still owns decay/forget for
         everything unpinned. Idempotent (re-pinning a pinned fact returns True, changes nothing).
@@ -412,7 +412,7 @@ class FactsMixin:
     # Read a fact's plaintext embedding / HRR back out of the store so the blind-tier
     # reconciliation (provider _blind_reconcile, roadmap §14 6a) can mirror facts created
     # outside the consolidation hook (abstraction/gist/procedural/builtin) + backfill an
-    # existing store — WITHOUT re-embedding via Ollama. The stored float32 round-trips exactly.
+    # existing store - WITHOUT re-embedding via Ollama. The stored float32 round-trips exactly.
     def get_fact_embedding(self, fact_id: int) -> Optional[List[float]]:
         """Read a fact's embedding back from semantic_vec as a float list (None if absent or in
         degraded mode). Mirrors serialize_vector's float32 packing; the round-trip is exact."""
@@ -429,7 +429,7 @@ class FactsMixin:
 
     def get_fact_hrr_phases(self, fact_id: int):
         """Read a fact's HRR phase vector back from semantic_facts.hrr_vector (None if absent or
-        dim-mismatched — reuses _phases_from_blob, which guards dimension drift)."""
+        dim-mismatched - reuses _phases_from_blob, which guards dimension drift)."""
         with self._lock:
             row = self._conn.execute(
                 "SELECT hrr_vector FROM semantic_facts WHERE id = ?", (int(fact_id),)
@@ -445,7 +445,7 @@ class FactsMixin:
                              category: Optional[str] = None) -> List[Dict]:
         """Return facts linked to a specific entity, ranked by resonance.
 
-        Optional `category` (e.g. 'tool_action') narrows to one fact class —
+        Optional `category` (e.g. 'tool_action') narrows to one fact class -
         used by get_tool_history().
         """
         with self._lock:
@@ -482,7 +482,7 @@ class FactsMixin:
             if not row:
                 return False
             new_res = max(0, row["resonance_count"] + delta)
-            # Phase 3: keep the peak high-water mark current — positive feedback is
+            # Phase 3: keep the peak high-water mark current - positive feedback is
             # a strong 'this was important' signal P4 leans on.
             self._conn.execute(
                 "UPDATE semantic_facts SET resonance_count = ?, "
@@ -521,7 +521,7 @@ class FactsMixin:
     def seed_procedural_facts(self, items: List[Dict], current_cycle: int = 0,
                              durable_resonance: float = 10.0) -> int:
         """Seed durable procedural / guardrail facts (e.g. tool-usage rules and 'how NOT to use it'
-        guardrails) so the agent is grounded from DAY ONE — before it has failed enough to learn them
+        guardrails) so the agent is grounded from DAY ONE - before it has failed enough to learn them
         (P3e). ``items`` = [{"content", "embedding", "entities"?}], pre-embedded by the caller (the
         store calls no Ollama). Inserted as category='procedural', tier='long', high resonance, and
         **pinned** (identity-level never-forget + authority presentation) so a guardrail does NOT
@@ -530,7 +530,7 @@ class FactsMixin:
         count newly inserted.
 
         Phrase guardrails POSITIVELY where possible ('always require human approval') rather than
-        naming the forbidden capability ('never auto_approve') — the P3f judge showed the negative
+        naming the forbidden capability ('never auto_approve') - the P3f judge showed the negative
         form primes small models to do the very thing it forbids."""
         n = 0
         with self._lock:

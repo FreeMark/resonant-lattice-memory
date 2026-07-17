@@ -1,14 +1,14 @@
 """
-entity_extractor.py — Enhanced Entity Extraction for Resonant Lattice Memory
+entity_extractor.py - Enhanced Entity Extraction for Resonant Lattice Memory
 ==============================================================================
 A two-layer system (spaCy NER + a 14-pattern confidence-scored regex):
 
-  Layer 1 (spaCy NER — optional, best quality):
+  Layer 1 (spaCy NER - optional, best quality):
     Uses en_core_web_sm for named entity recognition.
     Install: pip install spacy && python -m spacy download en_core_web_sm
     Falls back gracefully if spaCy or the model is unavailable.
 
-  Layer 2 (Enhanced regex — always runs):
+  Layer 2 (Enhanced regex - always runs):
     14 targeted patterns covering the gaps the original missed:
       • Single-word proper nouns and ALL-CAPS acronyms
       • Technical identifiers (model names, GPU model strings)
@@ -24,7 +24,7 @@ A two-layer system (spaCy NER + a 14-pattern confidence-scored regex):
   Post-processing:
     • Deduplication (case-insensitive)
     • Stopword filtering (removes common English words caught as capitalized)
-    • Length filtering (2–80 chars)
+    • Length filtering (2-80 chars)
     • Lowercasing for consistent entity graph keys
 
 INTEGRATION: store.py imports `extract_entities` from this module at load time
@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Stopword list — capitalized words that are NOT entities
+# Stopword list - capitalized words that are NOT entities
 # These appear at sentence starts or in common phrases and create noise.
 # ─────────────────────────────────────────────────────────────────────────────
 _STOPWORDS = frozenset({
@@ -76,14 +76,14 @@ _SPACY_LABELS = frozenset({
 _PATTERNS = [
 
     # 1. Capitalized multi-word phrases: "Charlie Brown", "Rural Indiana Lab"
-    #    Original pattern — kept, slightly tightened to require 2+ words
+    #    Original pattern - kept, slightly tightened to require 2+ words
     (re.compile(r'\b([A-Z][a-z]{1,}(?:\s+[A-Z][a-z]{1,})+)\b'), 1),
 
     # 2. Mixed-case proper words: "iPhone", "GitHub", "HuggingFace"
     #    Catches camelCase product names that look like proper nouns
     (re.compile(r'\b([A-Z][a-z]+[A-Z]\w*)\b'), 1),
 
-    # 3. ALL-CAPS acronyms (2–6 chars): RTX, GPU, FPV, API, RFM, LLM, UI
+    # 3. ALL-CAPS acronyms (2-6 chars): RTX, GPU, FPV, API, RFM, LLM, UI
     #    Filter: not a stopword, not a common English word
     (re.compile(r'\b([A-Z]{2,6})\b'), 1),
 
@@ -132,11 +132,11 @@ _PATTERNS = [
         r'|fps|FPS|RPM|Mbps|Gbps))\b'         # rates
     ), 1),
 
-    # 11. Quoted terms — double quotes: "Resonant Lattice", "hello world"
+    # 11. Quoted terms - double quotes: "Resonant Lattice", "hello world"
     #     Original pattern, kept. Intentionally quoted = probably named.
     (re.compile(r'"([^"]{2,60})"'), 1),
 
-    # 12. Quoted terms — single quotes: 'charlie', 'the thing'
+    # 12. Quoted terms - single quotes: 'charlie', 'the thing'
     #     Filter in post-processing to avoid possessives (it's, don't)
     (re.compile(r"(?<!\w)'([^']{2,60})'(?!\w)"), 1),
 
@@ -161,9 +161,9 @@ _PATTERNS = [
 # ─────────────────────────────────────────────────────────────────────────────
 # Per-pattern confidence + kind (parallel to _PATTERNS, 1-based index → meta).
 #   base:  prior confidence in [0,1] that a match of this pattern is a real entity
-#   kind:  "normal"  — use base directly
-#          "hyphen"  — pattern 4: hyphen/dot identifiers (noisy) → reject/boost heuristic
-#          "snake"   — pattern 8: snake_case identifiers (noisy) → reject/boost heuristic
+#   kind:  "normal"  - use base directly
+#          "hyphen"  - pattern 4: hyphen/dot identifiers (noisy) → reject/boost heuristic
+#          "snake"   - pattern 8: snake_case identifiers (noisy) → reject/boost heuristic
 # Quoted/AKA/proper-noun/NER patterns are trusted; pattern 4 & 8 are the noise
 # sources (well-being, state-of-the-art, foo_bar) and earn their keep only via
 # the vocab booster or a digit/case signal.
@@ -172,11 +172,11 @@ _PATTERN_META = {
     1:  (0.80, "normal"),   # Capitalized multi-word phrases
     2:  (0.80, "normal"),   # Mixed-case (iPhone, GitHub)
     3:  (0.60, "normal"),   # ALL-CAPS acronym (vocab-boostable)
-    4:  (0.30, "hyphen"),   # hyphen/dot identifiers — NOISY
+    4:  (0.30, "hyphen"),   # hyphen/dot identifiers - NOISY
     5:  (0.70, "normal"),   # GPU/hardware strings
     6:  (0.60, "normal"),   # Quantized tags
     7:  (0.55, "normal"),   # File paths
-    8:  (0.30, "snake"),    # snake_case — NOISY
+    8:  (0.30, "snake"),    # snake_case - NOISY
     9:  (0.80, "normal"),   # Network endpoints
     10: (0.60, "normal"),   # Measurements
     11: (0.90, "normal"),   # Double-quoted
@@ -192,7 +192,7 @@ _MIN_CONFIDENCE = 0.50        # candidates below this are dropped
 # ─────────────────────────────────────────────────────────────────────────────
 # Import-free technical vocabulary (confidence booster, NOT a gate).
 # Harvested from the stdlib module list and INSTALLED distribution names without
-# importing any of them — so it reflects the real environment, adds zero runtime
+# importing any of them - so it reflects the real environment, adds zero runtime
 # dependencies, and keeps extraction general-purpose (unknown tokens still count;
 # known tech names just score higher). Built lazily + cached on first use so the
 # (possibly duplicate) module load does not pay for it twice.
@@ -258,7 +258,7 @@ def _score_noisy_candidate(candidate: str, base: float,
 
     Boost to high confidence when there's a real signal:
       - the token is in the DOMAIN vocabulary (Phase B allowlist), or
-      - a LEADING or DOUBLE underscore (_run_dream_cycle, rlm_memory__rlm_pin) — an
+      - a LEADING or DOUBLE underscore (_run_dream_cycle, rlm_memory__rlm_pin) - an
         unambiguous identifier shape that never occurs in prose, or
       - the token (or its head) is a known module/package name (tech vocab), or
       - it contains a digit (granite-4.1-30b), or has internal uppercase (faster-Whisper).
@@ -300,7 +300,7 @@ class EntityExtractor:
 
         Lazy on purpose: the host loader may import this module twice (dotted +
         bare namespace). Deferring the model load to first extract() means the
-        duplicate module — which never has extract() called on it — never pays
+        duplicate module - which never has extract() called on it - never pays
         the ~50-100ms model-load cost or holds a second copy in RAM.
         """
         if self._spacy_attempted:
@@ -312,7 +312,7 @@ class EntityExtractor:
                 self._nlp = spacy.load("en_core_web_sm")
                 self._spacy_available = True
                 logger.info(
-                    "EntityExtractor: spaCy en_core_web_sm loaded — NER active (best quality)."
+                    "EntityExtractor: spaCy en_core_web_sm loaded - NER active (best quality)."
                 )
             except OSError:
                 logger.warning(
@@ -322,7 +322,7 @@ class EntityExtractor:
                 )
         except ImportError:
             logger.info(
-                "EntityExtractor: spaCy not installed — enhanced regex only. "
+                "EntityExtractor: spaCy not installed - enhanced regex only. "
                 "Install with: pip install spacy && python -m spacy download en_core_web_sm"
             )
 
@@ -333,7 +333,7 @@ class EntityExtractor:
         Each candidate gets a confidence in [0,1]; candidates below
         _MIN_CONFIDENCE are dropped. The noisy identifier patterns (4 hyphen/dot,
         8 snake_case) only survive when a real signal is present (known
-        module/package name, a digit, or internal uppercase) — so ordinary
+        module/package name, a digit, or internal uppercase) - so ordinary
         English compounds like "well-being" or "state-of-the-art" no longer
         pollute the entity graph, while "granite-4.1-30b" and "sqlite_vec" do.
 
@@ -377,7 +377,7 @@ class EntityExtractor:
             base, kind = _PATTERN_META.get(idx, (0.5, "normal"))
             for match in pattern.finditer(text):
                 if n_groups == 2:
-                    # AKA pattern — both sides are explicitly named → trust base
+                    # AKA pattern - both sides are explicitly named → trust base
                     _consider(match.group(1), base)
                     _consider(match.group(2), base)
                     continue
@@ -416,7 +416,7 @@ class EntityExtractor:
 
     @property
     def mode(self) -> str:
-        """Returns 'spacy+regex' or 'regex-only' — useful for logging.
+        """Returns 'spacy+regex' or 'regex-only' - useful for logging.
 
         Note: reflects state only after the first extract() (lazy spaCy load).
         """
@@ -424,7 +424,7 @@ class EntityExtractor:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Module-level singleton — imported by store.py
+# Module-level singleton - imported by store.py
 # Created once at module load time; shared across all LatticeStore instances.
 # spaCy + the tech vocab load lazily on the first extract() call.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -433,14 +433,14 @@ _extractor = EntityExtractor()
 
 def extract_entities(text: str, domain_vocab: Optional["frozenset"] = None) -> List[str]:
     """
-    Public interface — module-level function wrapping the singleton.
+    Public interface - module-level function wrapping the singleton.
     Drop-in replacement for LatticeStore._extract_entities().
 
     Args:
         text: Raw fact content string.
         domain_vocab: optional frozenset of domain terms (an explicit high-precision
             allowlist) that boost matching identifiers and are swept whole-word from
-            the text — so single-word / multi-word domain names the generic patterns
+            the text - so single-word / multi-word domain names the generic patterns
             miss (resonance, dream cycle, rlm_pin, relational) become entities.
 
     Returns:

@@ -7,12 +7,12 @@ spend safety, long-term memory, cross-session continuity, anti-fabrication,
 multi-hop inference, self-model, at-rest privacy), built on the discipline used
 by `live_e2e.py`:
 
-- **HARD checks** — deterministic / substrate invariants. A failure is a real
+- **HARD checks** - deterministic / substrate invariants. A failure is a real
   defect and forces a non-zero exit code.
-- **SOFT checks** — LLM-dependent yields (extraction, distillation, narrative,
+- **SOFT checks** - LLM-dependent yields (extraction, distillation, narrative,
   LLM relation triples). Reported as PASS/WARN; they do **not** fail the run,
   because they vary by model. A WARN means "the model under-produced this run".
-- **Result files contain only measured values** — read back from the store.
+- **Result files contain only measured values** - read back from the store.
   No hardcoded "expected" text presented as model output, and no unconditional
   "it works" conclusion. If something was not verified, the report says SKIP.
 
@@ -55,10 +55,10 @@ Env overrides (defaults in `_common.py`): `RL_OLLAMA` (`http://localhost:11434`)
 
 | test | hard invariants | soft (LLM) |
 |---|---|---|
-| long_term_rule_persistence | pinned rules protected **and** unpinned facts fade | — |
-| anti_fabrication_attestation | grounded→attested, fabricated number→`specific_mismatch`, exact `get_fact`, conflict machinery (surface/age-gate/resolve/supersede) | — (organic HRR detection is *reported*) |
-| multi_hop_inference_conflict | deterministic triple, 2-hop + 3-hop transitive inference, real no-write invariant, conflict machinery | — |
-| private_financial_memory | self-write gate flags self-infra / passes real facts, attestation drops fabricated specifics | — (at-rest opacity **skipped** unless binding present) |
+| long_term_rule_persistence | pinned rules protected **and** unpinned facts fade | - |
+| anti_fabrication_attestation | grounded→attested, fabricated number→`specific_mismatch`, exact `get_fact`, conflict machinery (surface/age-gate/resolve/supersede) | - (organic HRR detection is *reported*) |
+| multi_hop_inference_conflict | deterministic triple, 2-hop + 3-hop transitive inference, real no-write invariant, conflict machinery | - |
+| private_financial_memory | self-write gate flags self-infra / passes real facts, attestation drops fabricated specifics | - (at-rest opacity **skipped** unless binding present) |
 | procedural_distillation_loop | episodes stored, distill runs, rows are `category='procedural'` | ≥1 rule produced; rules cover ≥2/3 safety concepts |
 | cross_session_business_memory | spend recalled across restart, planted relation persists, tool episodes persist | session-1 narrative present + mentions Acme |
 | business_quarter_sim | pinned survive, every spend recalled, no phantom amount | narrative captured |
@@ -68,25 +68,25 @@ Env overrides (defaults in `_common.py`): `RL_OLLAMA` (`http://localhost:11434`)
 
 Not part of `run_all.py` (longer-running); run on demand.
 
-- **`stress_longhorizon.py`** — scale + recall-quality. Default 20,000 real-embedded facts over 50
+- **`stress_longhorizon.py`** - scale + recall-quality. Default 20,000 real-embedded facts over 50
   dream cycles, 30 golden needles (pinned/reinforced/cold) measured each epoch for recall@k, MRR,
   latency, DB growth, fabrication-under-load. Checkpoints to `results/stress_report.md` +
   `results/stress_metrics.jsonl` every epoch. Env: `RL_STRESS_FACTS`, `RL_STRESS_EPOCH`, `RL_STRESS_ABSTRACT_EVERY`.
   Findings: pinned recall@10 = 1.0 throughout up to ~9k live rows; latency 23→63 ms; no fabrication
-  creep; long tier capped (867). (Distinctive golden facts are retained by design — see fade probe for
+  creep; long tier capped (867). (Distinctive golden facts are retained by design - see fade probe for
   the forgetting curve.)
-- **`forgetting_probe.py`** — the FADE curve. Recall-required regime (init < promotion, novelty off);
+- **`forgetting_probe.py`** - the FADE curve. Recall-required regime (init < promotion, novelty off);
   4 cohorts (cold / reinforced / pinned / revived) over 32 cycles. Shows the three-phase fade
   (decay → dormant-but-pluckable → prune cliff), pinned/reinforced persistence, and buried-but-pluckable
   revival; plus a contrast that the same fact is retained under the default regime. Pure substrate +
-  embeddings (~1–2 min). Env: `RL_FADE_CYCLES`, `RL_FADE_REVIVE_AT`.
+  embeddings (~1-2 min). Env: `RL_FADE_CYCLES`, `RL_FADE_REVIVE_AT`.
 
 Note: both advance the logical memory clock each cycle (`set_cycle_counts`) so time-based dormancy/prune
-actually fires — without it, row reduction is dedup/merge only.
+actually fires - without it, row reduction is dedup/merge only.
 
-- **`test_action_correctness.py`** — does conflict CONTAINMENT change what the agent DOES? For high-stakes
+- **`test_action_correctness.py`** - does conflict CONTAINMENT change what the agent DOES? For high-stakes
   contested scenarios it builds the REAL recall block (quarantine OFF vs ON) through the store+provider
   pipeline and scores a real model's final action (ALLOW=unsafe / DENY / DEFER). HARD: with ON the contested
   value is withheld and a `[WITHHELD]` notice shown on the real pipeline; SOFT: the downstream unsafe-action
   rate ON vs OFF (a cautious model that already defers shows "never hurts" rather than a reduction). Needs an
-  agent model — `RL_ACTION_MODEL` (defaults to `RL_REASON_MODEL`).
+  agent model - `RL_ACTION_MODEL` (defaults to `RL_REASON_MODEL`).

@@ -98,7 +98,7 @@ def main():
     suite.report("STALE value is top-1 (failure)", f"{stale_top}/{N}")
     suite.report("stale-top examples", stale_examples or "none")
 
-    # GUARANTEE (hard): a value-update is never silently DROPPED — the current
+    # GUARANTEE (hard): a value-update is never silently DROPPED - the current
     # value is always retained + recallable (the merge gate no longer folds a
     # changed number into the stale row).
     suite.hard("value-update never silently dropped (current value recallable in top-5) for every update",
@@ -106,10 +106,10 @@ def main():
     suite.hard("no update was swallowed as a reinforcement of the stale value", len(merged) == 0,
                f"{len(merged)} merged")
     # CHARACTERIZED (soft): autonomous ranking does NOT auto-prefer the newer value
-    # — old + new coexist and the stale one can out-rank. This is by design (the
+    # - old + new coexist and the stale one can out-rank. This is by design (the
     # system surfaces value-changes rather than silently flipping them); the
     # TRUSTWORTHY path to authoritative currency is the supersession machinery
-    # below (or surfacing the change as a conflict — recommended enhancement).
+    # below (or surfacing the change as a conflict - recommended enhancement).
     suite.soft("autonomous recall ranks the CURRENT value top-1 (characterized, not a guarantee)",
                new_top >= stale_top, f"current_top={new_top}/{N}, stale_top={stale_top}")
 

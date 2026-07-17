@@ -1,4 +1,4 @@
-"""store_schema.py — SchemaMixin: DB creation, idempotent migrations, meta.
+"""store_schema.py - SchemaMixin: DB creation, idempotent migrations, meta.
 
 Mixed into LatticeStore. Relies on the composite for self._conn, self._lock,
 self.vector_dim, self.hrr_dim, self.degraded, self.db_path."""
@@ -30,7 +30,7 @@ class SchemaMixin:
                             stored_dim, self.vector_dim, stored_dim
                         )
         except Exception:
-            pass  # non-fatal — best-effort validation only
+            pass  # non-fatal - best-effort validation only
 
 
     def _init_db(self) -> None:
@@ -96,7 +96,7 @@ class SchemaMixin:
         
         CREATE INDEX IF NOT EXISTS idx_semantic_facts_conflict ON semantic_facts(conflict_group_id);
 
-        -- Phase 1: supersedion chain lookups (partial — only superseded rows)
+        -- Phase 1: supersedion chain lookups (partial - only superseded rows)
         CREATE INDEX IF NOT EXISTS idx_semantic_facts_superseded
             ON semantic_facts(superseded_by) WHERE superseded_by IS NOT NULL;
 
@@ -154,7 +154,7 @@ class SchemaMixin:
     def _migrate_schema(self) -> None:
         """Run idempotent migrations for existing databases.
 
-        Thin orchestrator — each step is a named helper, safe to run on every
+        Thin orchestrator - each step is a named helper, safe to run on every
         open (they self-detect whether work is needed).
         """
         self._migrate_add_columns()
@@ -191,7 +191,7 @@ class SchemaMixin:
     def _migrate_add_columns(self) -> None:
         """Add semantic_facts.cycles_in_tier if missing.
 
-        Turn/cycle-based tier-dwell counter — no wall-clock involved. Existing
+        Turn/cycle-based tier-dwell counter - no wall-clock involved. Existing
         rows default to 0.
         """
         with self._lock:
@@ -218,7 +218,7 @@ class SchemaMixin:
         URL/identifier when the turn came from a tool/web fetch, and quote_status
         the verification verdict ('attested' / 'soft' / 'unattested' / 'unverified'
         / NULL). All nullable TEXT; legacy rows default to NULL. Self-detecting +
-        idempotent — mirrors _migrate_add_columns, safe to run on every open. No
+        idempotent - mirrors _migrate_add_columns, safe to run on every open. No
         wall-clock involved.
         """
         with self._lock:
@@ -242,15 +242,15 @@ class SchemaMixin:
         """Add the Phase-1 temporal/supersedion columns to semantic_facts.
 
         learned_at_cycle / last_confirmed_cycle stamp the memory_cycle at first
-        INSERT and at last reinforcement (the logical clock — never wall-clock).
+        INSERT and at last reinforcement (the logical clock - never wall-clock).
         superseded_by / superseded_at_cycle record a conflict-loser's replacement
         and are populated in Phase 1b; superseded_by is a self-FK with ON DELETE
         SET NULL so a pruned winner doesn't leave a dangling pointer (SQLite
-        permits a REFERENCES column via ALTER only when its default is NULL — it
+        permits a REFERENCES column via ALTER only when its default is NULL - it
         is). All nullable INTEGER; legacy rows stay NULL and are back-stamped
         lazily by ordinary reinforcement (we never fabricate a learned_at for a
         pre-existing row). Self-detecting + idempotent like the sibling column
-        migrations — safe to run on every open. No wall-clock involved.
+        migrations - safe to run on every open. No wall-clock involved.
         """
         with self._lock:
             try:
@@ -282,7 +282,7 @@ class SchemaMixin:
     def _migrate_add_salience(self) -> None:
         """Add semantic_facts.max_resonance_seen (Phase 3) if missing.
 
-        A high-water mark of a fact's resonance — 'was this ever important' — used
+        A high-water mark of a fact's resonance - 'was this ever important' - used
         by Phase 4 to decide whether a fading fact earned a gist before pruning.
         Nullable REAL. On legacy DBs we backfill it to the current resonance_count
         (a safe lower-bound estimate of the peak) so pre-existing facts aren't all
@@ -301,7 +301,7 @@ class SchemaMixin:
                     )
                     logger.info("Migration: added semantic_facts.max_resonance_seen")
                 # Backfill NULLs to the current resonance (idempotent: only touches
-                # rows that still lack a peak — fresh inserts set it themselves).
+                # rows that still lack a peak - fresh inserts set it themselves).
                 self._conn.execute(
                     "UPDATE semantic_facts SET max_resonance_seen = resonance_count "
                     "WHERE max_resonance_seen IS NULL"
@@ -340,11 +340,11 @@ class SchemaMixin:
         """Add semantic_facts.entities_dirty (blind-tier entity re-mirror flag) if missing.
 
         The AEAD entity set in semantic_he_entities is the ONE blind mirror whose source is
-        MUTABLE — reinforcement links new entities to an existing fact (store_facts._link_entities),
+        MUTABLE - reinforcement links new entities to an existing fact (store_facts._link_entities),
         so 'mirror once when the row is missing' goes stale. This 0/1 flag is set when a genuinely
         new entity link lands and cleared once the set is re-mirrored, so facts_needing_entity_mirror
         picks the change up. NOT NULL INTEGER default 0; legacy rows default 0 (a clean fact whose
-        existing mirror, if any, is current as of its last link — the next real link flips it).
+        existing mirror, if any, is current as of its last link - the next real link flips it).
         Self-detecting + idempotent like the sibling column migrations. No wall-clock involved.
         """
         with self._lock:
@@ -392,11 +392,11 @@ class SchemaMixin:
         """Add semantic_facts.pinned (A5 identity-level durability, P4a) if missing.
 
         A 0/1 flag marking a fact the agent (via the pin tool action) or config has declared
-        identity-level / never-forget. A pinned fact is excluded from EVERY forgetting path —
+        identity-level / never-forget. A pinned fact is excluded from EVERY forgetting path -
         cycle decay (apply_cycle_decay), staleness decay (apply_staleness_decay), dormant-prune
-        (prune_weak_facts), AND long-tier-cap eviction (enforce_long_tier_cap) — so it is the one
+        (prune_weak_facts), AND long-tier-cap eviction (enforce_long_tier_cap) - so it is the one
         kind of fact the SYSTEM will never let fade. (Pinning only PROTECTS; it never bumps
-        resonance, so it can't be used to make a fact runaway-immortal — the system still owns
+        resonance, so it can't be used to make a fact runaway-immortal - the system still owns
         decay/forget/delete for everything unpinned.) NOT NULL INTEGER default 0; legacy rows
         default 0 (nothing is pinned until explicitly asked). Self-detecting + idempotent like the
         sibling column migrations. No wall-clock involved.
@@ -426,7 +426,7 @@ class SchemaMixin:
         table is created ONLY here (not in _init_db), so legacy and fresh DBs take
         the same path and _init_db stays untouched.
 
-        fact_id is a CASCADE self-FK — pruning a fact drops its triples automatically
+        fact_id is a CASCADE self-FK - pruning a fact drops its triples automatically
         (foreign_keys is ON per-connection). Subject/object are stored normalized
         (lowercased) like entity-graph keys, so the plain subject/object indexes
         serve Phase-5b lookups directly. The UNIQUE(fact_id, subject, relation,
@@ -462,12 +462,12 @@ class SchemaMixin:
     def _migrate_add_agent_identity(self) -> None:
         """Create the Phase-7 agent_identity table (idempotent, table-only).
 
-        A SEPARATE, deliberate self-model store — the agent's curated identity,
+        A SEPARATE, deliberate self-model store - the agent's curated identity,
         capabilities, and standing relationship with the user. Kept OUT of
         semantic_facts ON PURPOSE: the autonomous ingest path (add_or_reinforce_fact)
         only ever touches semantic_facts, so it can NEVER reach this table. The only
         write paths are the explicit, primary-context-only set_self_model action and
-        config seeding — so the self-model can't become a backdoor for the
+        config seeding - so the self-model can't become a backdoor for the
         self-referential chatter the Phase-E gate exists to suppress. key is the PK
         (UPSERT via INSERT OR REPLACE); updated_cycle is the logical clock, never
         wall-clock. Self-detecting + idempotent like the sibling table migrations.
@@ -493,7 +493,7 @@ class SchemaMixin:
         together' across sessions. Each row is a one-paragraph LLM gist of a session,
         generated at session end and stamped with the memory_cycle range it spans.
         A SEPARATE table (not semantic_facts / episodes) so it SURVIVES episode
-        pruning — episodes are L1/ephemeral, narrative is the durable story. Framed
+        pruning - episodes are L1/ephemeral, narrative is the durable story. Framed
         as summary, never verbatim; bounded by narrative_keep. Self-detecting +
         idempotent like the sibling table migrations; cycle-stamped, never wall-clock.
         """
@@ -524,11 +524,11 @@ class SchemaMixin:
         homomorphic blind store (ENCRYPTION_ROADMAP §8 E2). One opaque blob per
         fact: id is the PK *and* a CASCADE FK to semantic_facts(id), so pruning a
         fact drops its ciphertext automatically (foreign_keys is ON per-connection)
-        — the blind analogue of the semantic_vec cleanup trigger. he_version stamps
+        - the blind analogue of the semantic_vec cleanup trigger. he_version stamps
         the CKKS-params version each ct was written under (lockstep with
         he_crypto.HE_PARAMS_VERSION) so a ct from old params is identifiable.
 
-        Created unconditionally like the sibling table-only migrations — on a
+        Created unconditionally like the sibling table-only migrations - on a
         non-blind store it is simply an empty table that costs nothing; it is only
         ever populated on the blind write path (store_blind.store_he_vector), which
         the client drives when encryption_mode=blind. Created ONLY here (not in
@@ -553,10 +553,10 @@ class SchemaMixin:
         """Create the E4 blind-store semantic_he_hrr table (idempotent, table-only).
 
         The HRR analogue of semantic_he: holds the per-fact CKKS ciphertext of the HRR
-        LIFT (holographic.hrr_lift — the (cos φ, sin φ)/√dim representation whose cosine IS
+        LIFT (holographic.hrr_lift - the (cos φ, sin φ)/√dim representation whose cosine IS
         the HRR phase-similarity, ENCRYPTION_ROADMAP §8 E4). Storing the lift means the
         blind store computes HRR similarity (conflict / relational fuzzy recall) with the
-        SAME homomorphic cosine it uses for embeddings — no new crypto. Same shape and
+        SAME homomorphic cosine it uses for embeddings - no new crypto. Same shape and
         CASCADE-FK-on-id as semantic_he, so pruning a fact drops its HRR ciphertext too.
         Created unconditionally like the sibling table-only migrations; only the blind HRR
         write path populates it.
@@ -630,11 +630,11 @@ class SchemaMixin:
     def _migrate_add_semantic_he_content(self) -> None:
         """Create the §5-1 sealed-content table semantic_he_content (idempotent, table-only).
 
-        Holds the per-fact AEAD-encrypted CONTENT surface — one opaque, RANDOM-nonce blob per
+        Holds the per-fact AEAD-encrypted CONTENT surface - one opaque, RANDOM-nonce blob per
         fact wrapping ``{content, category, source_quote, source_ref}`` (crypto_keys.encrypt_sealed,
         domain 'content'). The first surface of the §5 full blind store: the natural-language text
         moves behind the same client key as the entity sets, so the untrusted store holds only
-        ciphertext and identical content is indistinguishable on disk. Additive + non-destructive —
+        ciphertext and identical content is indistinguishable on disk. Additive + non-destructive -
         the plaintext ``semantic_facts.content`` stays authoritative until the §5-4 seal nulls it.
         Same shape + CASCADE-FK-on-id as semantic_he; only the blind content-write path populates it.
         """
@@ -659,7 +659,7 @@ class SchemaMixin:
         A keyed HMAC-SHA256 hex of the normalized content (crypto_keys.content_hmac). It is the
         blind analogue of the plaintext ``content UNIQUE``: the store can reject an exact-duplicate
         insert by matching equal hmacs without holding the key or reading the content. §5-1 computes
-        + backfills it beside the plaintext content (NON-authoritative — the plaintext UNIQUE still
+        + backfills it beside the plaintext content (NON-authoritative - the plaintext UNIQUE still
         governs dedup); §5-4 makes ``content_hmac UNIQUE`` the identity once the plaintext content is
         nulled at seal. Nullable TEXT (legacy/unmirrored rows are NULL until reconciled); a PARTIAL
         index over the non-null values readies the future uniqueness check without constraining the
@@ -689,7 +689,7 @@ class SchemaMixin:
         """Create the §5-1b sealed-episode table semantic_he_episodes (idempotent, table-only).
 
         Per-episode AEAD blob of ``{role, content}`` (crypto_keys.encrypt_sealed, domain 'episode'),
-        keyed by the SOURCE episodes.id (CASCADE-FK — episodes are L1/ephemeral and pruned often, so
+        keyed by the SOURCE episodes.id (CASCADE-FK - episodes are L1/ephemeral and pruned often, so
         the ciphertext drops with the row). Additive/non-destructive like the sibling sealed tables;
         only the blind episode-mirror path populates it.
         """
@@ -712,7 +712,7 @@ class SchemaMixin:
         """Create the §5-1b sealed-triple table semantic_he_triples (idempotent, table-only).
 
         Per-triple AEAD blob of ``{subject, relation, object}`` (domain 'triple'), keyed by the
-        SOURCE fact_relations.relation_id (CASCADE-FK — pruning a fact drops its triples, and now
+        SOURCE fact_relations.relation_id (CASCADE-FK - pruning a fact drops its triples, and now
         their ciphertext). The blind analogue of the plaintext triple text; the fuzzy-HRR triple
         scoring stays as is, graph walks move client-side (3c). Only the blind triple-mirror path
         populates it.
@@ -759,12 +759,12 @@ class SchemaMixin:
         """Create the E6 re-encryption audit table (idempotent, table-only).
 
         Persists the §7.2 re-encryption audit log: one row per blind-recall grant the store
-        honored — the logical memory ``cycle`` (the policy clock), the binding
+        honored - the logical memory ``cycle`` (the policy clock), the binding
         ``query_token`` from ScopeLimiter.authorize, and ``k`` results re-encrypted. The
         user-reviewable trail that makes the policy bound on the honest seam auditable rather
         than implicit (the store re-encrypts query results to the agent; this records what it
         did). ``cycle`` is logical; ``created_at`` is wall-clock display only (mirrors
-        semantic_he). Created unconditionally like the sibling table-only migrations — an
+        semantic_he). Created unconditionally like the sibling table-only migrations - an
         empty, free table on a non-blind store; only the blind PRE runtime path writes rows.
         """
         with self._lock:
@@ -786,7 +786,7 @@ class SchemaMixin:
         """Rebuild semantic_vec with distance_metric=cosine if it is still L2.
 
         NON-DESTRUCTIVE: the stored float32 vectors are copied across verbatim
-        (byte-for-byte) — no re-embedding, no data loss. Only the *distance
+        (byte-for-byte) - no re-embedding, no data loss. Only the *distance
         interpretation* changes from L2 to cosine, which is what makes
         (1.0 - distance) a valid similarity. Idempotent: once the schema
         contains 'cosine' this is a no-op, so it is safe on every open.
@@ -810,7 +810,7 @@ class SchemaMixin:
 
                 logger.warning(
                     "Migration: rebuilding semantic_vec with distance_metric=cosine "
-                    "(was L2). Copying existing %d-d vectors verbatim — no re-embed.",
+                    "(was L2). Copying existing %d-d vectors verbatim - no re-embed.",
                     stored_dim,
                 )
 
@@ -828,8 +828,8 @@ class SchemaMixin:
                     if _os.path.exists(backup_path):
                         # A stale snapshot from an interrupted prior attempt would
                         # make VACUUM INTO fail forever ("output file already
-                        # exists"). Preserve it under a suffixed name — it may be
-                        # the only intact pre-crash copy — and snapshot fresh.
+                        # exists"). Preserve it under a suffixed name - it may be
+                        # the only intact pre-crash copy - and snapshot fresh.
                         aside = f"{backup_path}.{int(_time.time())}"
                         _os.replace(backup_path, aside)
                         logger.warning(
@@ -840,7 +840,7 @@ class SchemaMixin:
                     logger.warning("Migration: pre-cosine DB snapshot written to %s", backup_path)
                 except Exception as _be:
                     logger.error(
-                        "Migration: pre-cosine backup FAILED (%s) — skipping cosine "
+                        "Migration: pre-cosine backup FAILED (%s) - skipping cosine "
                         "rebuild to avoid unprotected data loss.", _be
                     )
                     return
@@ -863,12 +863,12 @@ class SchemaMixin:
                 ).fetchone()[0]
                 expected = sum(1 for _, e in vectors if e is not None)
                 if copied != expected:
-                    # Half-built index — do NOT trust it. Fall back to FTS-only for
+                    # Half-built index - do NOT trust it. Fall back to FTS-only for
                     # this session and shout loudly; the verified snapshot at
                     # {db}.pre-cosine.bak can be restored manually.
                     self.degraded = True
                     logger.critical(
-                        "Migration: cosine rebuild copied %d of %d vectors — MISMATCH. "
+                        "Migration: cosine rebuild copied %d of %d vectors - MISMATCH. "
                         "Entering DEGRADED (FTS-only) mode for safety. Restore from "
                         "%s.pre-cosine.bak before next run.",
                         copied, expected, self.db_path,
@@ -1012,8 +1012,8 @@ class SchemaMixin:
         call_id carries the platform tool_call_id and is enforced UNIQUE via a
         partial index so restart-driven replays of the full message history are
         rejected at the DB layer (INSERT OR IGNORE in add_tool_episode). The
-        partial index (WHERE call_id IS NOT NULL) keeps legacy rows — which
-        predate the column and hold NULL — out of the uniqueness check.
+        partial index (WHERE call_id IS NOT NULL) keeps legacy rows - which
+        predate the column and hold NULL - out of the uniqueness check.
         """
         with self._lock:
             try:
@@ -1063,7 +1063,7 @@ class SchemaMixin:
         value with provenance (source_fact_id), temporal validity (valid_from/until_cycle),
         a supersession chain, and a review_status. Lets an agent ask 'what is the current
         value of X' as one canonical field instead of inferring it from recall ranking.
-        Created unconditionally like the sibling table-only migrations — empty and free on
+        Created unconditionally like the sibling table-only migrations - empty and free on
         a store that never uses it; only the explicit set_canonical path writes rows.
         Cycle-stamped, never wall-clock. The partial index serves the hot 'current row for
         key' lookup (valid_until_cycle IS NULL)."""
@@ -1141,7 +1141,7 @@ class SchemaMixin:
 
         A session that logged substantial episodes but banked ZERO facts is a debt:
         an experience the substrate has not digested (epoch death, gate wipeout, a
-        reason-model outage — the failure classes extraction_max_attempts cannot see
+        reason-model outage - the failure classes extraction_max_attempts cannot see
         because they happen outside or after the extraction call). The dream cycle
         flags debts BEFORE episode pruning, the pruner exempts open debts so the
         evidence survives, and a bounded post-dream retry re-runs the consolidation

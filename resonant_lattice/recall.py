@@ -1,4 +1,4 @@
-"""recall.py — RecallMixin: prefetch (cached + synchronous), background
+"""recall.py - RecallMixin: prefetch (cached + synchronous), background
 queue_prefetch, recall-reinforcement gating, and the <resonant_memory>
 block builder.
 
@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
 
 # Two-tier authority marker for pinned facts (A/B-validated: a [PRIORITY] tag makes
 # the agent obey a pinned rule 15/15 vs 8/15 with no tag, on both nemotron + gemma).
-# A pinned RULE/policy (imperative language) reads as "[PRIORITY RULE]" — obey it,
-# override conflicting notes; any other pinned fact reads as "[PRIORITY]" — weight
+# A pinned RULE/policy (imperative language) reads as "[PRIORITY RULE]" - obey it,
+# override conflicting notes; any other pinned fact reads as "[PRIORITY]" - weight
 # it heavily, but it's a fact, not a command. Keyed on imperative/policy language,
 # NOT on money/spec presence (a money VALUE is a fact; a money RULE says "require").
 _RULE_CATEGORIES = {"policy", "rule", "compliance", "procedural", "guardrail"}
@@ -34,7 +34,7 @@ def _pinned_marker(content: str, category: str) -> str:
 def _is_authority_rule(result: Dict) -> bool:
     """True when a recalled row is a user-pinned binding RULE (not merely a pinned fact).
 
-    Same classification as the [PRIORITY RULE] marker — category in the rule set or
+    Same classification as the [PRIORITY RULE] marker - category in the rule set or
     imperative/policy language. Used to lift those rows into <authority_rules>.
     """
     if not result.get("pinned"):
@@ -64,7 +64,7 @@ class RecallMixin:
         # The background recall is a latency-hiding proxy computed from the PREVIOUS
         # message. Exact-match always short-circuits. Otherwise reuse the proxy ONLY
         # when the new query is on the same topic (lexical-overlap gate): a topic
-        # shift must NOT inject stale, high-confidence memory from the prior turn —
+        # shift must NOT inject stale, high-confidence memory from the prior turn -
         # so on low overlap we recompute synchronously for the current query.
         if cached is not None:
             cached_q, cached_block = cached
@@ -141,7 +141,7 @@ class RecallMixin:
 
     def _prefetch_proxy_ok(self, query: str, cached_query: str) -> bool:
         """Reuse the previous turn's (proxy) recall only when the new query shares
-        enough vocabulary with the one it was computed from — a cheap topic-shift
+        enough vocabulary with the one it was computed from - a cheap topic-shift
         guard so stale cross-topic memory isn't injected. Jaccard over word tokens
         vs `_prefetch_proxy_min_overlap` (0 disables the gate = always reuse)."""
         thr = getattr(self, "_prefetch_proxy_min_overlap", 0.3)
@@ -158,7 +158,7 @@ class RecallMixin:
         """Bump resonance for recalled facts (once per fact per dream-cycle window).
 
         Recall is a weak positive signal, so the bump is small and gated by an
-        in-memory set cleared each dream cycle — preventing the every-turn
+        in-memory set cleared each dream cycle - preventing the every-turn
         prefetch from inflating topic-locked facts. Skipped in non-primary
         (read-only) contexts.
         """
@@ -180,8 +180,8 @@ class RecallMixin:
 
     @staticmethod
     def _cap_procedural(results: List[Dict], cap: int, limit: int):
-        """Keep at most ``cap`` procedural-category facts — the most relevant, since
-        ``results`` is relevance-ordered — pass every non-procedural fact through,
+        """Keep at most ``cap`` procedural-category facts - the most relevant, since
+        ``results`` is relevance-ordered - pass every non-procedural fact through,
         preserve order, and truncate to ``limit``. cap=0 drops procedural from the
         prefetch entirely. The explicit search tool is unaffected (ungated). Returns
         ``(kept, proc_dropped)`` so the caller can surface a visible-boundary
@@ -203,7 +203,7 @@ class RecallMixin:
     def _compute_prefetch(self, query: str, sid: str) -> str:
         """Run the hybrid search and format the resonant-memory block."""
         # A6 precision gate (default ON): inject only the on-topic cluster, not
-        # everything above recall_floor. Prefetch ONLY — the explicit search tool
+        # everything above recall_floor. Prefetch ONLY - the explicit search tool
         # stays ungated. The blind/HE retriever's search() takes no relevance_margin
         # (vector-only), so fall back gracefully there.
         margin = getattr(self, "_recall_relevance_margin", 0.0) or None
@@ -211,7 +211,7 @@ class RecallMixin:
         # facts are numerous and, when embedding-similar to the query, can crowd the
         # on-topic CONTENT cluster out of the injected block and burn attention budget.
         # When capping, over-fetch candidates so content facts backfill the slots freed
-        # by dropped procedural facts. Prefetch ONLY — the explicit search tool stays
+        # by dropped procedural facts. Prefetch ONLY - the explicit search tool stays
         # ungated, so the agent can still pull full tool-use procedures on demand.
         cap = getattr(self, "_recall_procedural_cap", -1)
         capping = cap is not None and cap >= 0
@@ -262,7 +262,7 @@ class RecallMixin:
             gp = "s" if len(withheld) != 1 else ""
             cand_lines.append(
                 f"  - ⚠ [WITHHELD] {total} high-stakes fact{fp} in {len(withheld)} "
-                f"unresolved conflict{gp} ({gids}) held back pending resolution — do "
+                f"unresolved conflict{gp} ({gids}) held back pending resolution - do "
                 f"NOT act on the disputed value; call pending_conflicts / "
                 f"resolve_conflict to arbitrate first."
             )
@@ -273,7 +273,7 @@ class RecallMixin:
             cand_lines.append(
                 "  - [note] " + str(proc_dropped) + " tool-use/procedural "
                 + ("memory" if proc_dropped == 1 else "memories")
-                + " held back to keep this recall focused — call lattice_store "
+                + " held back to keep this recall focused - call lattice_store "
                 "search for deeper tool/search procedures if a task needs them."
             )
 
@@ -294,7 +294,7 @@ class RecallMixin:
             # Frame as fallible candidates, not ground truth (anti-confabulation).
             parts.append(
                 "<resonant_memory>\n"
-                "# Fallible retrieved candidates — NOT verbatim stored facts. They may "
+                "# Fallible retrieved candidates - NOT verbatim stored facts. They may "
                 "be approximate, stale, or a semantically-similar near-miss. Do not "
                 "quote any of these as exact wording; call lattice_store get_fact <ID> "
                 "to confirm an exact stored row (found:false ⇒ not stored). Low Res or "
@@ -347,7 +347,7 @@ class RecallMixin:
                     with self._recall_gate_lock:
                         if gid not in self._conflicts_surfaced:
                             self._conflicts_surfaced.add(gid)
-                            conflict += (" (unresolved — use pending_conflicts / "
+                            conflict += (" (unresolved - use pending_conflicts / "
                                          "resolve_conflict to disambiguate)")
         fresh = ""
         if self._surface_freshness_in_recall:

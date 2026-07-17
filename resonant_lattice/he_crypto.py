@@ -1,8 +1,8 @@
-"""he_crypto.py — CKKS engine for the homomorphic blind store (Tier 1, E2).
+"""he_crypto.py - CKKS engine for the homomorphic blind store (Tier 1, E2).
 
 Blind vector recall: embeddings are stored as CKKS ciphertext; the (untrusted)
-store side computes cosine similarity homomorphically — `EvalInnerProduct` over
-L2-normalized vectors — and NEVER decrypts. Only the client side, holding the
+store side computes cosine similarity homomorphically - `EvalInnerProduct` over
+L2-normalized vectors - and NEVER decrypts. Only the client side, holding the
 secret key (unwrapped from the keystore under the master passphrase), decrypts the
 resulting scalar scores to rank them.
 
@@ -12,7 +12,7 @@ Design (validated against openfhe 1.5.1 on the target node):
   * The eval-key store (mult + sum/rotation keys) is a GLOBAL/static map, so
     key *generation* happens once at setup (a one-shot process); runtime processes
     only *deserialize* keys. Generating and deserializing eval keys in the SAME
-    process collides on the keyTag — hence the setup/runtime split below.
+    process collides on the keyTag - hence the setup/runtime split below.
   * Cosine = dot product of unit vectors. Depth = 1 multiply + a rotation-sum, so
     no bootstrapping; small parameters; embarrassingly parallel across facts.
 
@@ -69,17 +69,17 @@ _TOPK_SAFE_SCALE = 0.5
 # Blind argmax WITHOUT FHEW scheme switching: approximate max / |·| as Chebyshev
 # polynomials (Cheon et al., HE comparison) so the circuit uses ONLY CKKS mult+rotation
 # keys, which DO serialize -> the eval-only store can run it across a process split
-# (the FHEW BlindArgmax canNOT — its switching keys do not serialize; see 0a / its
+# (the FHEW BlindArgmax canNOT - its switching keys do not serialize; see 0a / its
 # docstring). Proof params (HEStd_NotSet, leveled/no-bootstrap); production = E3 §3b.
 _CMP_DEPTH = 32          # leveled depth for the comparison circuit (no bootstrapping)
 _CMP_RING = 1 << 16      # ring dim for HEStd_NotSet fast-PoC ONLY (real levels auto-select)
-# E3 §3b: production security level. Node-measured (2026-06-19) — HEStd_128_classic
+# E3 §3b: production security level. Node-measured (2026-06-19) - HEStd_128_classic
 # auto-selects ring 2^17 for depth 32; ~31 s/argmax at N=8 (one-time setup ~3.7 s) vs ~14 s
 # at HEStd_NotSet/ring2^16. "Cycles-not-seconds" absorbs it. Pass "HEStd_NotSet" for fast tests.
 _CMP_SECURITY_DEFAULT = "HEStd_128_classic"
 _CMP_ABS_DEGREE = 59     # Chebyshev degree for |a-b| in max(a,b)=½(a+b)+½|a-b|
 _CMP_ONEHOT_DEGREE = 27  # Chebyshev degree for the exp() one-hot indicator
-_CMP_ONEHOT_ALPHA = 15.0 # exp sharpness: onehot_i ≈ exp(α·(s_i − max))
+_CMP_ONEHOT_ALPHA = 15.0 # exp sharpness: onehot_i ≈ exp(α·(s_i - max))
 _CMP_PAD = -2.0          # sentinel for unused (non-power-of-two) slots: below the cosine range
 
 # ── E5 blind dream-cycle maintenance (encrypted resonance) parameters ────────────
@@ -92,16 +92,16 @@ _MAINT_STEP_DEGREE = 119 # Chebyshev degree for step(x): sharp enough outside th
 _MAINT_RANGE = 1.0       # comparison interval [-1, 1] (resonance scaled to ~[0,1])
 _MAINT_NOTSET_RING = 1 << 15  # ring for the HEStd_NotSet fast-PoC path (real levels auto-select)
 # DECAY-ONLY light depth (provider blind-maintenance path; user sign-off 2026-06-19). The
-# provider dream cycle does blind DECAY + CLIENT-assisted settle (E5 5b) — NOT the homomorphic
+# provider dream cycle does blind DECAY + CLIENT-assisted settle (E5 5b) - NOT the homomorphic
 # ge_threshold (Chebyshev step, needs the deep _MAINT_DEPTH ctx). Node-spike (2026-06-19): an
 # IN-PLACE compounding decay survives exactly `depth` cycles (depth-1 ⇒ 1 decay before the ct
 # exhausts), but DECAY-FROM-ORIGIN (one EvalMult of the preserved original by factor**elapsed,
 # using the PUBLIC logical cycle clock) runs UNBOUNDED at depth 1. So the blind-maint keyset is
 # generated at depth 1 (~0.8MB mult key, vs ~63MB at depth 14) and the maintainer decays from
-# origin — lightest keystore AND unlimited autonomous cycles (the untrusted-store north star).
+# origin - lightest keystore AND unlimited autonomous cycles (the untrusted-store north star).
 # Bump only if store-side autonomous ge_threshold flagging is later wired (would need depth ~14).
 # ⚠️ The decay-FROM-ORIGIN maintainer this depth-1 keyset assumes is NOT yet implemented. The only
-# decay path today — retrieval.BlindMaintainer.decay_all — does IN-PLACE compounding and needs the
+# decay path today - retrieval.BlindMaintainer.decay_all - does IN-PLACE compounding and needs the
 # deep _MAINT_DEPTH; read its DEPTH CONTRACT docstring before wiring this keyset to any decay path.
 _MAINT_BLIND_DEPTH = 1
 
@@ -187,9 +187,9 @@ class BlindCrypto:
         """SETUP-ONLY (one-shot process): fresh keygen.
 
         Returns ``(client_instance, key_blobs, secret_blob)`` where:
-          * ``key_blobs`` = {ctx, pub, em, ea} serialized bytes — NON-secret, persisted
+          * ``key_blobs`` = {ctx, pub, em, ea} serialized bytes - NON-secret, persisted
             in the keystore as-is.
-          * ``secret_blob`` = the serialized secret key bytes — the caller MUST wrap it
+          * ``secret_blob`` = the serialized secret key bytes - the caller MUST wrap it
             (AES-GCM under a master-derived key) before persisting.
         Do not call other instances' deserialize paths in this same process (the eval
         key store is global/static and would collide).
@@ -218,7 +218,7 @@ class BlindCrypto:
     def load_eval(cls, key_blobs: Dict[str, bytes], dim: int, batch: int) -> "BlindCrypto":
         """STORE side (fresh process): reconstruct context + eval keys + public key.
 
-        No secret key — this instance can encrypt and score but never decrypt.
+        No secret key - this instance can encrypt and score but never decrypt.
         """
         _require()
         cc = _ofhe.DeserializeCryptoContextString(key_blobs["ctx"], _ofhe.BINARY)
@@ -261,7 +261,7 @@ class BlindCrypto:
         """STORE side: homomorphic cosine (inner product of unit vectors).
 
         Returns the encrypted scalar Ciphertext OBJECT (kept in-memory; serializing
-        each score would move ~hundreds of KB per fact between store and client — we
+        each score would move ~hundreds of KB per fact between store and client - we
         only serialize when the store is a genuinely separate process). Uses ONLY
         public + eval keys; never touches a secret key. ``query_ct_blob`` may be raw
         bytes OR a handle from ``prepare_query`` (deserialized once per scan, A1).
@@ -296,8 +296,8 @@ class BlindCrypto:
 
 class BlindArgmax:
     """E3: homomorphic blind argmax over encrypted embeddings via CKKS<->TFHE scheme
-    switching. The store computes WHICH stored vector is most similar to the query — a
-    one-hot indicator — using public + eval/switching keys ONLY (``EvalMaxSchemeSwitching``
+    switching. The store computes WHICH stored vector is most similar to the query - a
+    one-hot indicator - using public + eval/switching keys ONLY (``EvalMaxSchemeSwitching``
     takes the public key, never the secret). So neither the per-fact scores nor their full
     ranking leave the store; only the single winning index does. This removes the
     count/score leak of E2's client-side ranking (roadmap §7.3 option b).
@@ -309,7 +309,7 @@ class BlindArgmax:
     **co-located only**. 0a finding (node-proven 2026-06-19): the FHEW / scheme-switching
     keys do NOT serialize in openfhe-python 1.5.1 (no ``LWEPrivateKey``/``BinFHEContext``
     ``Serialize`` overload; a deserialized eval-only context segfaults in
-    ``EvalMaxSchemeSwitching``) and 1.5.1 is the latest wheel — so this engine canNOT run
+    ``EvalMaxSchemeSwitching``) and 1.5.1 is the latest wheel - so this engine canNOT run
     on an untrusted store via serialized keys. For the splittable blind-argmax path use
     ``BlindArgmaxCKKS`` (pure-CKKS comparison, all keys serialize). This class stays as the
     faster co-located reference. Other remaining E3 plumbing: top-k>1 (each argmax exhausts
@@ -386,7 +386,7 @@ class BlindArgmax:
 
         Packs each fact's inner product into slot i of one score vector, scales into the
         FHEW-safe range, then scheme-switches to the homomorphic argmax. Uses ONLY public
-        + eval/switching keys — never the secret. Requires exactly ``num_values`` facts
+        + eval/switching keys - never the secret. Requires exactly ``num_values`` facts
         (caller pads to the power-of-two count; richer padding is remaining plumbing)."""
         _require()
         if len(fact_cts) != self._n:
@@ -415,15 +415,15 @@ class BlindArgmax:
 
 
 class BlindPRE:
-    """E6: proxy re-encryption runtime path — the three-key "use but can't read" model
+    """E6: proxy re-encryption runtime path - the three-key "use but can't read" model
     (roadmap §4.1 / §7.1). Proven on the node 2026-06-18.
 
     The store holds a query RESULT ciphertext under the STORAGE key. With a one-time
     re-encryption key ``rk_storage->agent`` (generated at setup, while the master is
-    present), the store re-encrypts that result to the AGENT use-key — so the agent
+    present), the store re-encrypts that result to the AGENT use-key - so the agent
     decrypts ONLY results the store re-encrypts for a query it ran. Applied to the raw DB,
     the agent key decrypts NOTHING (proven: OpenFHE rejects the decode). The master/user
-    re-derives everything for god-mode. This property is impossible in Tier 0 — a runtime
+    re-derives everything for god-mode. This property is impossible in Tier 0 - a runtime
     key that can use the data can read all of it.
 
     The honest seam (tension #2): a hijacked agent can still ask the store to re-encrypt
@@ -454,7 +454,7 @@ class BlindPRE:
         return cls(cc, batch)
 
     def keygen(self):
-        """A fresh keypair — used for both the storage (master) key and the agent use-key."""
+        """A fresh keypair - used for both the storage (master) key and the agent use-key."""
         _require()
         return self._cc.KeyGen()
 
@@ -477,7 +477,7 @@ class BlindPRE:
     def decrypt(self, ct, secret_key, length: int = 1) -> List[float]:
         """Decrypt with whichever secret key (agent for re-encrypted results, master for
         god-mode). Raises if the key can't read the ciphertext (e.g. the agent key on the
-        raw DB) — that rejection IS the security property."""
+        raw DB) - that rejection IS the security property."""
         _require()
         pt = self._cc.Decrypt(ct, secret_key)
         pt.SetLength(length)
@@ -486,7 +486,7 @@ class BlindPRE:
 
 class ThresholdAudit:
     """E6: threshold / multiparty user-audit path (roadmap §7.1). Proven on the node
-    2026-06-18 (2-of-2). Distributed decryption needs ALL shares fused — no single party
+    2026-06-18 (2-of-2). Distributed decryption needs ALL shares fused - no single party
     (store or agent) decrypts alone; the user, holding the shares, reconstructs anything
     (god-mode audit / export / rotation). This is the path RESERVED for the user, distinct
     from the runtime PRE path (which is for the agent). Generalizes to (t,n); the proven
@@ -534,7 +534,7 @@ class ThresholdAudit:
         return self._cc.MultipartyDecryptMain([ct], secret_key)[0]
 
     def fuse(self, partials: List, length: int = 1) -> List[float]:
-        """Fuse decryption shares. ALL shares are required — fusing a subset raises (the
+        """Fuse decryption shares. ALL shares are required - fusing a subset raises (the
         rejection that proves no single party can decrypt)."""
         _require()
         pt = self._cc.MultipartyDecryptFusion(list(partials))
@@ -544,11 +544,11 @@ class ThresholdAudit:
 
 class BlindRecallPRE:
     """E2+E6 unified: the deployable blind-RECALL runtime in ONE serializable CKKS context
-    (roadmap 0a decision — purpose-built contexts). The untrusted store homomorphically
+    (roadmap 0a decision - purpose-built contexts). The untrusted store homomorphically
     scores cosine similarity (E2) AND re-encrypts the encrypted score to the agent's
-    use-key via PRE (E6 §4.1 / item 6b) — all with public + eval keys + the rekey, NEVER a
+    use-key via PRE (E6 §4.1 / item 6b) - all with public + eval keys + the rekey, NEVER a
     secret. The agent decrypts ONLY results the store re-encrypts for it (its use-key on the
-    RAW store ct is rejected by OpenFHE — the "use but can't read" property); the user
+    RAW store ct is rejected by OpenFHE - the "use but can't read" property); the user
     re-derives the master for god-mode. Because the score that gets re-encrypted is the
     actual cosine ct, this folds E6's "unify PRE with the scoring context" (6b).
 
@@ -559,10 +559,10 @@ class BlindRecallPRE:
     ``EvalKey`` serializer), unlike the FHEW path.
 
     Three roles via the load_* classmethods (each a fresh process; never keygen+deserialize
-    in the same process — the eval-key store is global/static):
-      * STORE  (``load_eval``)   — ctx + storage pub + eval keys + rekey; scores + reencrypts; no secret.
-      * AGENT  (``load_client``) — store role + the agent use-key; decrypts re-encrypted results only.
-      * USER   (``load_user``)   — store role + the master secret; god-mode decrypt of any ct.
+    in the same process - the eval-key store is global/static):
+      * STORE  (``load_eval``)   - ctx + storage pub + eval keys + rekey; scores + reencrypts; no secret.
+      * AGENT  (``load_client``) - store role + the agent use-key; decrypts re-encrypted results only.
+      * USER   (``load_user``)   - store role + the master secret; god-mode decrypt of any ct.
     """
 
     _BLOBS = ("ctx", "pub", "em", "ea", "rk")
@@ -581,8 +581,8 @@ class BlindRecallPRE:
         """SETUP-ONLY (one-shot process): build the recall+PRE context and all keys.
 
         Returns ``(user_instance, key_blobs, secret_blobs)`` where:
-          * ``key_blobs`` = {ctx, pub, em, ea, rk} serialized bytes — NON-secret, persist as-is.
-          * ``secret_blobs`` = {"master": bytes, "agent": bytes} — the caller MUST wrap each
+          * ``key_blobs`` = {ctx, pub, em, ea, rk} serialized bytes - NON-secret, persist as-is.
+          * ``secret_blobs`` = {"master": bytes, "agent": bytes} - the caller MUST wrap each
             (``crypto_keys.wrap_he_secret`` under a master-derived key) before persisting.
         The returned instance carries the master secret (the user/setup view)."""
         _require()
@@ -601,12 +601,12 @@ class BlindRecallPRE:
         cc.EvalSumKeyGen(kpS.secretKey)             # for EvalInnerProduct under the storage key
         rk = cc.ReKeyGen(kpS.secretKey, kpA.publicKey)   # rk_storage->agent (needs storage secret)
         # Serialize the eval keys BY THIS CONTEXT'S KEY TAG (not ""), so MULTIPLE keysets can be
-        # generated in ONE setup process (recall@embed-dim + HRR@2·hrr-dim — Option A multi-keyset
+        # generated in ONE setup process (recall@embed-dim + HRR@2·hrr-dim - Option A multi-keyset
         # keystore) with ISOLATED blobs: the "" selector grabs the whole GLOBAL eval-key store,
         # which by then holds every prior context's keys. All eval keys here register under the
         # storage keypair's tag (EvalMult/EvalSumKeyGen(kpS.secretKey); kpA is only ReKeyGen'd).
         # Node-proven 2026-06-19: by-tag yields clean per-context blobs AND live instances keep
-        # working (no clearing). Backward-compatible — for a single-context process by-tag == "".
+        # working (no clearing). Backward-compatible - for a single-context process by-tag == "".
         _tag = kpS.secretKey.GetKeyTag()
         key_blobs = {
             "ctx": _ofhe.Serialize(cc, _ofhe.BINARY),
@@ -627,7 +627,7 @@ class BlindRecallPRE:
 
     @classmethod
     def load_eval(cls, key_blobs: Dict[str, bytes], dim: int, batch: int) -> "BlindRecallPRE":
-        """STORE side (fresh process): ctx + eval keys + storage pub + rekey. No secret —
+        """STORE side (fresh process): ctx + eval keys + storage pub + rekey. No secret -
         can encrypt, score, and re-encrypt, but never decrypt."""
         _require()
         cc = _ofhe.DeserializeCryptoContextString(key_blobs["ctx"], _ofhe.BINARY)
@@ -683,7 +683,7 @@ class BlindRecallPRE:
         """STORE side: homomorphic cosine (inner product of unit vectors) -> score Ciphertext
         OBJECT. Public + eval keys only; never a secret. ``query_ct_blob`` may be raw bytes OR
         a handle from ``prepare_query`` (deserialized ONCE for a whole scan so the query is not
-        re-deserialized per fact — the A1 streaming recall path passes a prepared handle)."""
+        re-deserialized per fact - the A1 streaming recall path passes a prepared handle)."""
         _require()
         q = self._deser_ct(query_ct_blob) if isinstance(query_ct_blob, (bytes, bytearray)) else query_ct_blob
         s = self._deser_ct(stored_ct_blob)
@@ -708,7 +708,7 @@ class BlindRecallPRE:
 
     def decrypt_score(self, score_ct) -> float:
         """AGENT (a re-encrypted result) or USER (any ct): decrypt the scalar cosine score.
-        The agent's use-key on a RAW (non-re-encrypted) store ct is rejected by OpenFHE —
+        The agent's use-key on a RAW (non-re-encrypted) store ct is rejected by OpenFHE -
         that rejection IS the 'use but can't read' property."""
         _require()
         if self._sk is None:
@@ -721,10 +721,10 @@ class BlindRecallPRE:
 
 class BlindArgmaxCKKS:
     """E3 serializable alternative to the FHEW ``BlindArgmax``: blind argmax via PURE-CKKS
-    polynomial comparison — no scheme switching. ``max(a,b)=½(a+b)+½·|a−b|`` with |·| a
+    polynomial comparison - no scheme switching. ``max(a,b)=½(a+b)+½·|a-b|`` with |·| a
     Chebyshev approximation (Cheon et al., HE comparison), a cyclic rotate-max-reduce to the
     global max broadcast across slots, then a steep ``exp()`` one-hot indicator. Uses ONLY
-    CKKS mult + rotation keys, which SERIALIZE — so unlike the FHEW ``BlindArgmax`` (whose
+    CKKS mult + rotation keys, which SERIALIZE - so unlike the FHEW ``BlindArgmax`` (whose
     switching keys do not serialize and segfault on a deserialized eval-only store) this
     engine genuinely SPLITS: the untrusted store runs argmax with public + eval keys only
     and never decrypts. Node-proven 2026-06-19 across a 3-process serialized split
@@ -736,7 +736,7 @@ class BlindArgmaxCKKS:
     speed; production security + bootstrapping (bootstrap keys also serialize, so the split
     holds) are E3 hardening (roadmap §3b). Operates on an encrypted SCORE vector (the N
     cosines packed in N slots); packing query/fact inner products into that vector in this
-    same context is the recall-integration step (0c / E3 hardening — node-spike first)."""
+    same context is the recall-integration step (0c / E3 hardening - node-spike first)."""
 
     _BLOBS = ("ctx", "pub", "em", "ea")
 
@@ -753,9 +753,9 @@ class BlindArgmaxCKKS:
 
         ``security`` is an OpenFHE level name (default ``HEStd_128_classic``, production); pass
         ``"HEStd_NotSet"`` for the fast PoC params. At a real level OpenFHE auto-selects the
-        ring dim for depth ``_CMP_DEPTH`` (2^17 at 128-bit, ~31 s/argmax for N=8 — §3b); at
+        ring dim for depth ``_CMP_DEPTH`` (2^17 at 128-bit, ~31 s/argmax for N=8 - §3b); at
         ``HEStd_NotSet`` we fix the small ring ``_CMP_RING`` for speed. Returns
-        ``(client_instance, key_blobs, secret_blob)`` mirroring ``BlindCrypto`` — key_blobs
+        ``(client_instance, key_blobs, secret_blob)`` mirroring ``BlindCrypto`` - key_blobs
         {ctx,pub,em,ea} are NON-secret; secret_blob is wrapped by the caller. The store side
         reconstructs via ``load_eval`` (no secret)."""
         _require()
@@ -835,13 +835,13 @@ class BlindArgmaxCKKS:
         return self._cc.Encrypt(self._pub, self._cc.MakeCKKSPackedPlaintext(v, 1, 0, None, self._batch))
 
     def argmax(self, score_ct):
-        """STORE side: one-hot argmax over the encrypted score vector — public + eval keys
+        """STORE side: one-hot argmax over the encrypted score vector - public + eval keys
         ONLY, never the secret. Cyclic Chebyshev-|·| max-reduce to the global max, then an
-        ``exp()`` one-hot indicator on (score − max)."""
+        ``exp()`` one-hot indicator on (score - max)."""
         _require()
         lo, hi = self._interval()
         absf = lambda x: abs(x)
-        a_lo, a_hi = lo - hi, hi - lo            # range of (a − b)
+        a_lo, a_hi = lo - hi, hi - lo            # range of (a - b)
         def hmax(a, b):
             ab = self._cc.EvalChebyshevFunction(absf, self._cc.EvalSub(a, b), a_lo, a_hi, _CMP_ABS_DEGREE)
             return self._cc.EvalAdd(self._cc.EvalMult(self._cc.EvalAdd(a, b), 0.5),
@@ -871,23 +871,23 @@ class BlindMaintenance:
     keys serialize (like BlindArgmaxCKKS / BlindRecallPRE). The untrusted store runs the
     Hebbian maintenance on ciphertext it cannot read, with public + eval keys ONLY:
 
-      * DECAY — ``resonance *= factor`` (a plaintext scalar multiply): the per-cycle forgetting.
-      * threshold COMPARE — ``step(resonance − threshold)`` -> an encrypted 0/1 indicator via
+      * DECAY - ``resonance *= factor`` (a plaintext scalar multiply): the per-cycle forgetting.
+      * threshold COMPARE - ``step(resonance - threshold)`` -> an encrypted 0/1 indicator via
         the Chebyshev sign-approx: promotion (resonance ≥ promote) / eviction (resonance <
         prune), and conflict similarity bands (low ≤ sim ≤ high = two compares on a score ct).
 
     Resonance is scaled to ~[0,1] client-side (``resonance / max_resonance``) so the comparison
     sits in a bounded interval. The comparison has a TRANSITION BAND: a value within ~epsilon of
     the threshold may classify either way (the exact-boundary case decrypts to ~0.5). That is
-    fine for a soft, every-cycle signal — a near-threshold fact merely promotes/evicts a cycle
+    fine for a soft, every-cycle signal - a near-threshold fact merely promotes/evicts a cycle
     early or late, and resolves as resonance moves. Node-measured: decay ~4ms, one comparison
     ~3.5s/batch at HEStd_128_classic; the cost lands on the dream cycle, never the hot recall
-    path — exactly where "cycles-not-seconds" pays off (roadmap §4/§9).
+    path - exactly where "cycles-not-seconds" pays off (roadmap §4/§9).
 
     Scope (E5 5a): the homomorphic decay + threshold-comparison primitives, serializable across
     the store/client split. ACTING on an encrypted indicator (a blind tier flip / conditional
     eviction) and which maintenance ops run fully blind vs need per-cycle client assistance is
-    5b (a design decision; some steps — e.g. structural pruning — may stay client-assisted)."""
+    5b (a design decision; some steps - e.g. structural pruning - may stay client-assisted)."""
 
     _BLOBS = ("ctx", "pub", "em")
 
@@ -902,7 +902,7 @@ class BlindMaintenance:
                  depth: Optional[int] = None):
         """SETUP/CLIENT: build the maintenance context + mult key. ``security`` defaults to
         HEStd_128_classic (production); pass ``"HEStd_NotSet"`` for the fast small-ring PoC.
-        ``depth`` defaults to ``_MAINT_DEPTH`` (14 — supports the homomorphic ``ge_threshold``
+        ``depth`` defaults to ``_MAINT_DEPTH`` (14 - supports the homomorphic ``ge_threshold``
         Chebyshev step); pass ``_MAINT_BLIND_DEPTH`` (1) for the DECAY-ONLY light keyset (the
         provider blind-maint path, ~0.8MB vs ~63MB). A depth-1 context can ``decay``/``encrypt``/
         ``decrypt`` but NOT ``ge_threshold`` (which exhausts depth-1 immediately); the maintainer
@@ -942,7 +942,7 @@ class BlindMaintenance:
 
     @classmethod
     def load_eval(cls, key_blobs: Dict[str, bytes], batch: int) -> "BlindMaintenance":
-        """STORE side (fresh process): ctx + mult key + pub. No secret — decays and compares
+        """STORE side (fresh process): ctx + mult key + pub. No secret - decays and compares
         but never decrypts."""
         _require()
         cc = _ofhe.DeserializeCryptoContextString(key_blobs["ctx"], _ofhe.BINARY)
@@ -982,7 +982,7 @@ class BlindMaintenance:
                 if isinstance(ct, (bytes, bytearray)) else ct)
 
     def decay(self, ct, factor: float):
-        """STORE side: per-cycle decay — multiply every encrypted resonance by a plaintext
+        """STORE side: per-cycle decay - multiply every encrypted resonance by a plaintext
         ``factor`` (depth 1). Public + eval keys only. Accepts a live ct or a stored blob."""
         _require()
         return self._cc.EvalMult(self._as_ct(ct), float(factor))

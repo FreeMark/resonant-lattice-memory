@@ -1,5 +1,5 @@
 """
-self_write_gate.py — Phase E self-write policy boundary.
+self_write_gate.py - Phase E self-write policy boundary.
 
 Explicit, auditable denylist of phrases that unambiguously mark the AGENT
 describing its OWN configuration / infrastructure / identity (model name,
@@ -7,7 +7,7 @@ context size, IP/endpoint, training, "as an AI…"). When such chatter is
 autonomously consolidated it lands in semantic_facts as a fake "user fact",
 polluting the user model and inflating self-referential resonance.
 
-This is a POLICY, not a heuristic to be clever about — explicit lists, simple
+This is a POLICY, not a heuristic to be clever about - explicit lists, simple
 substring matching, no fuzzy scoring. It is intentionally CONSERVATIVE: it
 should UNDER-block (miss a novel paraphrase) rather than ever drop a legitimate
 fact about the USER's own infrastructure or about the user's project. NOTE:
@@ -19,7 +19,7 @@ REAL facts and must NOT match. Bare topic words ("consolidation", "resonance",
 Two-tier rule (see is_self_referential_infra):
   1) any _SELF_INFRA_PHRASES substring  → block (unambiguous on its own), OR
   2) an AI-self _SELF_SUBJECTS term AND an _INFRA_TERMS descriptor co-occur.
-Neither subject nor infra term blocks alone — only their co-occurrence does,
+Neither subject nor infra term blocks alone - only their co-occurrence does,
 which is what makes "I am running granite4.1:8b with a 128k context window"
 self-infra while "the user runs Ollama on port 11434" stays a user fact.
 
@@ -27,19 +27,19 @@ Pure (str only); the provider's _is_self_referential_infra method delegates here
 """
 
 _SELF_INFRA_PHRASES = (
-    # First-person AI identity — the agent describing what it *is*.
+    # First-person AI identity - the agent describing what it *is*.
     "as an ai", "as a language model", "as an ai language model",
     "i am an ai", "i'm an ai", "i am a language model", "i'm a language model",
     "i am an assistant", "i am the assistant", "i am claude",
     "large language model",
-    # First-person "my <own machinery>" — unambiguous self-config.
+    # First-person "my <own machinery>" - unambiguous self-config.
     "my context window", "my context length", "my context size",
     "my maximum context", "my token limit", "my knowledge cutoff",
     "my training data", "my training cutoff", "my system prompt",
     "my ip address", "my embedding model", "my reasoning model",
     "my underlying model", "my model name", "i was trained",
 )
-# AI-self SUBJECTS — kept tight to the agent ITSELF, never a model-in-general
+# AI-self SUBJECTS - kept tight to the agent ITSELF, never a model-in-general
 # ("the language model"/"the ai model" are excluded: an AI developer discusses
 # those generically). Only fire in conjunction with an _INFRA_TERMS descriptor.
 _SELF_SUBJECTS = (
@@ -65,7 +65,7 @@ def is_self_referential_infra(content: str) -> bool:
       1) any _SELF_INFRA_PHRASES substring is unambiguous on its own, OR
       2) an AI-self _SELF_SUBJECTS term co-occurs with an _INFRA_TERMS
          descriptor (neither fires alone).
-    UNDER-blocks on purpose — it will miss a novel paraphrase rather than risk
+    UNDER-blocks on purpose - it will miss a novel paraphrase rather than risk
     dropping a legitimate fact about the USER's infrastructure or project.
     """
     if not content:
@@ -88,11 +88,11 @@ def is_self_referential_infra(content: str) -> bool:
 # "end with 'Synthesis complete. Stopping.'", "record only … principles"). The
 # repetition inflates their apparent importance, and the mid- + session-end
 # passes store near-duplicates. These are response FORMAT / task PROCEDURE, not
-# external domain knowledge — drop them before they reach the store.
+# external domain knowledge - drop them before they reach the store.
 #
 # Same discipline as above: explicit, auditable substrings; UNDER-block. Bare
 # topic words (memory, synthesis, search, lattice_store, consolidation) are
-# ABSENT on purpose — this user builds a memory system, so "the lattice_store
+# ABSENT on purpose - this user builds a memory system, so "the lattice_store
 # tool has a search action" is a REAL fact and must NOT match. Only the
 # instruction-shaped phrasings below match.
 _TASK_META_PHRASES = (

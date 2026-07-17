@@ -1,4 +1,4 @@
-"""store_entities.py — EntitiesMixin: entity extraction (delegates to the
+"""store_entities.py - EntitiesMixin: entity extraction (delegates to the
 enhanced extractor with a regex fallback), orphan GC, entity-graph reads.
 
 Mixed into LatticeStore; relies on the composite for self._conn/_lock."""
@@ -40,7 +40,7 @@ class EntitiesMixin:
 
     # ====================== FAST ENTITY EXTRACTION ======================
     def _extract_entities(self, text: str) -> List[str]:
-        """Entity extraction — delegates to the enhanced EntityExtractor.
+        """Entity extraction - delegates to the enhanced EntityExtractor.
 
         Primary: spaCy NER (lazy) + 14-pattern high-precision regex with
         confidence scoring, tech-vocab boosting, and compound rejection.

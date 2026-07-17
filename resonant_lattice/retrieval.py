@@ -38,7 +38,7 @@ def _significant_tokens(text: str) -> set:
 
 
 def _relevance_tier(score: float) -> str:
-    """Coarse, agent-facing contextual-relevance label (A22) — distinct from resonance/strength."""
+    """Coarse, agent-facing contextual-relevance label (A22) - distinct from resonance/strength."""
     if score >= 0.60:
         return "high"
     if score >= 0.40:
@@ -50,7 +50,7 @@ class LatticeRetriever:
     """Hybrid semantic + keyword retrieval with neuroplastic metadata."""
 
     # Phase 2: maximum additive cosine-distance penalty applied to a fully-stale
-    # fact when ranking. Deliberately small — this only breaks near-ties so a
+    # fact when ranking. Deliberately small - this only breaks near-ties so a
     # fresh near-match can edge out a long-unconfirmed strong one; it is a gentle
     # nudge, never a hard filter (stale facts are never dropped from recall).
     FRESHNESS_MAX_NUDGE = 0.08
@@ -62,7 +62,7 @@ class LatticeRetriever:
         self.ollama_endpoint = ollama_endpoint
         self.embed_model = embed_model
         # Embedding HTTP timeout. Default 30s (was a hardcoded 5s) so a COLD networked
-        # embedder — e.g. a small GPU that idle-unloaded the model — has time to load on
+        # embedder - e.g. a small GPU that idle-unloaded the model - has time to load on
         # the first call (observed ~6s cold vs ~0.6s warm); a 5s ceiling silently dropped
         # facts at consolidation time. embed_keep_alive is sent to Ollama so the model stays
         # resident between turns (far fewer cold loads); "" disables the hint.
@@ -70,11 +70,11 @@ class LatticeRetriever:
         self.embed_keep_alive = embed_keep_alive
         # Recall floor: vector hits below this cosine similarity are discarded.
         # Deliberately much looser than store.similarity_threshold (a dedup
-        # gate) — this only blocks clearly-unrelated k-NN filler, which would
+        # gate) - this only blocks clearly-unrelated k-NN filler, which would
         # otherwise be injected into context AND recall-reinforced every turn.
         self.min_similarity = float(min_similarity)
         # Phase 2 freshness nudge: cycles for a fact's freshness to halve. 0
-        # disables the nudge entirely (pure similarity ranking). Cycle-driven —
+        # disables the nudge entirely (pure similarity ranking). Cycle-driven -
         # read from last_confirmed_cycle vs the meta memory_cycle, never wall-clock.
         self.freshness_halflife = float(freshness_halflife)
 
@@ -86,7 +86,7 @@ class LatticeRetriever:
         Returns 0 when the fact is fresh (staleness <= 0) or the nudge is off
         (halflife <= 0); otherwise rises smoothly toward max_nudge as staleness
         grows: freshness = 0.5**(staleness/halflife); penalty = max_nudge*(1-freshness).
-        Bounded in [0, max_nudge) — presentation/ranking only, never a filter.
+        Bounded in [0, max_nudge) - presentation/ranking only, never a filter.
         """
         if halflife <= 0 or staleness <= 0:
             return 0.0
@@ -126,11 +126,11 @@ class LatticeRetriever:
         """Hybrid search: vector + FTS5 keyword, unified re-rank by CONTEXTUAL RELEVANCE.
 
         Both passes always run (keyword catches exact technical names that embed poorly). Candidates
-        are scored on one axis — relevance = cosine (minus a gentle freshness nudge) + a
-        ``keyword_weight`` boost for matching the query's SIGNIFICANT tokens — and ranked by it,
+        are scored on one axis - relevance = cosine (minus a gentle freshness nudge) + a
+        ``keyword_weight`` boost for matching the query's SIGNIFICANT tokens - and ranked by it,
         with resonance as the tiebreak (two-axis: "useful now" = relevant AND established).
         ``relevance_margin`` (opt-in) drops candidates whose score is more than ``margin`` below the
-        top — the adaptive precision gate (A6). Each result carries ``relevance`` + ``relevance_tier``
+        top - the adaptive precision gate (A6). Each result carries ``relevance`` + ``relevance_tier``
         (A22). Default args preserve the full ranked list (no gate) for callers that expect it.
         """
         if not query:
@@ -165,12 +165,12 @@ class LatticeRetriever:
                     max_dist = 1.0 - self.min_similarity
                     for row in vec_rows:
                         if row["distance"] is not None and row["distance"] > max_dist:
-                            continue  # below recall floor — k-NN filler, not a match
+                            continue  # below recall floor - k-NN filler, not a match
                         results_dict[row["id"]] = dict(row)
                 except Exception as e:
                     logger.error("Vector search failed: %s", e)
 
-            # 2. FTS5 keyword pass — always runs (hybrid union, not a
+            # 2. FTS5 keyword pass - always runs (hybrid union, not a
             #    fallback): catches exact technical names that embed poorly.
             fts_sql = """
                 SELECT f.id, f.content, f.category, f.tier,
@@ -234,7 +234,7 @@ class LatticeRetriever:
                 # Authoritative-fact preference: a PINNED fact (identity-level,
                 # never-forget) gets a small bounded relevance bump so a curated
                 # policy ranks above merely query-matching content (e.g. a
-                # query-optimized poison). Bounded — it reorders among candidates
+                # query-optimized poison). Bounded - it reorders among candidates
                 # that already cleared the floor; it never surfaces an irrelevant
                 # pin. The [PRIORITY] marker in the recall block remains the hard
                 # trust signal regardless of rank (A/B-validated: it makes the
@@ -251,9 +251,9 @@ class LatticeRetriever:
             # Two-axis ranking: contextual relevance first, resonance (established strength) tiebreak.
             scored.sort(key=lambda h: (h["_score"], float(h.get("resonance_count") or 0.0)),
                         reverse=True)
-            # Buried-but-pluckable (P2b): a DORMANT fact (resonance below dormant_floor — decayed,
+            # Buried-but-pluckable (P2b): a DORMANT fact (resonance below dormant_floor - decayed,
             # long un-recalled) is withheld from normal recall UNLESS a STRONG contextual cue
-            # (score >= strong_cue) resurfaces it — recognition vs recall, the "intentional
+            # (score >= strong_cue) resurfaces it - recognition vs recall, the "intentional
             # relevance" pluck. Off when dormant_floor is None (preserves current behavior).
             if dormant_floor is not None:
                 kept = []
@@ -295,8 +295,8 @@ class LatticeRetriever:
             fact["resonance_count"] = round(float(fact["resonance_count"]), 2)
         except (TypeError, ValueError):
             pass
-        # A22 confidence picture (P4b): surface the PEAK ('was this ever important' —
-        # max_resonance_seen) and the ENTRY cycle ('how long has it been known' —
+        # A22 confidence picture (P4b): surface the PEAK ('was this ever important' -
+        # max_resonance_seen) and the ENTRY cycle ('how long has it been known' -
         # learned_at_cycle) alongside current strength, so the agent reasons over
         # uncertainty, not just present resonance. Round the peak like resonance.
         if "max_resonance_seen" in fact:
@@ -323,16 +323,16 @@ class BlindRetriever(LatticeRetriever):
     ``semantic_vec`` index, reusing the inherited ``_get_embedding`` /
     ``_sanitize_fact``.
 
-    ``blind`` is an HE CLIENT instance — on the live path a ``he_crypto.BlindRecallPRE``
+    ``blind`` is an HE CLIENT instance - on the live path a ``he_crypto.BlindRecallPRE``
     (cosine + PRE), holding the secret key unwrapped from the keystore under the master
-    passphrase. It is DUCK-TYPED — the only methods used are ``encrypt_unit_vector`` /
-    ``cosine_score`` / ``decrypt_score`` — so it is the single seam that needs openfhe;
+    passphrase. It is DUCK-TYPED - the only methods used are ``encrypt_unit_vector`` /
+    ``cosine_score`` / ``decrypt_score`` - so it is the single seam that needs openfhe;
     BlindRetriever itself carries no HE import. On a host without openfhe a real client
     cannot be constructed, so blind recall is naturally unavailable there while the store
     side (``store_blind``) stays dependency-free.
 
     HRR recall (``blind_hrr_scores`` / ``blind_hrr_search`` over ``semantic_he_hrr``) uses a
-    SEPARATE ``blind_hrr`` client sized for the 2·hrr_dim lift (Option A multi-keyset tier) —
+    SEPARATE ``blind_hrr`` client sized for the 2·hrr_dim lift (Option A multi-keyset tier) -
     distinct from the embed-dim ``blind`` recall client; see ``__init__``. There is no FTS5
     half here: keyword search over ciphertext is impossible, so blind recall is vector/HRR-only
     (roadmap §7.4 / E7 drop-FTS). Ranking is client-side, which leaks only the fact COUNT
@@ -360,7 +360,7 @@ class BlindRetriever(LatticeRetriever):
         self._scan_concurrency = max(1, int(scan_concurrency))
         # Separate HE client for the HRR (cos,sin) lift over ``semantic_he_hrr`` (Option A:
         # sized 2·hrr_dim, a DISTINCT context from the embed-dim ``blind`` recall client). The
-        # HRR methods MUST use this, never ``self.blind`` — encrypting a 2·hrr_dim lift with the
+        # HRR methods MUST use this, never ``self.blind`` - encrypting a 2·hrr_dim lift with the
         # embed-dim recall context is a dimension/context mismatch. Falls back to ``blind`` when
         # not given (single-client callers / a context sized for both, e.g. older tests).
         self.blind_hrr = blind_hrr if blind_hrr is not None else blind
@@ -451,7 +451,7 @@ class BlindRetriever(LatticeRetriever):
                     (int(fid),),
                 ).fetchone()
                 if row is None:
-                    continue   # missing or superseded — skip, keep filling top-k
+                    continue   # missing or superseded - skip, keep filling top-k
                 fact = dict(row)
                 fact["blind_similarity"] = round(float(score), 6)
                 self._sanitize_fact(fact)
@@ -465,7 +465,7 @@ class BlindRetriever(LatticeRetriever):
 
         Lifts the plaintext phase probe to ``(cos, sin)/√dim`` CLIENT-SIDE
         (``holographic.hrr_lift``), encrypts it under the public key, and homomorphically
-        scores it against every stored HRR-lift ciphertext — the inner product of two lifts
+        scores it against every stored HRR-lift ciphertext - the inner product of two lifts
         IS the HRR phase-cosine similarity (E4 4a), so this is blind conflict / fuzzy content
         scoring with the SAME cosine primitive embeddings use. Uses ``self.blind_hrr`` (the
         2·hrr_dim HRR context, distinct from the embed-dim recall ``self.blind``). The store
@@ -492,13 +492,13 @@ class BlindRetriever(LatticeRetriever):
 
 class BlindWriter:
     """Tier-1 blind WRITE (roadmap 0b/E4): encrypt a fact's unit vector client-side and persist
-    ONLY the ciphertext to the store. ``table``-parametrized — ``semantic_he`` for the embedding
+    ONLY the ciphertext to the store. ``table``-parametrized - ``semantic_he`` for the embedding
     (E2), ``semantic_he_hrr`` for the HRR (cos,sin) lift (E4). The plaintext never reaches the
-    blind store through this path — encryption happens here under the public key
+    blind store through this path - encryption happens here under the public key
     (``blind.encrypt_unit_vector``), and the store keeps an opaque blob (``store_he_vector``).
 
     ``blind`` is a duck-typed he_crypto client (``BlindRecallPRE``/``BlindCrypto``) exposing
-    ``encrypt_unit_vector`` — the only HE seam, so BlindWriter carries no openfhe import. The
+    ``encrypt_unit_vector`` - the only HE seam, so BlindWriter carries no openfhe import. The
     provider drives it from the consolidation/ingest path when ``encryption_mode=blind``:
     after a fact is added (id known), ``write_fact(fact_id, embedding)`` stores the ct.
     """
@@ -533,7 +533,7 @@ class BlindMaintainer:
     """E5 5b: client-side orchestration of the BLIND dream-cycle maintenance over encrypted
     resonance (``semantic_he_meta``). The store DECAYS the encrypted resonance every cycle
     WITHOUT reading it (fully blind); the trusted client (holding the secret) SETTLES
-    promotion/eviction on a visit by decrypting and thresholding in plaintext — the
+    promotion/eviction on a visit by decrypting and thresholding in plaintext - the
     client-assisted model (roadmap §8 E5 5b). The store never sees plaintext resonance.
 
     ``maint`` is a duck-typed ``he_crypto.BlindMaintenance`` (``encrypt_scalars`` /
@@ -562,12 +562,12 @@ class BlindMaintainer:
 
     def decay_all(self, factor: float) -> int:
         """STORE-side blind decay: multiply every stored encrypted resonance by ``factor`` and
-        write it back — runs WITHOUT the secret (the store never reads the value). Returns the
+        write it back - runs WITHOUT the secret (the store never reads the value). Returns the
         count decayed. The per-cycle forgetting, fully blind.
 
-        ⚠️ DEPTH CONTRACT (read before wiring E5 — BlindMaintainer is NOT instantiated anywhere
+        ⚠️ DEPTH CONTRACT (read before wiring E5 - BlindMaintainer is NOT instantiated anywhere
         yet, so this is a forward-looking guard, not a live bug): this is IN-PLACE COMPOUNDING
-        decay — it reads the current ct and re-multiplies it each cycle, spending ONE
+        decay - it reads the current ct and re-multiplies it each cycle, spending ONE
         multiplicative level per call. It therefore requires a maint context built at the DEEP
         ``he_crypto._MAINT_DEPTH`` (~14). It MUST NOT run against the light
         ``_MAINT_BLIND_DEPTH`` (=1) keyset that ``crypto_keys.setup_or_load_blind_contexts``
@@ -616,10 +616,10 @@ class BlindMaintainer:
 class BlindEntityStore:
     """E7 7b (client-side, no-leak): per-fact entity NAME sets are AEAD-encrypted at rest in
     ``semantic_he_entities`` (one opaque, RANDOMIZED blob per fact) so the untrusted store can't
-    read entity names and identical sets are indistinguishable on disk — the store learns NO
+    read entity names and identical sets are indistinguishable on disk - the store learns NO
     entity co-occurrence. Overlap / conflict detection are CLIENT-side ops on the decrypted sets
     (roadmap §7.4; the SSE/PSI store-side-leakage path was declined). The store-side PSI option
-    is deliberately NOT built — overlap never runs on the untrusted store.
+    is deliberately NOT built - overlap never runs on the untrusted store.
 
     ``encrypt_fn`` / ``decrypt_fn`` are the trusted-client binders over
     ``crypto_keys.encrypt_entities`` / ``decrypt_entities`` with the entity key, so
@@ -658,7 +658,7 @@ class BlindEntityStore:
     def find_conflicts(self, fact_id: int, min_overlap: int = 1,
                        limit: int = 20) -> List[tuple]:
         """CLIENT-side conflict-candidate finder: facts sharing >= ``min_overlap`` entities with
-        ``fact_id``, strongest first. Decrypts every stored set in TRUSTED RAM — the untrusted
+        ``fact_id``, strongest first. Decrypts every stored set in TRUSTED RAM - the untrusted
         store never computes this (no co-occurrence leakage). Returns [(other_fact_id, overlap), …]."""
         target = set(self.get_entities(fact_id) or [])
         if not target:
@@ -679,7 +679,7 @@ class BlindEntityStore:
 
 class BlindContentStore:
     """§5-1 sealed-content mirror (client-side): a fact's CONTENT surface (content text +
-    category + source quote/ref) is AEAD-encrypted at rest in ``semantic_he_content`` — one
+    category + source quote/ref) is AEAD-encrypted at rest in ``semantic_he_content`` - one
     opaque, RANDOM-nonce blob per fact, so the untrusted store holds only ciphertext and
     identical content is indistinguishable on disk. The blind analogue of BlindEntityStore for
     the natural-language surface; the first step of §5's move to a full blind store where the
@@ -703,7 +703,7 @@ class BlindContentStore:
     def set_content(self, fact_id: int, fields: Dict) -> bool:
         """Encrypt a fact's content surface (the ``_FIELDS`` subset of its plaintext row) and store
         the opaque blob. ``fields`` is any dict/row exposing those keys (e.g. store.get_fact);
-        missing keys serialize as None. Non-fatal — a blind-write hiccup never unwinds the
+        missing keys serialize as None. Non-fatal - a blind-write hiccup never unwinds the
         already-committed plaintext write."""
         if fact_id is None or int(fact_id) <= 0:
             return False
@@ -724,7 +724,7 @@ class BlindContentStore:
 
 class BlindSealedStore:
     """§5-1b generic sealed TEXT surface (episodes / triples / summaries): store one opaque AEAD
-    payload — a str or a dict — keyed by its SOURCE row id, in the given ``table``. The blind
+    payload - a str or a dict - keyed by its SOURCE row id, in the given ``table``. The blind
     analogue of the plaintext episode/triple/summary text; unlike BlindContentStore (which shapes a
     fixed fact-content field set) the payload is passed through as-is, so the reconcile loop shapes
     it per surface. ``encrypt_fn`` / ``decrypt_fn`` are the trusted-client binders over
@@ -739,7 +739,7 @@ class BlindSealedStore:
 
     def set_payload(self, row_id: int, payload) -> bool:
         """Encrypt ``payload`` (str or dict) and store the opaque blob keyed by ``row_id``.
-        Non-fatal — a blind-write hiccup never unwinds the committed plaintext write."""
+        Non-fatal - a blind-write hiccup never unwinds the committed plaintext write."""
         if row_id is None or int(row_id) <= 0 or payload is None:
             return False
         try:
@@ -759,13 +759,13 @@ class BlindSealedStore:
 class BlindVisitor:
     """§5-2 client visitor: assembles the dream cycle's per-fact WORKING SET from the §5-1 sealed
     ciphertext (content / entities / triples) plus the sealed episode/summary text, instead of the
-    plaintext store — the read surface a cognition pass (clustering, conflict adjudication, gist,
+    plaintext store - the read surface a cognition pass (clustering, conflict adjudication, gist,
     narrative) needs to run WITHOUT the plaintext content, which is the property the §5-4 seal
     requires. Read-only, trusted-client (it holds the decrypt binders via the sealed stores).
 
     Pre-seal it runs BESIDE the authoritative plaintext store; the §5-2 parity harness asserts it
     reconstructs the SAME working set the plaintext path sees, so re-routing a pass through it cannot
-    change outcomes. Only the sealed TEXT is served from ciphertext — STRUCTURAL metadata that never
+    change outcomes. Only the sealed TEXT is served from ciphertext - STRUCTURAL metadata that never
     held content (a fact's relation-id list, row ids) still reads from the plaintext ``store``, and
     those columns survive the seal. A missing surface (e.g. no entity store) yields empty, not an
     error, so the visitor degrades to whatever subset is mirrored."""
@@ -777,8 +777,8 @@ class BlindVisitor:
         self._sealed = sealed or {}        # {episode|triple|summary: BlindSealedStore}
 
     def fact_view(self, fact_id: int) -> Optional[Dict]:
-        """The decrypted per-fact working set — ``{content, category, source_quote, source_ref,
-        entities:[...]}`` — or None if the fact's content is not mirrored. Content/quote/category
+        """The decrypted per-fact working set - ``{content, category, source_quote, source_ref,
+        entities:[...]}`` - or None if the fact's content is not mirrored. Content/quote/category
         come from ``semantic_he_content``; entities from the AEAD set (normalized). This is exactly
         what an abstraction/gist/conflict pass reads per fact, served blind."""
         if self._content is None:
@@ -791,7 +791,7 @@ class BlindVisitor:
         return view
 
     def triples(self, fact_id: int) -> List[Dict]:
-        """Decrypted ``{subject, relation, object}`` triples for a fact — relation ids read
+        """Decrypted ``{subject, relation, object}`` triples for a fact - relation ids read
         STRUCTURALLY from the plaintext store, text decrypted from ``semantic_he_triples``."""
         ts = self._sealed.get("triple")
         if ts is None:

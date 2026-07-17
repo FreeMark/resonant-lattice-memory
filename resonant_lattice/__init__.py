@@ -1,5 +1,5 @@
 ﻿"""
-Resonant Lattice Memory — Neuroplastic Hebbian System
+Resonant Lattice Memory - Neuroplastic Hebbian System
 MemoryProvider implementation for hermes-agent.
 
 This file is the thin COMPOSITE / entry point: `LatticeMemoryProvider` mixes in the
@@ -12,9 +12,9 @@ and the `LatticeStore` mixins (see MODULE_MAP.md / README.md):
 - `feedback` + the other `lattice_store` tool actions (Hebbian reinforcement, conflicts, …)
 - Recall-based reinforcement + cosine semantic dedup + dwell-gated tier promotion
 - Optional two-tier encryption (at-rest SQLCipher; homomorphic blind store)
-- All operations driven purely by memory cycle count — no time-based actions whatsoever.
+- All operations driven purely by memory cycle count - no time-based actions whatsoever.
 
-(Multi-modal image/audio ingestion is NOT implemented — see ENCRYPTION_ROADMAP.md §3.1 and MEMORY_ROADMAP.md.)
+(Multi-modal image/audio ingestion is NOT implemented - see ENCRYPTION_ROADMAP.md §3.1 and MEMORY_ROADMAP.md.)
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from agent.memory_provider import MemoryProvider
 logger = logging.getLogger(__name__)
 
 
-# HRR (Holographic Reduced Representations) — holographic.py ships in this
+# HRR (Holographic Reduced Representations) - holographic.py ships in this
 # plugin directory; the sys.path insert below makes it importable as a
 # top-level module regardless of how the host loader imported this package.
 import sys
@@ -57,14 +57,14 @@ except Exception as e:
     _HRR_AVAILABLE = False
 
 # ----------------------------------------------------------------------
-# Tool Schema + handler — extracted to tool_handler.py (named tool_handler, NOT
+# Tool Schema + handler - extracted to tool_handler.py (named tool_handler, NOT
 # tools, to avoid shadowing Hermes' top-level `tools` package on sys.path[0]).
 # ToolHandlerMixin is composed into LatticeMemoryProvider below; LATTICE_STORE_SCHEMA
 # is re-exported here so the name stays importable from this package.
 from tool_handler import ToolHandlerMixin, LATTICE_STORE_SCHEMA
 
 # ----------------------------------------------------------------------
-# Phase E — self-write policy boundary
+# Phase E - self-write policy boundary
 # ----------------------------------------------------------------------
 # Extracted to self_write_gate.py (the auditable denylists + the pure
 # is_self_referential_infra(content) the provider calls). Re-exported here so the
@@ -90,7 +90,7 @@ from config_schema import CONFIG_SCHEMA, DEFAULTS
 
 
 # ----------------------------------------------------------------------
-# Phase D+ — source_quote attestation (two-channel grounding verifier)
+# Phase D+ - source_quote attestation (two-channel grounding verifier)
 # ----------------------------------------------------------------------
 # Extracted verbatim to attestation.py (pure: re + difflib). Re-exported here so
 # the names remain importable from this package and so consolidation imports the
@@ -110,7 +110,7 @@ from lifecycle import LifecycleMixin
 
 class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
                             LifecycleMixin, MemoryProvider):
-    """Resonant Lattice Memory — the ultimate local neuroplastic memory system."""
+    """Resonant Lattice Memory - the ultimate local neuroplastic memory system."""
 
     def __init__(self, config: dict | None = None):
         self._config = config or {}
@@ -140,7 +140,7 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         self._embed_model = self._config.get("embed_model", DEFAULTS["embed_model"])
         # Embedding HTTP timeout + keep-alive. Default 30s (was a hardcoded 5s) so a COLD
         # networked embedder (a small GPU that idle-unloaded the model) can load on the first
-        # call without the request being dropped — a 5s ceiling silently lost facts at
+        # call without the request being dropped - a 5s ceiling silently lost facts at
         # consolidation. keep_alive keeps the model resident between turns (fewer cold loads).
         self._embed_timeout = float(self._config.get("embed_timeout", DEFAULTS["embed_timeout"]))
         self._embed_keep_alive = self._config.get("embed_keep_alive", DEFAULTS["embed_keep_alive"])
@@ -148,15 +148,15 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         # model invents specifics at extraction time, producing real rows with
         # wrong content. Consolidation is async/off the hot path, so a slower,
         # stronger model is the right trade. Recommended default raised to
-        # ibm/granite4.1:8b (the exact Ollama tag — namespaced). Step-up:
+        # ibm/granite4.1:8b (the exact Ollama tag - namespaced). Step-up:
         # ibm/granite4.1:30b Q4_K_M (must be pulled in Ollama; never quantize below
-        # Q4 — it degrades extraction fidelity). The embedding model stays small.
-        # Absent models don't hard-fail — this is just a config value the Ollama
+        # Q4 - it degrades extraction fidelity). The embedding model stays small.
+        # Absent models don't hard-fail - this is just a config value the Ollama
         # call will surface if unavailable.
         self._reason_model = self._config.get("reason_model", DEFAULTS["reason_model"])
         # Reason-model HTTP timeout (extraction/abstraction/distillation). Default 300s (was a
         # hardcoded 180s) because it runs OFF the hot path (dream cycle) and a flagship reasoning
-        # model (e.g. nemotron-3-ultra) can "think" well past 180s on a long transcript — a tight
+        # model (e.g. nemotron-3-ultra) can "think" well past 180s on a long transcript - a tight
         # ceiling silently times the whole epoch out and stores 0 facts. Raise further for very
         # slow/cloud reasoners; a one-off timeout is non-fatal (the next cycle retries).
         self._reason_timeout = float(self._config.get("reason_timeout", DEFAULTS["reason_timeout"]))
@@ -212,7 +212,7 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
             self._config.get("recall_procedural_cap", DEFAULTS["recall_procedural_cap"]))
 
         # Near-identity gate for silently merging a new fact into an existing one.
-        # The 0.78–0.95 band is left to conflict detection so contradictory updates
+        # The 0.78-0.95 band is left to conflict detection so contradictory updates
         # aren't dropped as reinforcements. See store.add_or_reinforce_fact.
         self._reinforce_threshold = float(self._config.get("reinforce_threshold", DEFAULTS["reinforce_threshold"]))
         self._hrr_dim = int(self._config.get("hrr_dim", DEFAULTS["hrr_dim"]))
@@ -234,13 +234,13 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         # Conflict-decay floor (0.0 = original lethal duel; >0 = non-lethal).
         self._conflict_decay_floor = float(self._config.get("conflict_decay_floor", DEFAULTS["conflict_decay_floor"]))
         # Conflict-limbo (A9/A13, default ON): a CONTESTED fact (active conflict group) is held in
-        # sustained-resonance limbo — protected from cycle decay AND prune, and auto-bleed
-        # (apply_conflict_decay) is skipped — so a contested belief never fades before the USER
+        # sustained-resonance limbo - protected from cycle decay AND prune, and auto-bleed
+        # (apply_conflict_decay) is skipped - so a contested belief never fades before the USER
         # arbitrates it (resolve_conflict). It stays flagged on recall to nudge arbitration. Off
         # restores the original auto-bleed-to-resolution duel.
         self._conflict_limbo = bool(self._config.get("conflict_limbo", DEFAULTS["conflict_limbo"]))
         # Surprise/importance-weighted retention (A11, default 0.5): a fact that ever mattered (high
-        # max_resonance_seen — a surprising one-off entered high via novelty_boost, or was reinforced)
+        # max_resonance_seen - a surprising one-off entered high via novelty_boost, or was reinforced)
         # decays SLOWER, so a unique one-off is retained longer before going dormant. 0 = uniform decay.
         self._surprise_decay_discount = float(self._config.get("surprise_decay_discount", DEFAULTS["surprise_decay_discount"]))
         # Importance-weighted retention: high-stakes categories decay slower so an
@@ -249,7 +249,7 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         self._importance_categories = self._config.get("importance_categories", DEFAULTS["importance_categories"])
         # Conflict CONTAINMENT (default ON, fail-closed; set False only for an explicit
         # "unsafe mode"): withhold unpinned, high-stakes, UNRESOLVED-conflict facts from the
-        # autonomous recall block AND explicit search, and surface a [WITHHELD] notice —
+        # autonomous recall block AND explicit search, and surface a [WITHHELD] notice -
         # so the agent can't silently act on a contested high-stakes value before
         # resolve_conflict. Pinned authority is never withheld. get_fact by ID is never gated.
         self._quarantine_high_stakes_conflicts = bool(
@@ -281,12 +281,12 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
                              DEFAULTS["datetime_timezone"]) or "")
         # Phase 1b supersedion (default ON): a conflict loser bled to 0 is retired
         # as tier='superseded' history (superseded_by=winner) BEFORE prune instead
-        # of being deleted — a memory is the history of what you believed. Set
+        # of being deleted - a memory is the history of what you believed. Set
         # False to restore the original lethal-delete duel. max_superseded_history
         # bounds how many retired rows are kept (oldest dropped beyond the cap).
         self._keep_superseded = bool(self._config.get("keep_superseded", DEFAULTS["keep_superseded"]))
         self._max_superseded_history = int(self._config.get("max_superseded_history", DEFAULTS["max_superseded_history"]))
-        # Phase 2 — freshness decoupled from strength. freshness_halflife_cycles is
+        # Phase 2 - freshness decoupled from strength. freshness_halflife_cycles is
         # the cycle count for a fact's confirmation to "halve" in the gentle recall
         # ranking nudge (0 disables the nudge → pure similarity). Strictly cycle-
         # driven (last_confirmed_cycle vs memory_cycle), never wall-clock.
@@ -296,13 +296,13 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         # Optional "use it or lose it": extra dream-cycle decay for facts that are
         # BOTH weak and long-unconfirmed (0 = off; presentation-safe, bounded).
         self._stale_decay_boost = float(self._config.get("stale_decay_boost", DEFAULTS["stale_decay_boost"]))
-        # Phase 3 — salience/novelty at ingestion. A novel (low top-similarity) fact
+        # Phase 3 - salience/novelty at ingestion. A novel (low top-similarity) fact
         # enters at higher resonance so an important one-shot sticks without repeat;
         # novelty_boost is the max extra resonance for a fully-novel fact. Deterministic
         # and bounded. A fully-novel fact can now passively clear promotion_threshold.
         self._novelty_enabled = bool(self._config.get("novelty_enabled", DEFAULTS["novelty_enabled"]))
         self._novelty_boost = float(self._config.get("novelty_boost", DEFAULTS["novelty_boost"]))
-        # Phase 4 — gist-preserving forgetting (default OFF; the heaviest, LLM-bound
+        # Phase 4 - gist-preserving forgetting (default OFF; the heaviest, LLM-bound
         # phase). Before pruning, dying-but-once-important facts are clustered and
         # summarised into a 'gist' so meaning survives detail loss. gist_floor: the
         # resonance at/below which a fact is 'dying'; gist_min_peak_resonance: how
@@ -316,7 +316,7 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         self._gist_max_clusters = max(1, int(self._config.get("gist_max_clusters", DEFAULTS["gist_max_clusters"])))
         self._gist_prompt = self._config.get(
             "gist_prompt", DEFAULTS.get("gist_prompt", DEFAULT_GIST_PROMPT))
-        # Phase 6 — conflicts as conversation. Surface MATURE unresolved conflicts in
+        # Phase 6 - conflicts as conversation. Surface MATURE unresolved conflicts in
         # recall (one gentle nudge per group per cycle) so the agent/user can
         # disambiguate via the pending_conflicts / resolve_conflict tool actions,
         # instead of every contradiction being resolved silently by the duel.
@@ -335,7 +335,7 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
             self._config.get("conflict_llm_adjudication", DEFAULTS["conflict_llm_adjudication"]))
         # Per-conflict "asked once" guard (reset each dream cycle, like the recall gate).
         self._conflicts_surfaced: set = set()
-        # Phase 5a — HRR relational reasoning (extraction stage; default OFF). When
+        # Phase 5a - HRR relational reasoning (extraction stage; default OFF). When
         # on, each NEW fact has its explicit (subject, relation, object) triples
         # extracted into fact_relations during consolidation (entity-grounded
         # patterns + optional LLM pass), bound-HRR encoded for Phase-5b recall.
@@ -392,34 +392,34 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
                 or self._ollama_endpoint_relation != self._ollama_endpoint_reason):
             logger.info("Relation extraction routed to %s @ %s",
                         self._relation_model, self._ollama_endpoint_relation)
-        # Phase 5b — relational recall. The HRR partial-binding probe surfaces a
+        # Phase 5b - relational recall. The HRR partial-binding probe surfaces a
         # triple as a fuzzy match at/above this similarity when it isn't an exact
         # graph match (graceful fallback). ~0.69 = all known slots, ~0.46 = 2 of 3,
         # ~0.34 = 1 of 2; 0.4 keeps strong partials, drops single-slot noise.
         self._relation_recall_hrr_floor = float(self._config.get("relation_recall_hrr_floor", DEFAULTS["relation_recall_hrr_floor"]))
-        # Phase 5c — bounded transitive inference. max_hops = max path length in
+        # Phase 5c - bounded transitive inference. max_hops = max path length in
         # edges for the `infer` action: multi-hop DERIVED links only (never stored,
         # confidence decays per hop). 1 = multi-hop disabled (empty results);
-        # 2+ = allow chains up to that length. Kept small — combinatorial growth
+        # 2+ = allow chains up to that length. Kept small - combinatorial growth
         # + inference uncertainty both rise with hops.
         self._max_inference_hops = max(1, int(self._config.get(
             "max_inference_hops", DEFAULTS["max_inference_hops"])))
-        # Phase 7 — deliberate self-model. A curated, never-auto-ingested identity
+        # Phase 7 - deliberate self-model. A curated, never-auto-ingested identity
         # store (the separate agent_identity table). enable_self_model gates the
         # surface (a deterministic identity block in system_prompt_block + the
         # set/get_self_model tool actions); self_model_seed pre-populates keys on
-        # first run (INSERT OR IGNORE — never clobbers curated values). The
+        # first run (INSERT OR IGNORE - never clobbers curated values). The
         # autonomous ingest path physically can't write this table (separate from
-        # semantic_facts) — the only writes are the explicit, primary-context-only
+        # semantic_facts) - the only writes are the explicit, primary-context-only
         # set_self_model action.
         self._enable_self_model = bool(self._config.get("enable_self_model", DEFAULTS["enable_self_model"]))
         self._self_model_seed = self._config.get("self_model_seed", DEFAULTS["self_model_seed"]) or {}
         # P3e tool-grounding seed: durable procedural/guardrail facts ingested at startup so the agent
         # is grounded from day one (e.g. the Stripe Link CLI guardrails). A list of content strings;
-        # empty = no seed. Phrase POSITIVELY (P3f judge lesson — naming a forbidden capability primes
+        # empty = no seed. Phrase POSITIVELY (P3f judge lesson - naming a forbidden capability primes
         # small models to use it).
         self._procedural_seed = self._config.get("procedural_seed", DEFAULTS["procedural_seed"]) or []
-        # Phase 8 — narrative / autobiographical layer (default OFF). At session end
+        # Phase 8 - narrative / autobiographical layer (default OFF). At session end
         # the reasoning model writes a one-paragraph gist of the session into the
         # durable session_summaries table (survives episode pruning); the most recent
         # are surfaced as "recent history" in the system prompt. Bounded by
@@ -437,7 +437,7 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         self._max_long_facts = int(self._config.get("max_long_facts", DEFAULTS["max_long_facts"]))
         # Buried-but-pluckable forget policy (P2b-store): cycles a fully-faded fact stays DORMANT
         # (kept + pluckable by a strong cue) before it is truly deleted. >0 = demote then deep-delete
-        # (default — "eventually fades, preserve the essence"); 0 = delete at resonance 0 (legacy);
+        # (default - "eventually fades, preserve the essence"); 0 = delete at resonance 0 (legacy);
         # <0 = never delete (pure archive). Cycle-driven, no wall-clock.
         self._forget_after_dormant_cycles = int(self._config.get("forget_after_dormant_cycles", DEFAULTS["forget_after_dormant_cycles"]))
         # Recall-based reinforcement (Hebbian 'use it or lose it'): small bump to
@@ -453,7 +453,7 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         # off, the lattice_store 'remove' action is refused for the agent and it is steered to
         # unhelpful feedback (fade to dormancy, recoverable) + pin (protect). Set True only for an
         # admin/operator context that genuinely needs audited hard deletion. remove_fact (the store
-        # method) is unaffected — this gates only the agent-facing tool action.
+        # method) is unaffected - this gates only the agent-facing tool action.
         self._agent_can_delete = bool(self._config.get("agent_can_delete", DEFAULTS["agent_can_delete"]))
         # Source-quote attestation (Phase D+): verify each extracted fact's
         # source_quote against the consolidation transcript via the two-channel
@@ -467,7 +467,7 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         # Raw tool calls are logged as episodic events (store.tool_episodes) and
         # periodically generalized into reusable 'procedural' semantic facts by the
         # dream cycle. No per-call resonance is applied (the old
-        # tool_memory_resonance_success/failure knobs are intentionally gone) — a
+        # tool_memory_resonance_success/failure knobs are intentionally gone) - a
         # remembered FAILURE is high-value, so failures become procedural rules
         # rather than being penalized toward pruning.
         self._tool_distill_frequency = max(1, int(self._config.get("tool_distill_frequency", DEFAULTS["tool_distill_frequency"])))
@@ -484,12 +484,12 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         self._dream_every_n_consolidations = max(1, int(self._config.get("dream_every_n_consolidations", DEFAULTS["dream_every_n_consolidations"])))
         # Cycle-based memory-health audit: log a read-only health snapshot every N
         # dream cycles (0 disables the periodic log; the memory_audit tool action
-        # is always available on demand). Strictly dream-cycle-driven — no timers.
+        # is always available on demand). Strictly dream-cycle-driven - no timers.
         self._health_check_every_n_dream_cycles = int(self._config.get("health_check_every_n_dream_cycles", DEFAULTS["health_check_every_n_dream_cycles"]))
         self._health_near_cap = float(self._config.get("health_near_cap", DEFAULTS["health_near_cap"]))
 
         # === Encryption (E0: encrypted-at-rest; 'blind' reserved for the HE tier) ===
-        # Intent only — the actual SQLCipher binding is selected at import time in
+        # Intent only - the actual SQLCipher binding is selected at import time in
         # store_common via the RESONANT_LATTICE_DB_ENCRYPTED env signal; the key is
         # derived in _resolve_encryption_db_key() at initialize().
         self._encryption_mode = str(self._config.get("encryption_mode", DEFAULTS["encryption_mode"]) or "none").lower()
@@ -566,7 +566,7 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
             return True
         except Exception:
             logger.warning(
-                "resonant_lattice: sqlite-vec not importable — provider unavailable. "
+                "resonant_lattice: sqlite-vec not importable - provider unavailable. "
                 "Install with: pip install sqlite-vec"
             )
             return False
@@ -577,13 +577,13 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         Returns a bytearray key when encryption_mode='at_rest' (the store wipes it
         after PRAGMA key), or None for plaintext mode. Raises a clear, actionable
         error on misconfiguration rather than silently persisting an UNencrypted DB.
-        The keystore sidecar is created on first run (DESTRUCTIVE — see the warning).
+        The keystore sidecar is created on first run (DESTRUCTIVE - see the warning).
         """
         mode = self._encryption_mode
         if mode in ("none", "", None):
             return None
         if mode == "blind":
-            # Tier-1 blind: the DB itself stays plaintext-at-rest in this build — the blind
+            # Tier-1 blind: the DB itself stays plaintext-at-rest in this build - the blind
             # tier protects the embedding/HRR/entities via the semantic_he* tables + homomorphic
             # recall; composing with at_rest (whole-DB SQLCipher) is a follow-up. The HE keys are
             # resolved separately after the store opens (_resolve_blind_contexts / _resolve_blind_entities).
@@ -600,7 +600,7 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         if not store_common.encrypted_binding_active():
             err = store_common.sqlite_binding_error()
             hint = (f" ({err})" if err else
-                    " — set RESONANT_LATTICE_DB_ENCRYPTED=1 in the launch environment "
+                    " - set RESONANT_LATTICE_DB_ENCRYPTED=1 in the launch environment "
                     "(before the plugin is imported)")
             raise RuntimeError(
                 "encryption_mode=at_rest but the SQLCipher binding is not active" + hint
@@ -632,7 +632,7 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
                 crypto_keys.save_keystore(keystore_path, keystore)
                 logger.warning(
                     "Encrypted-at-rest keystore CREATED at %s. The passphrase is the "
-                    "ONLY way to decrypt this memory DB — there is NO recovery.",
+                    "ONLY way to decrypt this memory DB - there is NO recovery.",
                     keystore_path,
                 )
             else:
@@ -692,7 +692,7 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
 
         try:
             self._store = _LatticeStore(
-                db_path=db_path,                                   # NEW — profile-scoped
+                db_path=db_path,                                   # NEW - profile-scoped
                 vector_dim=self._probe_vector_dim(),
                 initial_resonance=self._initial_resonance,
                 decay_per_cycle=self._decay_per_cycle,
@@ -717,7 +717,7 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         except Exception as e:
             logger.error(
                 "CRITICAL: LatticeStore failed to open (%s). Resonant Lattice "
-                "Memory is DISABLED for this session — lattice_store calls will "
+                "Memory is DISABLED for this session - lattice_store calls will "
                 "report unavailable.", e, exc_info=True,
             )
             self._store = None
@@ -732,7 +732,7 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         # Phase 8: remember the memory_cycle this session started at, so the
         # session-end narrative summary can stamp the cycle range it spans.
         self._session_start_cycle = mc
-        # Phase 7: seed the deliberate self-model on startup (INSERT OR IGNORE —
+        # Phase 7: seed the deliberate self-model on startup (INSERT OR IGNORE -
         # never clobbers values the agent has curated since first run). Gated by
         # enable_self_model; non-fatal.
         if self._enable_self_model and self._self_model_seed:
@@ -750,7 +750,7 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         # Tier-1 blind (collaborator): when encryption_mode=blind, BlindTier owns the HE
         # recall/HRR/maint clients, the BlindWriters, and the AEAD entity store, plus the reconcile
         # pass. The provider holds it as ONE optional field (self._blind_tier) and decorates the
-        # retriever through it. Non-fatal — if the blind tier can't come up, decorate_retriever
+        # retriever through it. Non-fatal - if the blind tier can't come up, decorate_retriever
         # returns the plaintext retriever and reconcile() is a no-op, so memory keeps working on
         # plaintext recall rather than disabling. SEAM: the entire blind-vs-plaintext divergence
         # lives behind self._blind_tier; the cognition layer never sees it (see blind_tier.py).
@@ -805,7 +805,7 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         """Resolve the embedding dimension robustly.
 
         Priority:
-          1. An existing on-disk DB's stored vec dimension is authoritative —
+          1. An existing on-disk DB's stored vec dimension is authoritative -
              prevents a transient Ollama outage at startup from pinning the store
              into degraded (FTS-only) mode for the whole session.
           2. Otherwise probe Ollama (with retries).
@@ -848,7 +848,7 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         # 3. Fallback.
         logger.warning(
             "resonant_lattice: could not determine embedding dim (no existing DB, "
-            "Ollama probe failed) — defaulting to 768. Entering DEGRADED (FTS-only) mode "
+            "Ollama probe failed) - defaulting to 768. Entering DEGRADED (FTS-only) mode "
             "until embed succeeds or DB is rebuilt. This is normal on first run or cold embedder."
         )
         return 768
@@ -904,7 +904,7 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         return dict(DEFAULTS)  # copy
 
     def get_effective_config(self) -> dict:
-        """Live dial snapshot for memory_audit / stats — configured vs effective values.
+        """Live dial snapshot for memory_audit / stats - configured vs effective values.
 
         Surfaces the levers that most often diverge from intent (clamped reinforce,
         hops floor, store-wired conflict sweeps) plus models/endpoints and the
@@ -977,7 +977,7 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
 
     def system_prompt_block(self) -> str:
         if not self._store:
-            return "# Resonant Lattice Memory — Initializing..."
+            return "# Resonant Lattice Memory - Initializing..."
         block = (
             "# Resonant Lattice Memory Active\n"
             "Neuroplastic Hebbian system with 3-tier resonance (short/mid/long), "
@@ -985,7 +985,7 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
             "\n"
             "Recalled memory is a set of FALLIBLE RETRIEVED CANDIDATES, not ground "
             "truth. Treat anything inside <resonant_memory> as a hint that may be "
-            "approximate, outdated, or a semantically-similar near-miss — never as a "
+            "approximate, outdated, or a semantically-similar near-miss - never as a "
             "verbatim quote.\n"
             "- Anything inside <authority_rules> is a user-pinned BINDING rule "
             "(identity-level). Obey it over any conflicting note in <resonant_memory> "
@@ -996,7 +996,7 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
             "- NEVER present a reconstruction or a similar neighbour as a verbatim "
             "stored fact. To assert the exact content of a specific stored row, call "
             "lattice_store get_fact with its ID; a found:false result means it is "
-            "NOT stored — report that, do not substitute a neighbour.\n"
+            "NOT stored - report that, do not substitute a neighbour.\n"
             "- Each candidate carries [ID | Tier | Res] metadata: low Res or a "
             "'short' tier means weak/uncertain (more likely stale or noisy). A "
             "'long' tier with high Res is more reliable, but still confirm exact "
@@ -1005,11 +1005,11 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
             "contradictory facts about something. The system duels them automatically, "
             "but when you know which is right you may call lattice_store "
             "pending_conflicts to see the competitors and resolve_conflict (fact_id = "
-            "the correct one) to settle it — never silently pick one as truth.\n"
+            "the correct one) to settle it - never silently pick one as truth.\n"
             "Use lattice_store for manual control and feedback."
         )
         # Phase 7: surface the curated self-model DETERMINISTICALLY (not via fallible
-        # fuzzy recall). Read-only here — the ingest paths never write this store, so
+        # fuzzy recall). Read-only here - the ingest paths never write this store, so
         # it is authoritative about the agent itself. Updated only via set_self_model.
         if self._enable_self_model:
             try:
@@ -1020,7 +1020,7 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
                 lines = "\n".join(f"- {r['key']}: {r['value']}" for r in identity)
                 block += (
                     "\n\n# Agent Self-Model (curated, authoritative)\n"
-                    "This is your deliberately maintained identity — unlike recalled "
+                    "This is your deliberately maintained identity - unlike recalled "
                     "memory it is authoritative about yourself and is never auto-ingested. "
                     "Update it only via lattice_store set_self_model.\n" + lines
                 )
@@ -1037,7 +1037,7 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
                 block += (
                     "\n\n# Recent History (across sessions)\n"
                     "Summaries of what you and the user have been doing together "
-                    "(remembered gist, not verbatim — for continuity, not quoting). "
+                    "(remembered gist, not verbatim - for continuity, not quoting). "
                     "Use lattice_store narrative for more.\n" + lines
                 )
         return block
@@ -1090,7 +1090,7 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
 
         Deliberate POLICY BOUNDARY, not a cleverness heuristic. Its only job is to
         stop the memory system from autonomously persisting its own operational
-        chatter — model name, context size, IP/endpoint, training/identity — as if
+        chatter - model name, context size, IP/endpoint, training/identity - as if
         it were a durable user fact (which pollutes the user model and inflates
         self-referential resonance).
 
@@ -1098,7 +1098,7 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
           1) any _SELF_INFRA_PHRASES substring is unambiguous on its own, OR
           2) an AI-self _SELF_SUBJECTS term co-occurs with an _INFRA_TERMS
              descriptor (neither fires alone).
-        It UNDER-blocks on purpose — it will miss a novel paraphrase rather than
+        It UNDER-blocks on purpose - it will miss a novel paraphrase rather than
         risk dropping a legitimate fact about the USER's infrastructure or the
         user's project.
 
@@ -1109,7 +1109,7 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         return is_self_referential_infra(content)
 
     def get_config_schema(self) -> List[Dict[str, Any]]:
-        """Fields for `hermes memory setup`. All local — no secrets/credentials.
+        """Fields for `hermes memory setup`. All local - no secrets/credentials.
 
         NOTE on promotion latency: tier dwell is counted in DREAM CYCLES, and a
         dream cycle fires every `dream_every_n_consolidations` consolidations

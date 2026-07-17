@@ -1,4 +1,4 @@
-"""eval_run.py — CLI for the Phase-1 eval / tuning harness.
+"""eval_run.py - CLI for the Phase-1 eval / tuning harness.
 
 Examples:
   python eval_run.py                                  # example corpus, default presets, pseudo-embeds
@@ -6,7 +6,7 @@ Examples:
   python eval_run.py --ollama --cache emb.json        # persist/reuse embeddings across runs
   python eval_run.py --corpus mine.jsonl --presets presets.json --ollama --json
 
-A presets file is a JSON list of ``{"name": str, "config": {...}}`` — the export from the slider
+A presets file is a JSON list of ``{"name": str, "config": {...}}`` - the export from the slider
 page (A12). The harness embeds the corpus once (cached), replays it under each preset in parallel,
 and prints a best-first comparison (high right-time recall, low poison leak).
 """

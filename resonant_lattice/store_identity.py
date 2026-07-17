@@ -1,9 +1,9 @@
-"""store_identity.py — IdentityMixin: Phase-7 deliberate self-model.
+"""store_identity.py - IdentityMixin: Phase-7 deliberate self-model.
 
 Mixed into LatticeStore; uses self._conn/_lock. The agent_identity table is a
 SEPARATE store from semantic_facts: the autonomous ingest path
 (add_or_reinforce_fact) never touches it, so the ONLY writes are the deliberate
-set_self_model / seed_self_model calls here — and the provider gates the
+set_self_model / seed_self_model calls here - and the provider gates the
 set_self_model tool action to the primary agent context. This structural
 separation is the anti-fabrication guarantee: a consolidation/ingest LLM pass can
 READ the self-model (to stay consistent) but can never WRITE it, so it can't
@@ -11,7 +11,7 @@ become a backdoor for the self-chatter the Phase-E gate suppresses.
 
 The self-model is the POSITIVE counterpart to that suppression gate: a curated,
 authoritative record of who the agent is, what it can do, and its standing
-relationship with the user — surfaced deterministically in the system prompt
+relationship with the user - surfaced deterministically in the system prompt
 rather than reconstructed via fallible fuzzy recall.
 """
 

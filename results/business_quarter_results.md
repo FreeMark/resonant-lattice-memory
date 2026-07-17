@@ -15,7 +15,7 @@
 | hard | every recorded spend is recalled by entity at quarter end | PASS | 4/4 |
 | hard | no phantom/fabricated amount present | PASS |  |
 | info | tier distribution | INFO | {'long': 8, 'mid': 4} |
-| info | narrative | INFO | During this session the user asked me to approve successive funding allocations for Stark Industries—4350 cents in week 3, 4650 cents in week 6, 4950 cents in week 9, and 5250 cents in week 12—and I confirmed each approval using the --reque |
+| info | narrative | INFO | During this session the user asked me to approve successive funding allocations for Stark Industries-4350 cents in week 3, 4650 cents in week 6, 4950 cents in week 9, and 5250 cents in week 12-and I confirmed each approval using the --reque |
 | soft | narrative captured business activity (mentions a customer) | PASS | 1 entr(y/ies) |
 
 ## Caveat: near-identical fact merging
