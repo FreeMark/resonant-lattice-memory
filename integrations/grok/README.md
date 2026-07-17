@@ -26,14 +26,14 @@ this file and stand the whole thing up on a fresh grok install.
  |                                  |              |     -> facts + entities + RELATIONS   |
  | SessionStart hook  (read path)   |   ssh        |     -> dream cycle + narrative        |
  |   pull projection <--------------|<-------------|   rlm_export_memory.py   project      |
- |   write ~/.grok/memory/MEMORY.md |              |   rlm_*.py  (the 16 tool back-ends)   |
+ |   write ~/.grok/memory/MEMORY.md |              |   rlm_*.py  (the 17 tool back-ends)   |
  |                                  |              |                                       |
  | UserPromptSubmit hook (prefetch) |   ssh        |   rlm_search.py --no-reinforce        |
  |   -> detached worker; recall on  |------------->|     -> <resonant_memory> block        |
  |   the user's message -> local    |              |                                       |
  |   block; rlm_prefetch serves it  |              |                                       |
  |                                  |              |                                       |
- | MCP server  (active tools)       |   ssh (16)   |   reason model  (extraction)          |
+ | MCP server  (active tools)       |   ssh (17)   |   reason model  (extraction)          |
  |   rlm_mcp_server.py <------------|------------->|   relation model (triple slot-fill)   |
  |                                  |              |   embed model   (nomic-embed-text)    |
  | grok native memory engine        |  inject + memory_search                              |
@@ -68,7 +68,7 @@ Four planes, one lattice:
    writes a `<resonant_memory>` block to a local file; the `rlm_prefetch` MCP tool serves that block
    instantly (no node round-trip). It gives grok hermes-style per-turn recall for the cost of one
    argument-free tool call. See [Per-turn prefetch](#per-turn-prefetch).
-4. **Active tools (MCP):** a small stdio MCP server exposes the lattice as 16 tools so the agent
+4. **Active tools (MCP):** a small stdio MCP server exposes the lattice as 17 tools so the agent
    can operate its memory mid-session, not just wake up with a projection.
 
 RLM is the **sole writer** of grok's memory (grok's own auto-save / dream / compaction-flush are
@@ -78,7 +78,7 @@ drop rather than guess).
 
 ## The tool surface
 
-The MCP server (`hooks/rlm_mcp_server.py`) exposes **16 tools**. Each SSHes to a node script that
+The MCP server (`hooks/rlm_mcp_server.py`) exposes **17 tools**. Each SSHes to a node script that
 runs against the agent's own lattice.
 
 | Group | Tool | What it does |
@@ -98,6 +98,7 @@ runs against the agent's own lattice.
 | | `rlm_infer` | bounded multi-hop inference with the supporting path + per-hop-decayed confidence (a hypothesis) |
 | **identity** | `rlm_self_model` | read, or update an allowlisted identity key (role / mandate / current_focus …) |
 | **health** | `rlm_stats` | fact count, tiers, pins, cycle clocks, entities, relations, narratives, pending conflicts |
+| | `rlm_narrative` | recent session arcs (throughline / decisions / open loops / closed), newest first - read past the projected top-N |
 | | `rlm_conflict` | list / resolve / dismiss contradictions the dream cycle flagged |
 
 The agent's operating rule for these lives in [`rules/AGENT.md`](rules/AGENT.md) (search-on-encounter,
@@ -214,11 +215,11 @@ ollama + the RLM package; the **client** is the machine running grok (may be the
    cd ~/.grok/hooks && python -c "import rlm_grok_conf as C; print('configured:', C.configured())"
    # -> configured: True
 
-   # (b) MCP server lists 16 tools and reaches the node
+   # (b) MCP server lists 17 tools and reaches the node
    printf '%s\n%s\n' \
      '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
      '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | python ~/.grok/hooks/rlm_mcp_server.py
-   # -> a result listing 16 tools (rlm_pin ... rlm_infer)
+   # -> a result listing 17 tools (rlm_pin ... rlm_infer)
 
    # (c) per-turn prefetch: feed a fake prompt through the hook, then serve the block
    echo '{"sessionId":"t","cwd":"'$PWD'","workspaceRoot":"'$PWD'","prompt":"what do we know about the node setup"}' \
@@ -381,7 +382,7 @@ The integration, end to end:
   current message; the `rlm_prefetch` tool serves it instantly and reinforces on read. Plus a
   chunk-aligned projection so grok's native first-turn / post-compaction injection surfaces whole
   topics, not fragments. Closes the last hermes<->grok recall gap the wrapper allows.
-- **16 MCP tools** - write/curate (`rlm_remember`, `rlm_pin`, `rlm_forget`, `rlm_unpin`), recall
+- **17 MCP tools** - write/curate (`rlm_remember`, `rlm_pin`, `rlm_forget`, `rlm_unpin`), recall
   (`rlm_prefetch` per-turn block; `rlm_search` with recall-reinforcement; `external_rlm_search` +
   `transfer_knowledge` for domain lattices), feedback (`rlm_feedback`), inspect (`rlm_inspect`,
   `rlm_entity`), relations (`rlm_relational`, `rlm_infer`), identity (`rlm_self_model`,
