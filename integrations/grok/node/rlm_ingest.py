@@ -151,8 +151,26 @@ def _sample_spine(items, n):
     return head + mid + tail
 
 
+def _conversation_spine(turns, budget, per_turn_cap=1000):
+    """Head/mid/tail sample of the ACTUAL dialogue (BOTH roles), each turn capped and the whole
+    capped to `budget` chars. Restores the conversational arc + the secondary decisions and 'why'
+    that atomic fact extraction drops. (A/B/C judge test 2026-07-17: a hybrid facts+dialogue digest
+    beat facts-only on coverage with NO added fabrication, the gap widening on long sessions.)"""
+    fmt = [f"{r.upper()}: {' '.join(t.split())[:per_turn_cap]}" for r, t in turns if t and t.strip()]
+    if not fmt:
+        return ""
+    if sum(len(x) + 1 for x in fmt) <= budget:
+        return "\n".join(fmt)
+    avg = max(1, sum(len(x) for x in fmt) // len(fmt))
+    n = max(6, budget // avg)
+    k = n // 3
+    mid_n = n - 2 * k
+    ms = max(k, (len(fmt) - mid_n) // 2)
+    return "\n".join(fmt[:k] + fmt[ms:ms + mid_n] + fmt[-k:])[:budget]
+
+
 def _build_narrative_digest(store, base_sid, n_windows, turns,
-                            per_window=10, spine_turns=12, spine_char_cap=240):
+                            per_window=10, spine_budget=None, per_turn_cap=1000):
     """Build a hierarchical, born-fact-grounded digest of the WHOLE ingest for the narrative
     pass, replacing the tail-40-episodes input that clips long multi-window sessions.
 
@@ -160,7 +178,9 @@ def _build_narrative_digest(store, base_sid, n_windows, turns,
       1. BORN FACTS BY WINDOW - per window, its highest-signal born facts (the belief store's
          own distillation), ordered pinned -> priority-category -> high-resonance.
       2. OPEN / DECISION-LIKE - the priority-category facts rolled up across all windows.
-      3. SESSION SPINE - a head/mid/tail sample of user turns, for narrative flow.
+      3. CONVERSATION SPINE - a head/mid/tail sample of the ACTUAL dialogue (both roles), adaptive
+         in size to the session length, restoring the arc + secondary decisions the atomic fact
+         list drops (hybrid facts+dialogue; the grounded skeleton stays sections 1-2).
     Returns the digest string (empty when there is nothing to narrate)."""
     window_blocks, open_like, seen_open = [], [], set()
     for i in range(n_windows):
@@ -194,11 +214,12 @@ def _build_narrative_digest(store, base_sid, n_windows, turns,
     if open_like:
         sections.append("OPEN / DECISION-LIKE (rolled up across the whole session):\n"
                         + "\n".join(open_like[:24]))
-    user_turns = [t for role, t in turns if role == "user"] or [t for _, t in turns]
-    if user_turns:
-        spine = _sample_spine(user_turns, spine_turns)
-        spine_lines = ["  - " + " ".join(t.split())[:spine_char_cap] for t in spine]
-        sections.append("SESSION SPINE (user intents, head/mid/tail):\n" + "\n".join(spine_lines))
+    if turns:
+        budget = spine_budget if spine_budget is not None else min(20000, 4000 + n_windows * 1500)
+        spine = _conversation_spine(turns, budget, per_turn_cap)
+        if spine:
+            sections.append("CONVERSATION SPINE (head/mid/tail of the actual dialogue - the arc "
+                            "and secondary decisions the fact list above drops):\n" + spine)
 
     digest = "\n\n".join(sections)
     if len(digest) > _MAX_DIGEST_CHARS:
