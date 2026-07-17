@@ -13,7 +13,7 @@ Speaks newline-delimited JSON-RPC 2.0. Connection settings come from rlm_grok_co
   inspect        : rlm_inspect (one fact + its belief history), rlm_entity (entity-graph walk)
   relations      : rlm_relational (typed graph query), rlm_infer (multi-hop inference)
   identity       : rlm_self_model (read / allowlisted-key write)
-  health         : rlm_stats, rlm_narrative, rlm_conflict (list / resolve / dismiss)
+  health         : rlm_stats, rlm_dream, rlm_narrative, rlm_conflict (list / resolve / dismiss)
 """
 import sys, os, json, re, subprocess, time, threading, hashlib
 
@@ -149,6 +149,13 @@ TOOLS = [
      "description": ("Read-only health snapshot of your OWN lattice: fact count, tier distribution "
                      "(short/mid/long), pins, memory + dream cycle clocks, episodes, entities, "
                      "relations, narratives, and pending conflicts. Use to check the state of your memory."),
+     "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "rlm_dream",
+     "description": ("Read-only DREAM-CYCLE health of your OWN lattice: how memory is consolidating "
+                     "over cycles - tier flow (short/mid/long) with how many facts are READY to promote, "
+                     "dwell maturity, decay/fading, contested facts, abstraction/gist output, and the "
+                     "dials in effect (so each number sits next to the threshold that governs it). Use "
+                     "to see the 'why' behind what promotes, decays, or merges as your memory settles."),
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "rlm_narrative",
      "description": ("Read-only: your OWN recent session narratives - the remembered arc of what you "
@@ -585,6 +592,43 @@ def fmt_narrative(res):
     return "\n".join(lines)
 
 
+def do_dream():
+    cmd = f"{C.REMOTE_PY} {C.REMOTE_DIR}/rlm_dream.py"
+    try:
+        r = C.run(cmd, capture_output=True, timeout=90)
+        out = (r.stdout or b"").decode("utf-8", "replace").strip()
+        err = (r.stderr or b"").decode("utf-8", "replace")
+        return json.loads(out.splitlines()[-1]) if out else {"ok": False, "error": (err or "no output")[:200]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+
+
+def fmt_dream(res):
+    if not res.get("ok"):
+        return f"dream health failed: {res.get('error')}"
+    t = res.get("tiers") or {}
+    tline = ", ".join("%s %s (res %s, dwell %s)" % (k, v.get("n"), v.get("avg_res"), v.get("avg_dwell"))
+                      for k, v in t.items()) or "none"
+    pr = res.get("promotion") or {}
+    dl = pr.get("dials") or {}
+    cf = res.get("conflicts") or {}
+    ab = res.get("abstraction") or {}
+    de = res.get("decay") or {}
+    return (
+        "consolidation health @ memory_cycle %s / dream_cycle %s\n"
+        "  tiers: %s\n"
+        "  promotion ready: %s short->mid, %s mid->long  (dwell short>=%s / mid>=%s, res>=%s)\n"
+        "  conflicts: %s live group(s), %s contested, %s retired-as-history\n"
+        "  abstraction: %s abstract + %s gist facts (%s source links)\n"
+        "  decay: %s faded (res<2), %s stale-but-strong; %s pins" % (
+            res.get("memory_cycle"), res.get("dream_cycle"), tline,
+            pr.get("short_to_mid_ready"), pr.get("mid_to_long_ready"),
+            dl.get("short_tier_cycles"), dl.get("mid_tier_cycles"), dl.get("promotion_resonance"),
+            cf.get("live_groups"), cf.get("contested_facts"), cf.get("superseded_history"),
+            ab.get("abstract_facts"), ab.get("gist_facts"), ab.get("source_links"),
+            de.get("faded_low_res"), de.get("stale_but_strong"), res.get("pins")))
+
+
 def fmt_hits(res, source):
     if not res.get("ok"):
         return f"search failed: {res.get('error')}"
@@ -728,6 +772,10 @@ def dispatch_call(mid, name, a):
                 res = do_stats()
                 log(f"tools/call rlm_stats -> {res.get('ok')}")
                 send_tool(mid, fmt_stats(res), not res.get("ok"))
+            elif name == "rlm_dream":
+                res = do_dream()
+                log(f"tools/call rlm_dream -> {res.get('ok')}")
+                send_tool(mid, fmt_dream(res), not res.get("ok"))
             elif name == "rlm_narrative":
                 res = do_narrative(a.get("limit") or 5)
                 log(f"tools/call rlm_narrative -> {res.get('ok')}")
