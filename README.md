@@ -27,6 +27,30 @@ ready-made preset profiles (Scholar, Sovereign Vault, Overnight, Low-VRAM, and m
 
 ## What's new
 
+- **v1.7.0 (2026-07-17): dream / narrative enhancement.** A major upgrade to grok's autobiographical
+  narrative, plus new consolidation observability.
+  - **Hybrid narrative.** The session narrative is rebuilt from a hierarchical, born-fact-grounded
+    HYBRID digest of the whole session - per-window born facts (the belief store's own distillation) +
+    an open/decision roll-up + a head/mid/tail spine of the *actual dialogue* (both roles) - replacing
+    the tail-40-episodes input that clipped long multi-window ingests. A blind cloud-judged A/B/C test
+    showed the hybrid beats facts-only on coverage with no added fabrication (and that transcript-only
+    is worse - it reintroduces the tail bias), so facts give the grounded skeleton and the dialogue
+    spine restores the arc and secondary decisions that atomic extraction drops.
+  - **Structured + temporally framed.** Narratives now carry typed fields (throughline / decisions /
+    open_loops / closed / topics via an idempotent migration; `summarize_session(structured=True)` asks
+    for JSON and falls back to freeform prose on a parse miss) and a `historical` flag
+    (`mark_prior_narratives_historical`, a full two-direction recompute) so the newest reads as current
+    status. Every stored narrative is ASCII-guaranteed. The projection renders the newest arc in full +
+    older as one-liners, ordered by cycle; a new read-only `rlm_narrative` MCP tool reads past the top-N.
+  - **Dream observability.** A new read-only `rlm_dream` MCP tool + node script surfaces consolidation
+    health - tier flow (short/mid/long) with promotion-ready counts, dwell maturity, decay/fading,
+    contested facts, abstraction/gist output, and the dials in effect (each count beside the threshold
+    that governs it).
+  - **Anti-fossil hygiene.** The extraction prompt now rejects the lattice's own transient state
+    readings (cycle counters, fact/tier counts, before/after tallies, health snapshots) as non-durable.
+  - MCP surface **16 -> 18 tools** (`rlm_narrative`, `rlm_dream`). Backward-compatible throughout: the
+    structured/digest paths are opt-in, so the reference hermes narrative path is unchanged. Node test
+    suite **140 -> 146**.
 - **v1.6.9 (2026-07-17): grok narrative spans the whole session.** The session narrative
   (`summarize_session`) used to see only the last 40 episodes, so granite's `--context-shift` clipped
   the oldest and a long multi-window grok ingest narrated only its tail (a thin "paused for compact"
