@@ -2494,6 +2494,136 @@ def test_store_narrative_roundtrip_and_bound():
     s.close()
 
 
+# ---- P2: narrative eval bar - regression guards for the P0 digest + P1 structured/temporal/ascii work ----
+class _FakeOllamaResp:
+    def __init__(self, data):
+        self._data = data
+
+    def read(self):
+        return self._data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def _patch_ollama(response_fn):
+    """Patch urllib.request.urlopen so summarize_session runs offline. response_fn(payload)
+    -> the model's response string; `payload` is the decoded ollama request body, so a test
+    can capture the prompt that reached the model. Returns a restore() callable."""
+    import urllib.request as _ur
+    import json as _j
+    _orig = _ur.urlopen
+
+    def _fake(req, timeout=None):
+        payload = _j.loads(req.data.decode("utf-8"))
+        return _FakeOllamaResp(_j.dumps({"response": response_fn(payload)}).encode("utf-8"))
+    _ur.urlopen = _fake
+    return lambda: setattr(_ur, "urlopen", _orig)
+
+
+def test_narrative_structured_fields_roundtrip():
+    """P1.1: structured fields store as typed columns and decode back to lists; a plain
+    (freeform) summary keeps empty lists + a null throughline (back-compat)."""
+    if not _STORE_OK:
+        print("  SKIP"); return
+    s = _fresh_store()
+    sid = s.add_session_summary(
+        "s1", "blob", created_cycle=10,
+        throughline="chose the digest", decisions=["max 3 lanes", "no HE beside training"],
+        open_loops=["resume lane 71"], closed=["completed smoke test"], topics=["memory"])
+    plain = s.add_session_summary("s2", "just prose", created_cycle=11)
+    rows = {r["summary_id"]: r for r in s.get_recent_narrative(chronological=False)}
+    r1, r2 = rows[sid], rows[plain]
+    assert r1["decisions"] == ["max 3 lanes", "no HE beside training"], r1["decisions"]
+    assert r1["open_loops"] == ["resume lane 71"] and r1["closed"] == ["completed smoke test"], r1
+    assert r1["throughline"] == "chose the digest" and r1["topics"] == ["memory"], r1
+    assert r2["decisions"] == [] and r2["open_loops"] == [] and r2["throughline"] is None, r2
+    s.close()
+
+
+def test_narrative_temporal_framing():
+    """P1.2: mark_prior_narratives_historical keeps the newest current, flags the rest,
+    and is idempotent."""
+    if not _STORE_OK:
+        print("  SKIP"); return
+    s = _fresh_store()
+    a = s.add_session_summary("s1", "one", created_cycle=1)
+    b = s.add_session_summary("s2", "two", created_cycle=2)
+    c = s.add_session_summary("s3", "three", created_cycle=3)
+    assert s.mark_prior_narratives_historical(keep_current=1) == 2
+    hist = {r["summary_id"]: r["historical"] for r in s.get_recent_narrative(chronological=False)}
+    assert hist[c] == 0 and hist[a] == 1 and hist[b] == 1, hist
+    assert s.mark_prior_narratives_historical(keep_current=1) == 0  # idempotent
+    s.close()
+
+
+def test_narrative_ascii_guarantee():
+    """Core hardening: _ascii_sanitize returns pure ASCII for dashes, arrows, accents,
+    bullets, and smart quotes - stored narratives are always ASCII regardless of the model."""
+    _sanitize = _load("store_narrative")._ascii_sanitize
+    for src in ["a \u2014 b", "did X \u2192 Y", "caf\u00e9 na\u00efve", "\u2022 point",
+                "smart \u2019quote\u2019", "en\u2013dash and \u2026 done"]:
+        out = _sanitize(src)
+        assert all(ord(ch) < 128 for ch in out), (src, out)
+    assert _sanitize("a \u2014 b") == "a - b"
+    assert _sanitize("caf\u00e9 na\u00efve") == "cafe naive"
+
+
+def test_narrative_structured_llm_parse_and_fallback():
+    """P1.1: summarize_session(structured=True) parses JSON into typed columns; on a
+    non-JSON model reply it falls back to storing the raw prose as a freeform summary."""
+    if not _STORE_OK:
+        print("  SKIP"); return
+    import json as _j
+    s = _fresh_store()
+    good = _j.dumps({"throughline": "did X", "decisions": ["d1", "d2"],
+                     "open_loops": ["o1"], "closed": ["c1"], "topics": ["t1"]})
+    restore = _patch_ollama(lambda payload: good)
+    try:
+        sid = s.summarize_session("m", "http://x", "s-struct", structured=True,
+                                  digest="LOG BODY", created_cycle=5)
+    finally:
+        restore()
+    assert sid is not None
+    r = s.get_recent_narrative(chronological=False)[0]
+    assert r["throughline"] == "did X" and r["decisions"] == ["d1", "d2"], r
+    assert r["open_loops"] == ["o1"] and r["closed"] == ["c1"] and r["topics"] == ["t1"], r
+    restore2 = _patch_ollama(lambda payload: "just prose, not json at all")
+    try:
+        sid2 = s.summarize_session("m", "http://x", "s-fb", structured=True,
+                                   digest="LOG", created_cycle=6)
+    finally:
+        restore2()
+    r2 = [x for x in s.get_recent_narrative(chronological=False) if x["summary_id"] == sid2][0]
+    assert r2["throughline"] is None and "prose" in r2["summary"], r2
+    s.close()
+
+
+def test_narrative_digest_not_clipped():
+    """P0 40-episode regression: when a digest is provided, the WHOLE digest reaches the
+    model (early AND late), bypassing the max_episodes cap that clipped long ingests."""
+    if not _STORE_OK:
+        print("  SKIP"); return
+    s = _fresh_store()
+    early, late = "EARLYtok42", "LATEtok99"
+    digest = early + "\n" + ("filler line\n" * 200) + late
+    cap = {}
+
+    def _resp(payload):
+        cap["prompt"] = payload.get("prompt", "")
+        return "a short summary"
+    restore = _patch_ollama(_resp)
+    try:
+        s.summarize_session("m", "http://x", "s-dig", digest=digest, created_cycle=7)
+    finally:
+        restore()
+    assert early in cap["prompt"] and late in cap["prompt"], "digest was clipped"
+    s.close()
+
+
 def test_store_source_provenance_roundtrip():
     if not _STORE_OK:
         print("  SKIP"); return
