@@ -335,6 +335,42 @@ def _reinforce_async(ids_csv):
     threading.Thread(target=_bg, daemon=False).start()
 
 
+# Wall-clock parity with the reference hermes provider. Hermes prepends a <current_datetime> line
+# on every prefetch return (recall.py::_time_context_block). grok's prefetch is a side-channel (the
+# staged block only carries a machine unix ts= in its stripped HTML comment), so the agent had no
+# model-friendly "now" to judge open-loop staleness ("is that resume still open TODAY?"). We stamp
+# it here at SERVE/CONSUME time -- so a cached block minutes (or, on an idle desktop, hours) old
+# still gets a fresh clock -- using this client's LOCAL time (grok runs on the user's own box, so
+# host-local IS the user's wall clock; no timezone config needed). The lattice itself ages on
+# memory cycles, never wall-clock: this is a presentation-layer annotation, never a stored fact,
+# and it sits OUTSIDE the <resonant_memory> block so it can't read as a retrieved candidate.
+INJECT_DATETIME = os.environ.get("RLM_INJECT_DATETIME", "1").strip().lower() not in (
+    "0", "false", "no", "off")
+
+
+def _current_datetime_line():
+    """A model-friendly local wall-clock stamp, mirroring the hermes shape; '' if disabled/failed."""
+    if not INJECT_DATETIME:
+        return ""
+    try:
+        h12 = time.strftime("%I:%M %p").lstrip("0")
+        tz = time.strftime("%Z") or "local"
+        return ("<current_datetime>"
+                f"{time.strftime('%A %Y-%m-%d %H:%M')} ({h12} {tz}). "
+                "Live system clock at message time; authoritative for 'now', dates, and recency. "
+                "No tool call needed to check the time. Ephemeral context, not a stored memory."
+                "</current_datetime>")
+    except Exception:
+        return ""
+
+
+def _with_datetime(text):
+    """Prepend the current-datetime line (outside any memory block). Injected even on an empty
+    serve, so time coherence never depends on a recall hit (matches hermes)."""
+    line = _current_datetime_line()
+    return f"{line}\n{text}" if line else text
+
+
 def do_search(query, k, db_rel):
     db_arg = f" --db {C.REMOTE_DIR}/{db_rel}" if db_rel else ""
     cmd = f"{C.REMOTE_PY} {C.REMOTE_DIR}/rlm_search.py --k {int(k)}{db_arg}"
@@ -705,7 +741,7 @@ def dispatch_call(mid, name, a):
                 if query:  # explicit override: live recall, same path as rlm_search
                     res = do_search(query, int(a.get("k") or 8), None)
                     log(f"tools/call rlm_prefetch[live] -> ok={res.get('ok')} n={res.get('count')}")
-                    send_tool(mid, fmt_hits(res, "your memory (live recall)"), not res.get("ok"))
+                    send_tool(mid, _with_datetime(fmt_hits(res, "your memory (live recall)")), not res.get("ok"))
                     return
                 path = _prefetch_path(".md")
                 if path and (time.time() - os.path.getmtime(path)) < PREFETCH_FRESH_SECS:
@@ -715,7 +751,7 @@ def dispatch_call(mid, name, a):
                     age = int(time.time() - os.path.getmtime(path))
                     body = re.sub(r"^<!--.*?-->\n", "", text, count=1).strip()
                     log(f"tools/call rlm_prefetch -> served block age={age}s")
-                    send_tool(mid, f"(precomputed {age}s ago for the current message)\n{body}", False)
+                    send_tool(mid, _with_datetime(f"(precomputed {age}s ago for the current message)\n{body}"), False)
                     return
                 # cache miss (hook not installed / worker still running / stale): fall back to a
                 # live recall on the captured prompt, mirroring hermes prefetch()'s sync path.
@@ -724,10 +760,11 @@ def dispatch_call(mid, name, a):
                     q = open(qpath, encoding="utf-8", errors="replace").read().strip()
                     res = do_search(q[:2000], 8, None) if q else {"ok": False, "error": "empty query"}
                     log(f"tools/call rlm_prefetch[fallback] -> ok={res.get('ok')} n={res.get('count')}")
-                    send_tool(mid, fmt_hits(res, "your memory (live fallback)"), not res.get("ok"))
+                    send_tool(mid, _with_datetime(fmt_hits(res, "your memory (live fallback)")), not res.get("ok"))
                     return
-                send_tool(mid, "prefetch not primed (no fresh block; is the UserPromptSubmit hook "
-                               "installed?). Use rlm_search with an explicit query instead.", False)
+                send_tool(mid, _with_datetime(
+                    "prefetch not primed (no fresh block; is the UserPromptSubmit hook "
+                    "installed?). Use rlm_search with an explicit query instead."), False)
             elif name == "rlm_search":
                 query = (a.get("query") or "").strip()
                 if not query:

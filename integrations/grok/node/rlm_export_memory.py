@@ -80,6 +80,15 @@ def _loads_list(js):
         return [str(js)]
 
 
+def _meta_int(conn, key):
+    """Read an integer meta counter (e.g. the live memory_cycle) read-only; None if absent."""
+    r = _safe(conn, "SELECT value FROM meta WHERE key=?", (key,))
+    try:
+        return int(r[0][0]) if r else None
+    except Exception:
+        return None
+
+
 def _recent_narratives(conn, limit):
     """Newest-first narratives with the P1 structured fields, ordered by created_cycle
     (not rowid). Falls back to a summary-only SELECT on a pre-P1 schema, since the
@@ -87,7 +96,7 @@ def _recent_narratives(conn, limit):
     if limit <= 0:
         return []
     rich = _safe(conn,
-                 "SELECT summary, throughline, open_loops, decisions, "
+                 "SELECT summary, throughline, open_loops, decisions, closed, "
                  "COALESCE(created_cycle, 0), COALESCE(historical, 0) "
                  "FROM session_summaries "
                  "ORDER BY COALESCE(created_cycle, 0) DESC, summary_id DESC LIMIT ?", (limit,))
@@ -95,7 +104,7 @@ def _recent_narratives(conn, limit):
         return rich
     plain = _safe(conn, "SELECT summary FROM session_summaries "
                         "ORDER BY COALESCE(created_cycle, 0) DESC, rowid DESC LIMIT ?", (limit,))
-    return [(s, None, None, None, 0, 0) for (s,) in plain]
+    return [(s, None, None, None, None, 0, 0) for (s,) in plain]
 
 
 def main():
@@ -161,21 +170,28 @@ def main():
                 [f"- #{fid} (group {cgid}) [{cat}] {line}" for fid, cgid, cat, line in contested])
 
     narr_bullets = []
-    for i, (summary, throughline, open_js, dec_js, cyc, hist) in enumerate(narratives):
+    for i, (summary, throughline, open_js, dec_js, closed_js, cyc, hist) in enumerate(narratives):
         head = _ascii(throughline or summary or "")
         if not head:
             continue
         if i == 0 and not hist:
-            # newest, current status: render the full arc (throughline + open loops + decisions)
+            # newest, current status: render the full arc (throughline + open/decided/closed).
+            # 'closed' is surfaced (capped) so a resumed-but-not-yet-reingested item that has
+            # since been finished does not keep reading as still-open.
             narr_bullets.append(f"- **now (cycle {cyc})**: {head}")
             for it in _loads_list(open_js):
                 narr_bullets.append(f"  - open: {_ascii(it)}")
             for it in _loads_list(dec_js):
                 narr_bullets.append(f"  - decided: {_ascii(it)}")
+            for it in _loads_list(closed_js)[:2]:
+                narr_bullets.append(f"  - closed: {_ascii(it)}")
         else:
             tag = "historical" if hist else f"cycle {cyc}"
             narr_bullets.append(f"- ({tag}) {head}")
-    emit_packed(out, "narrative (session arc, newest first - a remembered gist; verify "
+    mc = _meta_int(c, "memory_cycle")
+    clock = f"; lattice now at memory_cycle {mc}" if mc is not None else ""
+    emit_packed(out, "narrative (session arc, newest first - a remembered gist" + clock +
+                     "; the per-row cycle is when that arc was recorded, not now; verify "
                      "against the authority block + live state)", narr_bullets)
 
     sys.stdout.write("\n".join(out))

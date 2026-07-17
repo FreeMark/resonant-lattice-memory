@@ -27,6 +27,20 @@ ready-made preset profiles (Scholar, Sovereign Vault, Overnight, Low-VRAM, and m
 
 ## What's new
 
+- **v1.7.1 (2026-07-17): grok aperture polish.** Small surfacing + parity fixes on top of v1.7.0
+  (the core changes are documentation-only; hermes runtime behavior is unchanged).
+  - **Prefetch clock parity (grok).** The reference hermes provider stamps a `<current_datetime>` on
+    every recall injection at consumption time (`inject_current_datetime`); grok's per-turn prefetch
+    is a side-channel that carried only a machine unix timestamp. The `rlm_prefetch` MCP handler now
+    stamps a model-friendly local wall clock at *serve* time, so even a cached block hands the agent a
+    fresh "now" to judge open-loop staleness instead of guessing.
+  - **Narrative projection surfacing.** The `## narrative` header now shows the live `memory_cycle`
+    (so a per-row `now (cycle N)` reads as as-of, not the current clock), and the newest arc surfaces
+    up to two `closed:` loops so a resumed-then-finished item stops reading as still open.
+  - **Docs.** The dual narrative-prompt path is now explicit everywhere (freeform `narrative_prompt`
+    vs opt-in `narrative_structured` JSON with typed fields) - `prompts.py`, `config_schema.py`, and
+    both READMEs; the grok README prose and `entity_vocabulary` are brought current with the 18-tool /
+    structured-narrative surface.
 - **v1.7.0 (2026-07-17): dream / narrative enhancement.** A major upgrade to grok's autobiographical
   narrative, plus new consolidation observability.
   - **Hybrid narrative.** The session narrative is rebuilt from a hierarchical, born-fact-grounded
@@ -314,6 +328,11 @@ No fork of grok, no plugin API. See [`integrations/grok/README.md`](integrations
   narrative, importance-weighted retention) copy **`resonant_lattice/recommended_config.yaml`**.
 - **Every tunable lives in one place:** `resonant_lattice/config_schema.py` (the `DEFAULTS` dict),
   which is also the `hermes memory setup` field list.
+- **Narrative has two prompt paths:** `narrative_prompt` writes the freeform one-paragraph gist (the
+  default). Opt in to `narrative_structured: true` (+ optional `narrative_structured_prompt`) for the
+  structured path, which asks the model for JSON and fills typed fields
+  (throughline / decisions / open_loops / closed / topics), falling back to freeform on a parse miss.
+  In structured mode the freeform `narrative_prompt` is not used.
 - **Time-coherent recall** (`inject_current_datetime`, on by default): a live `<current_datetime>`
   stamp is prepended to every recall injection at consumption time, so a cycle-driven agent always
   knows the real "now" without spending a tool call. Set `datetime_timezone` (an IANA zone) when

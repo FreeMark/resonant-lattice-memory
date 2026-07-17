@@ -53,8 +53,9 @@ Four planes, one lattice:
    compaction collapses it, ships it to the node, and RLM consolidates it - extracting grounded,
    resonance-ranked facts, entities, and typed relations, then running one dream cycle (decay /
    tier-promotion / conflict-detect) and a rolling narrative built from the *whole* session's born
-   facts (a hierarchical digest, so a long multi-window compact is narrated in full, not just its
-   tail). grok does **not** fire `SessionEnd`
+   facts (a hierarchical hybrid digest, so a long multi-window compact is narrated in full, not just
+   its tail; stored as structured typed fields and temporally framed as current vs historical - see
+   [What's implemented](#whats-implemented)). grok does **not** fire `SessionEnd`
    on a normal exit, so the convention is: **compact before you exit**.
 2. **Passive read (SessionStart):** a hook pulls a Markdown projection of the lattice into grok's
    native `MEMORY.md`. grok's engine indexes it and injects it first-turn and answers
@@ -287,6 +288,21 @@ recall_bump: 2.0
 `enable_self_model` (+ a `self_model_seed`), `enable_narrative` (a rolling autobiographical
 paragraph; point `narrative_model` at a small local model).
 
+**Narrative: two prompt paths.** There are two ways the narrative is written, and they use
+*different* prompts:
+- `narrative_prompt` drives the **freeform** one-paragraph gist (the base default).
+- `narrative_structured: true` (this integration's default) switches to the **structured** path:
+  the model is asked for JSON and the result fills the typed columns (throughline / decisions /
+  open_loops / closed / topics), with an automatic fallback to freeform prose on a parse miss.
+  Override its prompt with `narrative_structured_prompt`. In structured mode the freeform
+  `narrative_prompt` is **not** used - set `narrative_structured: false` to go back to it.
+```yaml
+enable_narrative: true
+narrative_structured: true                 # typed JSON fields (throughline/decisions/open_loops/closed/topics)
+# narrative_structured_prompt: |           # optional: override the structured prompt
+# narrative_prompt: |                       # only used when narrative_structured: false
+```
+
 **Feedback + self-model** (read by the node tool scripts):
 ```yaml
 feedback_helpful_delta: 1.0                # rlm_feedback helpful (gentle, < recall_bump)
@@ -366,10 +382,14 @@ The integration, end to end:
 
 - **Passive loop** - PreCompact snapshot (survives compaction) → detached worker → node ingest;
   ACP (grok session-update) transcript parser; per-window consolidation → one post-ingest dream
-  cycle → rolling narrative; SessionStart projection with a self-model header, a pinned
-  **authority** block, a **contested** (unresolved-conflict) quarantine, and the recent narrative.
-  UTF-8-clean write path. The worker launches the node ingest with `python -u`, so per-window
-  progress lines stream live instead of flushing only at exit.
+  cycle → rolling **hybrid narrative** (a hierarchical, born-fact-grounded digest of the *whole*
+  session + a head/mid/tail dialogue spine, so a long multi-window compact is narrated in full, not
+  just its tail; written as **structured** typed fields - throughline / decisions / open_loops /
+  closed / topics - and temporally framed as current vs `historical`, ASCII-guaranteed); SessionStart
+  projection with a self-model header, a pinned **authority** block, a **contested**
+  (unresolved-conflict) quarantine, and the recent narrative (newest arc in full, older as one-liners,
+  headed by the live `memory_cycle`). UTF-8-clean write path. The worker launches the node ingest with
+  `python -u`, so per-window progress lines stream live instead of flushing only at exit.
 - **Ingest observability** - `rlm_watch_ingest.py` (with the `rlm-watch.cmd` launcher) watches a
   `/compact` -> ingest "memory cycle" to completion and signals when it is safe to continue the
   conversation. Buffer-immune: it keys off the `rlm_ingest.py` process plus the live `semantic_facts`
@@ -387,7 +407,8 @@ The integration, end to end:
   (`rlm_prefetch` per-turn block; `rlm_search` with recall-reinforcement; `external_rlm_search` +
   `transfer_knowledge` for domain lattices), feedback (`rlm_feedback`), inspect (`rlm_inspect`,
   `rlm_entity`), relations (`rlm_relational`, `rlm_infer`), identity (`rlm_self_model`,
-  allowlist-gated), health (`rlm_stats`, `rlm_conflict`).
+  allowlist-gated), health (`rlm_stats`, `rlm_conflict`, `rlm_dream` dream-cycle report card,
+  `rlm_narrative` past session arcs).
 - **Domain-configurable relation graph** - closed `relation_vocabulary` + constrained slot-filling
   (relations recur), `entity_aliases` node canonicalization (chains form), `entity_vocabulary`
   (domain tool/config/concept names become graph nodes and survive strict binding), and

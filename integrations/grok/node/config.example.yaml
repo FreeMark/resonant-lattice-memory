@@ -73,8 +73,9 @@ relation_examples: |
 # 'resonance'/'relational' and tool/config names like 'rlm_pin'). Recognized as entities, so they
 # become graph nodes AND survive strict relation binding. Explicit, so it never over-generates.
 entity_vocabulary:
-  [rlm_pin, rlm_remember, rlm_forget, rlm_search, rlm_relational, rlm_infer, get_fact, fact_history,
-   initial_resonance, relation_extract_llm, resonance, lattice, dream cycle, consolidation, relational, infer]
+  [rlm_pin, rlm_remember, rlm_forget, rlm_search, rlm_relational, rlm_infer, rlm_narrative, rlm_dream,
+   get_fact, fact_history, initial_resonance, relation_extract_llm, resonance, lattice, dream cycle,
+   consolidation, narrative, projection, relational, infer]
 entity_aliases:                              # unify surface forms -> one canonical node (examples)
   "the node": "build node"
   "reason-model:cloud": "reason model"

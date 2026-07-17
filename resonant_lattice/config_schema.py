@@ -663,7 +663,11 @@ CONFIG_SCHEMA = [
      "default": DEFAULT_RELATION_PROMPT},
     {"key": "narrative_prompt",
      "description": "Reason-model prompt for end-of-session autobiographical narrative (enable_narrative). "
-                    "Override to change summary style or what counts as durable session memory.",
+                    "Drives the FREEFORM one-paragraph path (the default). Override to change summary style "
+                    "or what counts as durable session memory. A separate STRUCTURED JSON path (typed "
+                    "throughline/decisions/open_loops/closed/topics) is opt-in via `narrative_structured: "
+                    "true` (+ optional `narrative_structured_prompt`), used by integrations like grok; in "
+                    "structured mode this freeform prompt is ignored.",
      "default": DEFAULT_NARRATIVE_PROMPT},
 ]
 

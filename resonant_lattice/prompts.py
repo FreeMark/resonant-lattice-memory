@@ -67,6 +67,15 @@ DEFAULT_CONSOLIDATION_PROMPT = (
     "- Each object must have keys: \"content\" and \"category\" (use \"abstract\")"
 )
 
+# DUAL narrative path. This DEFAULT_NARRATIVE_PROMPT (config key `narrative_prompt`) drives the
+# FREEFORM one-paragraph narrative - the default, and the only path the reference hermes profile
+# uses. A SEPARATE structured path exists for integrations that opt in with `narrative_structured:
+# true` (see store_narrative._DEFAULT_STRUCTURED_PROMPT / summarize_session(structured=True), and
+# the optional `narrative_structured_prompt` override): it asks the model for JSON and populates the
+# typed columns (throughline / decisions / open_loops / closed / topics), falling back to freeform
+# prose on a parse miss. In structured mode THIS freeform prompt is not used. `narrative_structured`
+# and `narrative_structured_prompt` are read via _config.get() by the opt-in caller (e.g. the grok
+# ingest), not registered core schema keys, so the hermes defaults are unchanged.
 DEFAULT_NARRATIVE_PROMPT = (
     "Summarise the session below as ONE short paragraph of durable "
     "autobiographical memory for an AI agent - what the user and assistant worked "
