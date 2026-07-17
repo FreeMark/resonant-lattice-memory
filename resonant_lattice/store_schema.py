@@ -168,6 +168,7 @@ class SchemaMixin:
         self._migrate_add_relations()
         self._migrate_add_agent_identity()
         self._migrate_add_session_summaries()
+        self._migrate_add_narrative_fields()
         self._migrate_add_semantic_he()
         self._migrate_add_semantic_he_hrr()
         self._migrate_add_semantic_he_meta()
@@ -515,6 +516,41 @@ class SchemaMixin:
                 self._conn.commit()
             except Exception as e:
                 logger.debug("Migration (session_summaries) failed or already exists: %s", e)
+
+
+    def _migrate_add_narrative_fields(self) -> None:
+        """Add the P1 structured-narrative columns to session_summaries if missing.
+
+        throughline/decisions/open_loops/closed/topics carry the machine-readable
+        structure of a session arc (decisions/open_loops/closed/topics are JSON arrays
+        stored as TEXT); `summary` stays the human-readable blob for back-compat.
+        `historical` (0/1) marks superseded narratives so the projection renders the
+        newest as CURRENT status and older ones as past (temporal framing). All
+        nullable / defaulted; self-detecting + idempotent; no wall-clock.
+        """
+        with self._lock:
+            try:
+                cols = {
+                    r["name"]
+                    for r in self._conn.execute(
+                        "PRAGMA table_info(session_summaries)").fetchall()
+                }
+                adds = [
+                    ("throughline", "TEXT"),
+                    ("decisions", "TEXT"),
+                    ("open_loops", "TEXT"),
+                    ("closed", "TEXT"),
+                    ("topics", "TEXT"),
+                    ("historical", "INTEGER DEFAULT 0"),
+                ]
+                for name, decl in adds:
+                    if name not in cols:
+                        # name/decl come from this fixed literal list, never user input
+                        self._conn.execute(
+                            f"ALTER TABLE session_summaries ADD COLUMN {name} {decl}")
+                self._conn.commit()
+            except Exception as e:
+                logger.debug("Migration (narrative fields) failed or already exists: %s", e)
 
 
     def _migrate_add_semantic_he(self) -> None:

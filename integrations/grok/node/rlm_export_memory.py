@@ -17,8 +17,22 @@ hybrid score. A big category emitted as one long list would be split mid-list in
 chunks; packing each section to <=1400 chars with its own heading keeps every indexed chunk a
 coherent, self-contained unit, so what grok's engine injects is whole topics, not fragments.
 """
-import sys, os, sqlite3, argparse, time
+import sys, os, sqlite3, argparse, time, json, unicodedata
 from collections import defaultdict
+
+# ASCII-normalize narrative text on export (old rows may predate the store-side sanitize).
+# Keys are \u escapes so THIS source file stays ASCII-only.
+_PUNCT = {"\u2014": " - ", "\u2013": " - ", "\u2012": " - ", "\u2015": " - ", "\u2011": "-",
+          "\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"', "\u2026": "...",
+          "\u2192": "->", "\u2190": "<-"}
+
+
+def _ascii(s):
+    s = str(s)
+    for k, v in _PUNCT.items():
+        s = s.replace(k, v)
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+    return " ".join(s.split())
 
 DEFAULT_DB = os.path.expanduser("~/grok-agent-rlm/resonant_lattice_memory.db")
 CHUNK_BUDGET = 1400  # keep heading + bullets safely inside grok's 1600-char chunk window
@@ -56,6 +70,34 @@ def _safe(conn, sql, params=()):
         return []
 
 
+def _loads_list(js):
+    if not js:
+        return []
+    try:
+        v = json.loads(js)
+        return v if isinstance(v, list) else [str(v)]
+    except Exception:
+        return [str(js)]
+
+
+def _recent_narratives(conn, limit):
+    """Newest-first narratives with the P1 structured fields, ordered by created_cycle
+    (not rowid). Falls back to a summary-only SELECT on a pre-P1 schema, since the
+    projection opens the DB read-only and never runs migrations."""
+    if limit <= 0:
+        return []
+    rich = _safe(conn,
+                 "SELECT summary, throughline, open_loops, decisions, "
+                 "COALESCE(created_cycle, 0), COALESCE(historical, 0) "
+                 "FROM session_summaries "
+                 "ORDER BY COALESCE(created_cycle, 0) DESC, summary_id DESC LIMIT ?", (limit,))
+    if rich:
+        return rich
+    plain = _safe(conn, "SELECT summary FROM session_summaries "
+                        "ORDER BY COALESCE(created_cycle, 0) DESC, rowid DESC LIMIT ?", (limit,))
+    return [(s, None, None, None, 0, 0) for (s,) in plain]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default=DEFAULT_DB)
@@ -71,8 +113,7 @@ def main():
         (args.limit,),
     ).fetchall()
     self_model = _safe(c, "SELECT key, value FROM agent_identity ORDER BY key")
-    narratives = _safe(c, "SELECT summary FROM session_summaries ORDER BY rowid DESC LIMIT ?",
-                       (max(0, args.narrative),))
+    narratives = _recent_narratives(c, max(0, args.narrative))
 
     # Partition (mirrors the native recall presentation: authority block + conflict quarantine):
     #   - pinned facts        -> hoisted into one AUTHORITY block, obeyed over everything below.
@@ -119,8 +160,23 @@ def main():
                      "curate with rlm_conflict)",
                 [f"- #{fid} (group {cgid}) [{cat}] {line}" for fid, cgid, cat, line in contested])
 
-    emit_packed(out, "narrative (recent sessions, newest first)",
-                [f"- {' '.join(str(summary).split())}" for (summary,) in narratives])
+    narr_bullets = []
+    for i, (summary, throughline, open_js, dec_js, cyc, hist) in enumerate(narratives):
+        head = _ascii(throughline or summary or "")
+        if not head:
+            continue
+        if i == 0 and not hist:
+            # newest, current status: render the full arc (throughline + open loops + decisions)
+            narr_bullets.append(f"- **now (cycle {cyc})**: {head}")
+            for it in _loads_list(open_js):
+                narr_bullets.append(f"  - open: {_ascii(it)}")
+            for it in _loads_list(dec_js):
+                narr_bullets.append(f"  - decided: {_ascii(it)}")
+        else:
+            tag = "historical" if hist else f"cycle {cyc}"
+            narr_bullets.append(f"- ({tag}) {head}")
+    emit_packed(out, "narrative (session arc, newest first - a remembered gist; verify "
+                     "against the authority block + live state)", narr_bullets)
 
     sys.stdout.write("\n".join(out))
 

@@ -15,6 +15,7 @@ gisting discipline from Phase 4.
 import json
 import logging
 import re
+import unicodedata
 import urllib.request
 from reason_gate import reason_slot
 from typing import Dict, List, Optional
@@ -40,13 +41,54 @@ _ASCII_MAP = {
 
 
 def _ascii_sanitize(text: str) -> str:
-    """Map common non-ASCII punctuation to ASCII and collapse the double spaces the
-    ' - ' dash substitution can introduce. Newlines are preserved."""
+    """Return an ASCII-only rendering of `text`: map the common non-ASCII punctuation to
+    readable ASCII (dashes, quotes, ellipsis, nbsp), then fold accents and DROP anything
+    still non-ASCII (arrows, bullets, symbols, CJK) so a stored narrative is guaranteed
+    ASCII regardless of what the model emits. Newlines preserved; the ' - ' dash
+    substitution's double spaces are collapsed."""
     if not text:
         return text
     for k, v in _ASCII_MAP.items():
         text = text.replace(k, v)
+    # NFKD folds accents (e-acute -> e) and compatibility forms; ascii/ignore then drops any
+    # remaining non-ASCII the map above did not name (e.g. a right-arrow granite emits).
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
     return re.sub(r"[ \t]{2,}", " ", text)
+
+
+# P1: the structured-narrative prompt. Same content discipline as the freeform Rivernest
+# prompt (ground in the log, ASCII, resumable handles, current-status-not-old-gaps), but
+# asks for a parseable JSON object so the arc can be stored in typed columns.
+_DEFAULT_STRUCTURED_PROMPT = (
+    "You are writing a remembered session arc for an AI agent's NEXT wake, not a diary. "
+    "Ground every item in the SESSION LOG; never invent. Return ONLY a JSON object with keys:\n"
+    "  \"throughline\": one sentence naming what the session was about.\n"
+    "  \"decisions\": array of locked decisions / standing rules established (at most 5, one line each).\n"
+    "  \"open_loops\": array of still-pending items (at most 4), each with a resumable handle "
+    "(a profile name, file path, or lane id from the log) when load-bearing.\n"
+    "  \"closed\": array of finished work (at most 5), each stated in past tense.\n"
+    "  \"topics\": array of short topic tags the session touched.\n"
+    "Use ONLY ASCII punctuation. If the session supersedes an earlier backlog or plan, reflect the "
+    "CURRENT status, not the old gap list. Any array may be empty. Output ONLY the JSON object."
+)
+
+
+def _render_narrative_blob(throughline, decisions, open_loops, closed):
+    """Deterministically render the structured fields into the human-readable `summary`
+    text, so readers that only know the flat summary column still get the whole arc."""
+    parts = []
+    if throughline and str(throughline).strip():
+        parts.append(str(throughline).strip())
+
+    def _sec(label, items):
+        items = [str(i).strip() for i in (items or []) if str(i).strip()]
+        if items:
+            parts.append(label + " " + "; ".join(items))
+
+    _sec("Decisions:", decisions)
+    _sec("Open loops:", open_loops)
+    _sec("Closed:", closed)
+    return _ascii_sanitize("  ".join(parts))
 
 
 class NarrativeMixin:
@@ -55,25 +97,44 @@ class NarrativeMixin:
                             started_cycle: Optional[int] = None,
                             ended_cycle: Optional[int] = None,
                             created_cycle: Optional[int] = None,
-                            keep: int = 30) -> Optional[int]:
+                            keep: int = 30, *,
+                            throughline: Optional[str] = None,
+                            decisions: Optional[List] = None,
+                            open_loops: Optional[List] = None,
+                            closed: Optional[List] = None,
+                            topics: Optional[List] = None) -> Optional[int]:
         """Store one session narrative summary, then bound the table to `keep`.
 
-        Lock-guarded. Trims + length-caps the summary; skips empty. Returns the new
-        summary_id (or None if the summary was empty). Pruning to the most recent
-        `keep` happens in the same lock so the autobiographical log never grows
-        unbounded.
+        Lock-guarded. ASCII-sanitizes + trims + length-caps the summary; skips empty.
+        Returns the new summary_id (or None if empty). The optional P1 structured
+        fields carry the machine-readable arc: `throughline` is TEXT; decisions /
+        open_loops / closed / topics are lists serialised to JSON TEXT (each element
+        sanitized). Pruning to the most recent `keep` happens in the same lock so the
+        autobiographical log never grows unbounded.
         """
         if not summary or not summary.strip():
             return None
-        summary = summary.strip()[:_MAX_SUMMARY_CHARS]
+        summary = _ascii_sanitize(summary.strip())[:_MAX_SUMMARY_CHARS]
+
+        def _jlist(v):
+            if v is None:
+                return None
+            if isinstance(v, str):
+                return _ascii_sanitize(v)
+            items = [_ascii_sanitize(str(x)) for x in v if str(x).strip()]
+            return json.dumps(items, ensure_ascii=True)
+
+        th = _ascii_sanitize(str(throughline).strip()) if throughline else None
         with self._lock:
             cur = self._conn.execute(
                 """
                 INSERT INTO session_summaries
-                    (session_id, summary, started_cycle, ended_cycle, created_cycle)
-                VALUES (?, ?, ?, ?, ?)
+                    (session_id, summary, started_cycle, ended_cycle, created_cycle,
+                     throughline, decisions, open_loops, closed, topics)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (session_id, summary, started_cycle, ended_cycle, created_cycle),
+                (session_id, summary, started_cycle, ended_cycle, created_cycle,
+                 th, _jlist(decisions), _jlist(open_loops), _jlist(closed), _jlist(topics)),
             )
             new_id = cur.lastrowid
             self._conn.commit()
@@ -93,15 +154,53 @@ class NarrativeMixin:
             rows = self._conn.execute(
                 """
                 SELECT summary_id, session_id, summary,
-                       started_cycle, ended_cycle, created_cycle
+                       started_cycle, ended_cycle, created_cycle,
+                       throughline, decisions, open_loops, closed, topics,
+                       COALESCE(historical, 0) AS historical
                 FROM session_summaries
                 ORDER BY COALESCE(created_cycle, 0) DESC, summary_id DESC
                 LIMIT ?
                 """,
                 (limit,),
             ).fetchall()
-        rows = [dict(r) for r in rows]
-        return list(reversed(rows)) if chronological else rows
+        out = []
+        for r in rows:
+            d = dict(r)
+            for k in ("decisions", "open_loops", "closed", "topics"):
+                v = d.get(k)
+                if v:
+                    try:
+                        d[k] = json.loads(v)
+                    except Exception:
+                        d[k] = [v]
+                else:
+                    d[k] = []
+            out.append(d)
+        return list(reversed(out)) if chronological else out
+
+    def mark_prior_narratives_historical(self, keep_current: int = 1) -> int:
+        """Mark all but the newest `keep_current` narratives historical=1 (temporal
+        framing: the newest row is the CURRENT status, older rows are the past). Returns
+        the count newly flagged. Idempotent; uses the same recency ordering as pruning.
+        Callers that want the newest to read as 'current' (the grok projection) invoke
+        this right after writing a new narrative; the default (hermes) path never does,
+        so its behaviour is unchanged."""
+        keep_current = max(0, keep_current)
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                UPDATE session_summaries SET historical = 1
+                WHERE COALESCE(historical, 0) = 0
+                  AND summary_id NOT IN (
+                    SELECT summary_id FROM session_summaries
+                    ORDER BY COALESCE(created_cycle, 0) DESC, summary_id DESC
+                    LIMIT ?
+                  )
+                """,
+                (keep_current,),
+            )
+            self._conn.commit()
+            return cur.rowcount or 0
 
     def prune_session_summaries(self, keep: int) -> int:
         """Keep only the most recent `keep` summaries; delete the rest. Returns the
@@ -126,6 +225,8 @@ class NarrativeMixin:
     def summarize_session(self, reason_model: str, ollama_endpoint: str,
                           session_id: str, *, prompt: Optional[str] = None,
                           digest: Optional[str] = None,
+                          structured: bool = False,
+                          structured_prompt: Optional[str] = None,
                           started_cycle: Optional[int] = None,
                           ended_cycle: Optional[int] = None,
                           created_cycle: Optional[int] = None,
@@ -158,15 +259,19 @@ class NarrativeMixin:
             body = "\n".join(
                 f"{e['role'].upper()}: {e['content']}" for e in episodes
             )
-        base_prompt = prompt or (
-            "Summarise the session below as ONE short paragraph of durable "
-            "autobiographical memory - what the user and assistant worked on and "
-            "decided together, the kind of thing worth remembering next session. "
-            "Frame it as a remembered summary, not a transcript; keep only the "
-            "throughline, drop turn-by-turn detail; never invent anything not in "
-            "the log. Output ONLY the paragraph, no preamble."
-        )
-        final_prompt = f"{base_prompt}\n\nSESSION LOG:\n{body}\n\nSUMMARY:"
+        if structured:
+            base_prompt = structured_prompt or _DEFAULT_STRUCTURED_PROMPT
+            final_prompt = f"{base_prompt}\n\nSESSION LOG:\n{body}\n\nJSON:"
+        else:
+            base_prompt = prompt or (
+                "Summarise the session below as ONE short paragraph of durable "
+                "autobiographical memory - what the user and assistant worked on and "
+                "decided together, the kind of thing worth remembering next session. "
+                "Frame it as a remembered summary, not a transcript; keep only the "
+                "throughline, drop turn-by-turn detail; never invent anything not in "
+                "the log. Output ONLY the paragraph, no preamble."
+            )
+            final_prompt = f"{base_prompt}\n\nSESSION LOG:\n{body}\n\nSUMMARY:"
         try:
             payload = {"model": reason_model, "prompt": final_prompt,
                        "stream": False, "options": {"temperature": 0.3}}
@@ -180,9 +285,28 @@ class NarrativeMixin:
         except Exception as e:
             logger.debug("Session summarisation LLM call failed (non-fatal): %s", e)
             return None
-        # Reuse the shared cleaner to strip <think> blocks / code fences, then take
-        # the prose as-is (this is freeform narrative, not JSON).
-        summary = _ascii_sanitize(self._clean_llm_json(raw).strip())
+        # Reuse the shared cleaner to strip <think> blocks / code fences.
+        cleaned = self._clean_llm_json(raw).strip()
+        if structured:
+            try:
+                parsed = json.loads(cleaned)
+            except Exception:
+                parsed = None
+            if isinstance(parsed, dict) and str(parsed.get("throughline", "")).strip():
+                th = str(parsed.get("throughline", "")).strip()
+                dec = parsed.get("decisions") or []
+                opn = parsed.get("open_loops") or []
+                clo = parsed.get("closed") or []
+                top = parsed.get("topics") or []
+                blob = _render_narrative_blob(th, dec, opn, clo)
+                return self.add_session_summary(
+                    session_id, blob, started_cycle=started_cycle,
+                    ended_cycle=ended_cycle, created_cycle=created_cycle, keep=keep,
+                    throughline=th, decisions=dec, open_loops=opn, closed=clo, topics=top,
+                )
+            # JSON parse failed / no throughline: fall back to storing the raw prose.
+            logger.debug("Structured narrative parse failed; storing freeform summary")
+        summary = _ascii_sanitize(cleaned)
         if not summary:
             return None
         return self.add_session_summary(

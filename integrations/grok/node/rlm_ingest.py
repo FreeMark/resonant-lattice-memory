@@ -316,6 +316,7 @@ def main():
     if turns and getattr(prov, "_enable_narrative", False):
         nmodel = prov._config.get("narrative_model") or prov._relation_model
         nep = prov._config.get("narrative_endpoint") or prov._ollama_endpoint_relation
+        structured = bool(prov._config.get("narrative_structured", True))
         nsid = f"{base_sid}-narrative"
         ns = time.time()
         try:
@@ -323,11 +324,18 @@ def main():
             sid = store.summarize_session(
                 nmodel, nep, nsid,
                 prompt=getattr(prov, "_narrative_prompt", None),
+                structured=structured,
+                structured_prompt=prov._config.get("narrative_structured_prompt"),
                 digest=digest,
                 ended_cycle=prov._memory_cycle, created_cycle=prov._memory_cycle,
                 keep=getattr(prov, "_narrative_keep", 40))
+            if sid:
+                # P1.2 temporal framing: the new narrative is CURRENT; older ones become historical
+                # so the projection renders the newest as current status, not a stale backlog voice.
+                store.mark_prior_narratives_historical(keep_current=1)
             tag = f"written #{sid}" if sid else "skipped (too thin)"
-            print(f"[ingest] narrative {tag} via {nmodel} "
+            mode = "structured" if structured else "freeform"
+            print(f"[ingest] narrative {tag} ({mode}) via {nmodel} "
                   f"(hierarchical digest {len(digest)} chars, {len(windows)} windows) "
                   f"({time.time()-ns:.0f}s)")
         except Exception as e:

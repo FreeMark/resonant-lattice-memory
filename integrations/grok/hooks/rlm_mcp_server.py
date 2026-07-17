@@ -13,7 +13,7 @@ Speaks newline-delimited JSON-RPC 2.0. Connection settings come from rlm_grok_co
   inspect        : rlm_inspect (one fact + its belief history), rlm_entity (entity-graph walk)
   relations      : rlm_relational (typed graph query), rlm_infer (multi-hop inference)
   identity       : rlm_self_model (read / allowlisted-key write)
-  health         : rlm_stats, rlm_conflict (list / resolve / dismiss)
+  health         : rlm_stats, rlm_narrative, rlm_conflict (list / resolve / dismiss)
 """
 import sys, os, json, re, subprocess, time, threading, hashlib
 
@@ -150,6 +150,16 @@ TOOLS = [
                      "(short/mid/long), pins, memory + dream cycle clocks, episodes, entities, "
                      "relations, narratives, and pending conflicts. Use to check the state of your memory."),
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "rlm_narrative",
+     "description": ("Read-only: your OWN recent session narratives - the remembered arc of what you "
+                     "and the user did, newest first. Each carries a throughline plus locked decisions, "
+                     "still-open loops (with resumable handles), and closed work. The SessionStart "
+                     "projection surfaces only the top few; call this to read further back mid-session. "
+                     "A remembered gist - verify against the authority block + live state."),
+     "inputSchema": {"type": "object",
+                     "properties": {
+                         "limit": {"type": "integer", "description": "how many recent narratives (default 5)"}},
+                     "required": []}},
     {"name": "rlm_conflict",
      "description": ("Inspect and resolve contradictory memories in your OWN lattice. action='list' "
                      "shows pending (unresolved) conflict groups. action='resolve' with an id picks "
@@ -544,6 +554,37 @@ def fmt_stats(res):
             f"{res.get('narratives')} narratives, {res.get('pending_conflicts')} pending conflicts")
 
 
+def do_narrative(limit):
+    cmd = f"{C.REMOTE_PY} {C.REMOTE_DIR}/rlm_narrative.py --limit {int(limit)}"
+    try:
+        r = C.run(cmd, capture_output=True, timeout=90)
+        out = (r.stdout or b"").decode("utf-8", "replace").strip()
+        err = (r.stderr or b"").decode("utf-8", "replace")
+        return json.loads(out.splitlines()[-1]) if out else {"ok": False, "error": (err or "no output")[:200]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+
+
+def fmt_narrative(res):
+    if not res.get("ok"):
+        return f"narrative failed: {res.get('error')}"
+    ns = res.get("narratives") or []
+    if not ns:
+        return "no session narratives yet"
+    lines = []
+    for i, n in enumerate(ns):
+        current = (i == 0 and not n.get("historical"))
+        head = n.get("throughline") or n.get("summary") or ""
+        tag = "now" if current else ("historical" if n.get("historical") else f"cycle {n.get('created_cycle')}")
+        lines.append(f"[{tag}] {head}")
+        if current:
+            for it in (n.get("open_loops") or []):
+                lines.append(f"   open: {it}")
+            for it in (n.get("decisions") or []):
+                lines.append(f"   decided: {it}")
+    return "\n".join(lines)
+
+
 def fmt_hits(res, source):
     if not res.get("ok"):
         return f"search failed: {res.get('error')}"
@@ -687,6 +728,10 @@ def dispatch_call(mid, name, a):
                 res = do_stats()
                 log(f"tools/call rlm_stats -> {res.get('ok')}")
                 send_tool(mid, fmt_stats(res), not res.get("ok"))
+            elif name == "rlm_narrative":
+                res = do_narrative(a.get("limit") or 5)
+                log(f"tools/call rlm_narrative -> {res.get('ok')}")
+                send_tool(mid, fmt_narrative(res), not res.get("ok"))
             elif name == "rlm_conflict":
                 action = (a.get("action") or "").strip()
                 if action not in ("list", "resolve", "dismiss"):
