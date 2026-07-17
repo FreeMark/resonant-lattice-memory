@@ -14,13 +14,39 @@ gisting discipline from Phase 4.
 
 import json
 import logging
+import re
 import urllib.request
 from reason_gate import reason_slot
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-_MAX_SUMMARY_CHARS = 1500
+_MAX_SUMMARY_CHARS = 2200  # headroom for grok's structured arc (throughline/decisions/open/closed);
+#                            hermes single-paragraph narratives sit well under this, so raising the
+#                            cap only lets the richer form survive - it never truncates what worked.
+
+# Non-ASCII punctuation the reasoning model tends to emit (em/en dashes, smart quotes,
+# ellipsis, nbsp) -> plain ASCII. Applied to every stored narrative so the
+# autobiographical surface stays ASCII-only regardless of the prompt or model (standing
+# operator pin). Cosmetic-only: it never changes the meaning of a summary.
+_ASCII_MAP = {
+    "—": " - ", "–": " - ", "‒": " - ", "―": " - ",  # em/en/figure/bar dash
+    "‑": "-",                                                        # non-breaking hyphen
+    "‘": "'", "’": "'", "‚": "'", "‛": "'",           # single quotes
+    "“": '"', "”": '"', "„": '"', "‟": '"',           # double quotes
+    "…": "...",                                                      # ellipsis
+    " ": " ", " ": " ", " ": " ",                          # non-breaking spaces
+}
+
+
+def _ascii_sanitize(text: str) -> str:
+    """Map common non-ASCII punctuation to ASCII and collapse the double spaces the
+    ' - ' dash substitution can introduce. Newlines are preserved."""
+    if not text:
+        return text
+    for k, v in _ASCII_MAP.items():
+        text = text.replace(k, v)
+    return re.sub(r"[ \t]{2,}", " ", text)
 
 
 class NarrativeMixin:
@@ -99,6 +125,7 @@ class NarrativeMixin:
 
     def summarize_session(self, reason_model: str, ollama_endpoint: str,
                           session_id: str, *, prompt: Optional[str] = None,
+                          digest: Optional[str] = None,
                           started_cycle: Optional[int] = None,
                           ended_cycle: Optional[int] = None,
                           created_cycle: Optional[int] = None,
@@ -110,23 +137,36 @@ class NarrativeMixin:
         a short autobiographical summary (unlocked), then stores it (locked) +
         bounds the table. Mirrors the consolidate_before_prune structure. Returns the
         new summary_id, or None when there is too little to summarise or the LLM
-        call fails (non-fatal — never blocks session shutdown).
+        call fails (non-fatal - never blocks session shutdown).
+
+        When `digest` is provided (the grok hierarchical-ingest path) it is used
+        verbatim as the SESSION LOG body and both the episode gather and the
+        `max_episodes` cap are skipped - the caller has already distilled the WHOLE
+        session (per-window born facts + open loops + a head/mid/tail spine), so the
+        model sees all of it instead of only the tail-`max_episodes` episodes that a
+        long multi-window ingest would otherwise clip. `digest is None` keeps the
+        original episode path bit-for-bit (hermes on_session_end unchanged).
         """
-        episodes = self.get_recent_episodes(limit=max_episodes, session_id=session_id)
-        if not episodes or len(episodes) < min_episodes:
-            return None
-        transcript = "\n".join(
-            f"{e['role'].upper()}: {e['content']}" for e in episodes
-        )
+        if digest is not None:
+            body = digest.strip()
+            if not body:
+                return None
+        else:
+            episodes = self.get_recent_episodes(limit=max_episodes, session_id=session_id)
+            if not episodes or len(episodes) < min_episodes:
+                return None
+            body = "\n".join(
+                f"{e['role'].upper()}: {e['content']}" for e in episodes
+            )
         base_prompt = prompt or (
             "Summarise the session below as ONE short paragraph of durable "
-            "autobiographical memory — what the user and assistant worked on and "
+            "autobiographical memory - what the user and assistant worked on and "
             "decided together, the kind of thing worth remembering next session. "
             "Frame it as a remembered summary, not a transcript; keep only the "
             "throughline, drop turn-by-turn detail; never invent anything not in "
             "the log. Output ONLY the paragraph, no preamble."
         )
-        final_prompt = f"{base_prompt}\n\nSESSION LOG:\n{transcript}\n\nSUMMARY:"
+        final_prompt = f"{base_prompt}\n\nSESSION LOG:\n{body}\n\nSUMMARY:"
         try:
             payload = {"model": reason_model, "prompt": final_prompt,
                        "stream": False, "options": {"temperature": 0.3}}
@@ -142,7 +182,7 @@ class NarrativeMixin:
             return None
         # Reuse the shared cleaner to strip <think> blocks / code fences, then take
         # the prose as-is (this is freeform narrative, not JSON).
-        summary = self._clean_llm_json(raw).strip()
+        summary = _ascii_sanitize(self._clean_llm_json(raw).strip())
         if not summary:
             return None
         return self.add_session_summary(

@@ -27,6 +27,19 @@ ready-made preset profiles (Scholar, Sovereign Vault, Overnight, Low-VRAM, and m
 
 ## What's new
 
+- **v1.6.9 (2026-07-17): grok narrative spans the whole session.** The session narrative
+  (`summarize_session`) used to see only the last 40 episodes, so granite's `--context-shift` clipped
+  the oldest and a long multi-window grok ingest narrated only its tail (a thin "paused for compact"
+  gist). The grok ingest now builds a hierarchical, born-fact-grounded digest of the *whole* session -
+  per-window born facts (the belief store's own distillation) + an open/decision roll-up + a
+  head/mid/tail spine of user turns - and hands it to `summarize_session` through a new optional
+  `digest=` param that skips the episode cap. No extra LLM calls. A tuned "remembered arc" narrative
+  prompt asks for a throughline, locked decisions, open loops with resumable handles, and closed work
+  in past tense; every stored narrative is ASCII-sanitized (em/en dashes, smart quotes, ellipsis ->
+  ASCII) and the length cap is raised 1500 -> 2200 for the richer structured form. Verified on a real
+  12-window session: the same session went from a 373-char tail-only gist to a 1368-char full-span
+  arc. Backward-compatible - with no `digest` the original episode path is unchanged, so the reference
+  hermes narrative keeps working exactly as before. grok-integration only.
 - **v1.6.8 (2026-07-16): grok re-compact deduplication.** grok's `chat_history.jsonl` is
   append-only, so compacting the *same* session a second time re-snapshots from turn 1 and the ingest
   used to re-mine everything the previous compact already processed (wasted compute + near-duplicate

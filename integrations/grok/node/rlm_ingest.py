@@ -127,6 +127,85 @@ def _session_key(base_sid):
     return re.sub(r"_\d{6}$", "", base_sid)
 
 
+# Categories that mark durable / resumable material - surfaced first in the narrative digest.
+_NARRATIVE_PRIORITY_CATS = {
+    "decision", "constraint", "requirement", "best_practice", "open_loop",
+    "goal", "project", "rule", "preference", "plan",
+}
+_MAX_DIGEST_CHARS = 60000  # generous; granite runs at 72420 ctx. Guard against pathological sessions.
+
+
+def _sample_spine(items, n):
+    """Head/mid/tail sample of `items` down to ~n, order preserved, so the spine shows the
+    session's flow (opening intent -> mid pivots -> latest) instead of only its tail."""
+    if n <= 0 or len(items) <= n:
+        return list(items)
+    k = max(1, n // 3)
+    head, tail = items[:k], items[-k:]
+    mid_n = n - 2 * k
+    if mid_n > 0:
+        start = max(k, (len(items) - mid_n) // 2)
+        mid = items[start:start + mid_n]
+    else:
+        mid = []
+    return head + mid + tail
+
+
+def _build_narrative_digest(store, base_sid, n_windows, turns,
+                            per_window=10, spine_turns=12, spine_char_cap=240):
+    """Build a hierarchical, born-fact-grounded digest of the WHOLE ingest for the narrative
+    pass, replacing the tail-40-episodes input that clips long multi-window sessions.
+
+    Three sections, all from material the ingest already produced (no extra LLM calls):
+      1. BORN FACTS BY WINDOW - per window, its highest-signal born facts (the belief store's
+         own distillation), ordered pinned -> priority-category -> high-resonance.
+      2. OPEN / DECISION-LIKE - the priority-category facts rolled up across all windows.
+      3. SESSION SPINE - a head/mid/tail sample of user turns, for narrative flow.
+    Returns the digest string (empty when there is nothing to narrate)."""
+    window_blocks, open_like, seen_open = [], [], set()
+    for i in range(n_windows):
+        wsid = f"{base_sid}-w{i:02d}"
+        rows = store._conn.execute(
+            "SELECT content, category, COALESCE(resonance_count, 0) AS rc, "
+            "COALESCE(pinned, 0) AS pinned FROM semantic_facts WHERE source_session = ?",
+            (wsid,)).fetchall()
+        if not rows:
+            continue
+        rows = sorted(
+            rows,
+            key=lambda r: (int(r["pinned"] or 0),
+                           1 if (r["category"] or "").lower() in _NARRATIVE_PRIORITY_CATS else 0,
+                           float(r["rc"] or 0)),
+            reverse=True)
+        lines = [f"WINDOW {i:02d}:"]
+        for r in rows[:per_window]:
+            cat = (r["category"] or "fact").lower()
+            content = " ".join((r["content"] or "").split())
+            lines.append(f"  - [{cat}] {content}")
+            if cat in _NARRATIVE_PRIORITY_CATS and content not in seen_open:
+                seen_open.add(content)
+                open_like.append(f"  - [{cat}] {content}")
+        window_blocks.append("\n".join(lines))
+
+    sections = []
+    if window_blocks:
+        sections.append("BORN FACTS BY WINDOW (the session's distilled beliefs, in order):\n"
+                        + "\n".join(window_blocks))
+    if open_like:
+        sections.append("OPEN / DECISION-LIKE (rolled up across the whole session):\n"
+                        + "\n".join(open_like[:24]))
+    user_turns = [t for role, t in turns if role == "user"] or [t for _, t in turns]
+    if user_turns:
+        spine = _sample_spine(user_turns, spine_turns)
+        spine_lines = ["  - " + " ".join(t.split())[:spine_char_cap] for t in spine]
+        sections.append("SESSION SPINE (user intents, head/mid/tail):\n" + "\n".join(spine_lines))
+
+    digest = "\n\n".join(sections)
+    if len(digest) > _MAX_DIGEST_CHARS:
+        digest = digest[:_MAX_DIGEST_CHARS] + "\n[... digest truncated ...]"
+    return digest
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("chat_history")
@@ -225,29 +304,32 @@ def main():
         except Exception as e:
             print(f"[ingest] dream cycle FAILED (non-fatal): {e}")
 
-    # Rolling narrative pass: ONE autobiographical paragraph over this whole ingest, so the agent
-    # wakes up with continuity. summarize_session is session-scoped and caps at ~40 episodes, so we
-    # stage the transcript under a throwaway narrative session, summarize it (narrative_model /
-    # narrative_endpoint if set, else the relation model), then delete those episodes. It runs AFTER
-    # the dream, so the staged episodes never trigger consolidation-debt. Non-fatal.
+    # Rolling narrative pass: ONE autobiographical paragraph over this WHOLE ingest, so the agent
+    # wakes up with continuity. Feeding summarize_session the raw transcript only lets it see the
+    # tail-40 episodes (granite runs with --context-shift, which clips the oldest), so a long
+    # multi-window ingest would narrate only the last hinge. Instead we build a hierarchical digest
+    # from what the ingest already produced - per-window born facts (the belief store's own
+    # distillation) + open/decision roll-up + a head/mid/tail user-turn spine - and hand THAT to
+    # summarize_session via digest=. No extra LLM calls, grounded in the attested facts, full-session
+    # coverage. Uses narrative_model / narrative_endpoint if set, else the relation model. Runs AFTER
+    # the dream so the born-fact set reflects the post-consolidation survivors. Non-fatal.
     if turns and getattr(prov, "_enable_narrative", False):
         nmodel = prov._config.get("narrative_model") or prov._relation_model
         nep = prov._config.get("narrative_endpoint") or prov._ollama_endpoint_relation
         nsid = f"{base_sid}-narrative"
         ns = time.time()
         try:
-            for role, text in turns:
-                store.add_episode(nsid, role, text)
+            digest = _build_narrative_digest(store, base_sid, len(windows), turns)
             sid = store.summarize_session(
                 nmodel, nep, nsid,
                 prompt=getattr(prov, "_narrative_prompt", None),
+                digest=digest,
                 ended_cycle=prov._memory_cycle, created_cycle=prov._memory_cycle,
-                keep=getattr(prov, "_narrative_keep", 40),
-                min_episodes=getattr(prov, "_narrative_min_episodes", 2))
-            store._conn.execute("DELETE FROM episodes WHERE session_id = ?", (nsid,))
-            store._conn.commit()
+                keep=getattr(prov, "_narrative_keep", 40))
             tag = f"written #{sid}" if sid else "skipped (too thin)"
-            print(f"[ingest] narrative {tag} via {nmodel} ({time.time()-ns:.0f}s)")
+            print(f"[ingest] narrative {tag} via {nmodel} "
+                  f"(hierarchical digest {len(digest)} chars, {len(windows)} windows) "
+                  f"({time.time()-ns:.0f}s)")
         except Exception as e:
             print(f"[ingest] narrative FAILED (non-fatal): {e}")
 

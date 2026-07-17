@@ -52,7 +52,9 @@ Four planes, one lattice:
 1. **Passive write (PreCompact):** compacting a session snapshots the transcript *before*
    compaction collapses it, ships it to the node, and RLM consolidates it - extracting grounded,
    resonance-ranked facts, entities, and typed relations, then running one dream cycle (decay /
-   tier-promotion / conflict-detect) and a rolling narrative. grok does **not** fire `SessionEnd`
+   tier-promotion / conflict-detect) and a rolling narrative built from the *whole* session's born
+   facts (a hierarchical digest, so a long multi-window compact is narrated in full, not just its
+   tail). grok does **not** fire `SessionEnd`
    on a normal exit, so the convention is: **compact before you exit**.
 2. **Passive read (SessionStart):** a hook pulls a Markdown projection of the lattice into grok's
    native `MEMORY.md`. grok's engine indexes it and injects it first-turn and answers
