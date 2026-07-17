@@ -179,28 +179,33 @@ class NarrativeMixin:
         return list(reversed(out)) if chronological else out
 
     def mark_prior_narratives_historical(self, keep_current: int = 1) -> int:
-        """Mark all but the newest `keep_current` narratives historical=1 (temporal
-        framing: the newest row is the CURRENT status, older rows are the past). Returns
-        the count newly flagged. Idempotent; uses the same recency ordering as pruning.
-        Callers that want the newest to read as 'current' (the grok projection) invoke
-        this right after writing a new narrative; the default (hermes) path never does,
-        so its behaviour is unchanged."""
+        """Recompute the historical flag from recency: the newest `keep_current` narratives
+        are CURRENT (historical=0), every older one is historical=1 (temporal framing). This
+        is a FULL recompute in both directions - a row that later becomes the newest is
+        cleared back to current, not left stale (the one-directional set-only version left a
+        previously-historical row historical even after it became newest). Returns the number
+        of rows whose flag actually changed. Idempotent; same recency ordering as pruning.
+        Callers that want the newest to read as 'current' (the grok projection) invoke this
+        right after writing a new narrative; the default (hermes) path never does, so its
+        behaviour is unchanged."""
         keep_current = max(0, keep_current)
         with self._lock:
-            cur = self._conn.execute(
-                """
-                UPDATE session_summaries SET historical = 1
-                WHERE COALESCE(historical, 0) = 0
-                  AND summary_id NOT IN (
-                    SELECT summary_id FROM session_summaries
-                    ORDER BY COALESCE(created_cycle, 0) DESC, summary_id DESC
-                    LIMIT ?
-                  )
-                """,
-                (keep_current,),
+            newest = (
+                "SELECT summary_id FROM session_summaries "
+                "ORDER BY COALESCE(created_cycle, 0) DESC, summary_id DESC LIMIT ?"
             )
+            demote = self._conn.execute(
+                "UPDATE session_summaries SET historical = 1 "
+                "WHERE COALESCE(historical, 0) = 0 AND summary_id NOT IN (%s)" % newest,
+                (keep_current,),
+            ).rowcount or 0
+            promote = self._conn.execute(
+                "UPDATE session_summaries SET historical = 0 "
+                "WHERE COALESCE(historical, 0) = 1 AND summary_id IN (%s)" % newest,
+                (keep_current,),
+            ).rowcount or 0
             self._conn.commit()
-            return cur.rowcount or 0
+            return demote + promote
 
     def prune_session_summaries(self, keep: int) -> int:
         """Keep only the most recent `keep` summaries; delete the rest. Returns the

@@ -2560,6 +2560,27 @@ def test_narrative_temporal_framing():
     s.close()
 
 
+def test_narrative_historical_recompute_clears():
+    """Regression: mark_prior recomputes BOTH directions - a row marked historical that later
+    becomes the newest is CLEARED back to current (the set-only version left it stale, which the
+    hybrid backfill exposed)."""
+    if not _STORE_OK:
+        print("  SKIP"); return
+    s = _fresh_store()
+    a = s.add_session_summary("s1", "one", created_cycle=5)
+    b = s.add_session_summary("s2", "two", created_cycle=1)  # older -> historical
+    assert s.mark_prior_narratives_historical(keep_current=1) == 1  # only b demoted
+    hist = {r["summary_id"]: r["historical"] for r in s.get_recent_narrative(chronological=False)}
+    assert hist[a] == 0 and hist[b] == 1, hist
+    # remove a; b (previously historical) is now the newest -> must clear back to current
+    s._conn.execute("DELETE FROM session_summaries WHERE summary_id = ?", (a,))
+    s._conn.commit()
+    assert s.mark_prior_narratives_historical(keep_current=1) == 1  # b promoted 1 -> 0
+    only = s.get_recent_narrative(chronological=False)[0]
+    assert only["summary_id"] == b and only["historical"] == 0, only
+    s.close()
+
+
 def test_narrative_ascii_guarantee():
     """Core hardening: _ascii_sanitize returns pure ASCII for dashes, arrows, accents,
     bullets, and smart quotes - stored narratives are always ASCII regardless of the model."""
