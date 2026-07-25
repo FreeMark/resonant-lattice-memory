@@ -226,19 +226,33 @@ class ConsolidationMixin:
         # Cross-PROCESS serialization (concurrent overnight workers + gateway on
         # one profile DB): same skip/wait semantics as the in-process lock above.
         # Fresh instance per finalize unit - see proc_lock module docstring.
+        #
+        # SCOPE (2026-07-25): the lock is taken LATE - immediately before the
+        # write phase - not here. Measured on five concurrent overnight lanes,
+        # holding it across the whole epoch serialized 111.3s / 5.4s / 121.1s
+        # per lane with zero-gap handoffs, because the LLM stages sat inside it:
+        # one extraction call (up to _reason_timeout, configured 900s, x3
+        # attempts) plus ONE relation call PER newly added fact (60s each). None
+        # of that touches state the lock protects - the lock exists for the
+        # read-then-write dedup race in add_or_reinforce_fact and for Hebbian
+        # maintenance. Serializing LLM latency behind it capped throughput at
+        # 1/hold_time regardless of how many lanes ran.
         _flock = FinalizeLock(self._store.db_path)
-        if not _flock.acquire(FINALIZE_LOCK_WAIT if force_blocking else 0.0):
-            if force_blocking:
-                logger.error(
-                    "Finalize lock still held by another process after %.0fs - "
-                    "skipping forced consolidation (episodes remain durable).",
-                    FINALIZE_LOCK_WAIT)
-            else:
-                logger.info(
-                    "Consolidation deferred - another process is finalizing this DB")
+        # Preserve the early-skip for SCHEDULED work: bail before spending a
+        # reason-model call, exactly as when the lock was taken up front. Forced
+        # (session-end) work still queues and waits below.
+        if not force_blocking and _flock.held_by_other():
+            logger.info(
+                "Consolidation deferred - another process is finalizing this DB")
             self._consolidation_lock.release()
             return
 
+        _t_epoch = time.monotonic()
+        _t_extract = _t_write = _t_lockwait = _t_rel = 0.0
+        # Separate name: `finally` runs on the early-return paths too (no
+        # episodes, extraction failure), where a shared cursor would be unbound.
+        _t_write_start = None
+        _deferred_relations = []   # (fact_id, content, entities) - run unlocked
         try:
             # 1. Get recent conversation turns
             episodes = self._store.get_recent_episodes(
@@ -336,6 +350,7 @@ class ConsolidationMixin:
             # knowledge. Re-attempt a few times when the transcript is substantial.
             extracted_facts = []
             _max_attempts = max(1, int(getattr(self, "_extraction_max_attempts", 3)))
+            _t0 = time.monotonic()
             for _ea in range(_max_attempts):
                 try:
                     extracted_facts = _extract_once()
@@ -349,6 +364,27 @@ class ConsolidationMixin:
                     "%d-char transcript; retrying (reasoning-model flakiness guard)",
                     _ea + 1, _max_attempts, len(transcript),
                 )
+
+            _t_extract = time.monotonic() - _t0
+
+            # ---- WRITE PHASE BEGINS: take the cross-process lock HERE ----
+            # Everything above is read-only (episodes, cycle counts, tool names)
+            # plus the extraction LLM call, so it can run fully in parallel
+            # across lanes. From here on we mutate shared state, so we serialize.
+            _t0 = time.monotonic()
+            if not _flock.acquire(FINALIZE_LOCK_WAIT if force_blocking else 0.0):
+                if force_blocking:
+                    logger.error(
+                        "Finalize lock still held by another process after %.0fs - "
+                        "skipping forced consolidation (episodes remain durable).",
+                        FINALIZE_LOCK_WAIT)
+                else:
+                    logger.info(
+                        "Consolidation deferred - another process is finalizing "
+                        "this DB")
+                return
+            _t_lockwait = time.monotonic() - _t0
+            _t_write_start = time.monotonic()
 
             # 5. Process each extracted fact
             quotes_dropped = 0   # facts dropped by source-quote attestation
@@ -444,8 +480,15 @@ class ConsolidationMixin:
                     # FRESHLY added fact into the relation graph (idempotent, but only
                     # on 'added' to skip redundant work on reinforcement). Gated +
                     # non-fatal via the helper so it never blocks consolidation.
+                    # DEFERRED (2026-07-25): this is an LLM call per added fact
+                    # (timeout min(_reason_timeout, 60) each), and it was the
+                    # dominant term in a 111-121s lock hold across five lanes.
+                    # It writes only fact_relations rows for a fact_id THIS
+                    # process just created, so it needs no cross-process
+                    # exclusion - SQLite's WAL + 30s busy_timeout covers the
+                    # write. Collect now, run after the lock is released.
                     if self._enable_relations and action == "added" and fid and fid > 0:
-                        self._extract_relations_for_fact(fid, content, entities)
+                        _deferred_relations.append((fid, content, entities))
                 except Exception as e:
                     logger.error(f"Failed to ingest fact '{content[:40]}...': {e}", exc_info=True)
 
@@ -477,9 +520,34 @@ class ConsolidationMixin:
                 self._store.end_write_batch()   # close the consolidation batch (no-op if none)
             except Exception:
                 pass
+            if _t_write_start is not None:
+                _t_write = time.monotonic() - _t_write_start
             _flock.release()
             self._consolidation_lock.release()   # ← released BEFORE dream cycle
- 
+
+        # 5c. Relation extraction, OUTSIDE both locks (see the deferral note in
+        # the fact loop). One LLM call per newly added fact; non-fatal, and each
+        # touches only its own fact_id, so a slow or hung relation model can no
+        # longer stall every other lane's consolidation tail.
+        _t_rel_start = time.monotonic()
+        for _fid, _content, _entities in _deferred_relations:
+            try:
+                self._extract_relations_for_fact(_fid, _content, _entities)
+            except Exception as e:
+                logger.debug("Deferred relation extraction failed for fact %s: %s",
+                             _fid, e)
+        _t_rel = time.monotonic() - _t_rel_start
+
+        # One line that makes the next contention question measurable instead of
+        # arguable: lock_held is what OTHER lanes actually queue behind.
+        if _t_extract or _t_write:
+            logger.info(
+                "Consolidation timing: extract %.1fs (unlocked) | lockwait %.1fs "
+                "| write %.1fs (LOCK HELD) | relations %.1fs (unlocked, %d facts) "
+                "| epoch %.1fs",
+                _t_extract, _t_lockwait, _t_write, _t_rel,
+                len(_deferred_relations), time.monotonic() - _t_epoch)
+
         # Dream cycle runs outside the consolidation lock.
         # _dream_lock inside _run_dream_cycle() prevents concurrent dream cycles.
         # on_session_end suppresses this and runs its own single dream cycle to

@@ -56,6 +56,26 @@ class FinalizeLock:
                 return False
             time.sleep(_POLL)
 
+    def held_by_other(self) -> bool:
+        """Is another process finalizing right now? Peek WITHOUT keeping the lock.
+
+        Used to preserve early-skip semantics for SCHEDULED (non-forced) work
+        once the expensive LLM stages moved outside the lock: a mid-session
+        consolidation should still bail before spending a reason-model call,
+        exactly as it did when the lock was taken up front.
+
+        Inherently racy - the answer can be stale the instant it returns - which
+        is fine because it is only an optimization. The authoritative acquire
+        still happens before any write. Fails OPEN (returns False) for the same
+        reason acquire() does: a lock we cannot even create must not stop
+        consolidation.
+        """
+        got = self._try_once()
+        if got is False:
+            return True
+        self.release()          # no-op when _try_once fell open (fd is None)
+        return False
+
     def _try_once(self):
         try:
             fd = os.open(self._path, os.O_CREAT | os.O_RDWR)

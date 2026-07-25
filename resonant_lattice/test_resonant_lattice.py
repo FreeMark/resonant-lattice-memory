@@ -3134,6 +3134,141 @@ def test_finalize_lock_contention():
     print("  finalize lock OK: contention in-process + cross-process; clean handover")
 
 
+def test_finalize_lock_scope_excludes_llm_stages():
+    """The finalize lock must cover the WRITE phase only - not the LLM stages.
+
+    Measured 2026-07-25 on five concurrent overnight lanes, the old scope (lock
+    taken for the whole epoch) produced hold times of 111.3s / 121.1s / 415.2s
+    with zero-gap handoffs, because two LLM stages sat inside it: the extraction
+    call (up to _reason_timeout, configured 900s in production) and ONE relation
+    call per newly added fact. Neither touches state the lock protects, so they
+    were pure serialization: throughput was capped at 1/hold_time no matter how
+    many lanes ran.
+
+    This pins the scope by probing the lock from a SECOND FinalizeLock instance
+    (a distinct file descriptor, so it genuinely contends) at three points:
+      extraction  -> must be FREE
+      the write   -> must be HELD
+      relations   -> must be FREE
+    Before the change the first and third both reported HELD.
+    """
+    try:
+        _inject_hermes_stubs()
+        prov = _load("__init__")
+        pl = _load("proc_lock")
+    except Exception as e:
+        print(f"  SKIP finalize lock scope: {e}"); return
+    import json
+    import tempfile
+
+    seen = {}
+
+    def _probe(where, db_path):
+        """Is the lock free RIGHT NOW? Separate instance == real contention."""
+        probe = pl.FinalizeLock(db_path)
+        free = probe.acquire(0.0)
+        if free:
+            probe.release()
+        seen[where] = "free" if free else "held"
+
+    class _ScopeStore:
+        def __init__(self, tmp):
+            self.db_path = os.path.join(tmp, "stub.db")
+
+        def get_recent_episodes(self, limit=10, session_id=None):
+            return [{"role": "user", "content": "what did we learn" * 8},
+                    {"role": "assistant", "content": "creatinine 125 umol/L" * 20}]
+
+        def get_cycle_counts(self):
+            return (0, 0)
+
+        def _clean_llm_json(self, text):
+            return text
+
+        def begin_write_batch(self, **kw):
+            return 1
+
+        def end_write_batch(self):
+            pass
+
+        def _extract_entities(self, content):
+            return []
+
+        def session_tool_names(self, session_id):
+            return set()
+
+        def increment_cycle(self, key):
+            return 1
+
+        def add_or_reinforce_fact(self, content, emb, category, session_id, **kw):
+            _probe("write", self.db_path)
+            return ("added", 77)
+
+    class _ScopeRetriever:
+        def _get_embedding(self, content):
+            return [0.1] * 8
+
+    p = prov.LatticeMemoryProvider({})
+    tmp = tempfile.mkdtemp()
+    p._store = _ScopeStore(tmp)
+    p._retriever = _ScopeRetriever()
+    p._write_enabled = True
+    p._gate_self_writes = False
+    p._enable_relations = True          # the deferred stage under test
+    p._session_id = "s-scope"
+    p._extract_relations_for_fact = (
+        lambda fid, content, entities: _probe("relations", p._store.db_path))
+
+    fake = {"response": json.dumps([{"content": "Creatinine is reported in umol/L",
+                                     "category": "unit_convention"}])}
+
+    def _fake_post(url, payload, timeout, max_attempts=3):
+        _probe("extract", p._store.db_path)
+        return fake
+
+    g = p._run_consolidation_epoch.__func__.__globals__
+    orig = g["_ollama_post_with_retry"]
+    g["_ollama_post_with_retry"] = _fake_post
+    try:
+        p._run_consolidation_epoch("s-scope", suppress_dream=True)
+    finally:
+        g["_ollama_post_with_retry"] = orig
+
+    assert seen.get("extract") == "free", (
+        "extraction ran INSIDE the finalize lock: %r" % (seen,))
+    assert seen.get("write") == "held", (
+        "the write phase ran OUTSIDE the finalize lock - the dedup "
+        "read-then-write race is unprotected: %r" % (seen,))
+    assert seen.get("relations") == "free", (
+        "relation extraction ran INSIDE the finalize lock: %r" % (seen,))
+    print("  finalize lock scope OK: extract free, write HELD, relations free")
+
+
+def test_finalize_lock_held_by_other_peek():
+    """held_by_other() reports contention WITHOUT keeping the lock.
+
+    It backs the early-skip for scheduled consolidation once the expensive
+    stages moved outside the lock: a mid-session epoch must still bail before
+    spending a reason-model call. A peek that accidentally RETAINED the lock
+    would deadlock the very epoch that just peeked, so prove it lets go.
+    """
+    import tempfile as _tf
+    pl = _load("proc_lock")
+    base = os.path.join(_tf.mkdtemp(), "dbfile")
+
+    a = pl.FinalizeLock(base)
+    assert a.held_by_other() is False          # nobody holds it
+    # ...and the peek did not keep it: a real acquire must still succeed.
+    assert a.acquire(0.0) is True
+    b = pl.FinalizeLock(base)
+    assert b.held_by_other() is True           # a holds it now
+    a.release()
+    assert b.held_by_other() is False
+    assert b.acquire(0.0) is True
+    b.release()
+    print("  held_by_other OK: detects contention, never retains the lock")
+
+
 def test_store_dismiss_conflict():
     """Phase 6 second verb: dismiss_conflict unlocks ALL members of a false-positive
     group symmetrically - no supersession, no winner, confirm stamp + small
