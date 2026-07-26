@@ -5199,6 +5199,298 @@ def test_provider_effective_config_and_hops_floor():
     print("  effective config OK: hops=1 live; reinforce clamp + detect flags reported")
 
 
+
+
+# ===========================================================================
+# Source index: give extraction the urls it never sees, and VERIFY the ones it
+# attaches. Every assertion below encodes a false-citation class that was
+# actually observed on a live corpus, not a hypothetical one.
+# ===========================================================================
+
+def _si():
+    import source_index
+    return source_index
+
+
+def test_source_index_parses_both_web_payload_shapes():
+    """web_extract and web_search use different shapes, both wrapped in an
+    envelope with text AFTER the closing brace. json.loads() fails on 100% of
+    real payloads because of that trailing text; raw_decode is required."""
+    si = _si()
+    extract = ('<untrusted_tool_result source="web_extract">\nnotice\n'
+               '{"results":[{"url":"https://a.example/p","title":"A Title",'
+               '"content":"' + ("alpha beta gamma delta " * 40) + '"}]}\n'
+               '</untrusted_tool_result>')
+    search = ('<untrusted_tool_result source="web_search">\nnotice\n'
+              '{"success":true,"data":{"web":[{"url":"https://b.example/q",'
+              '"title":"B Title","description":"'
+              + ("epsilon zeta " * 60) + '"}]}}\n</untrusted_tool_result>')
+    got = si.parse_tool_sources([
+        {"role": "tool", "tool_name": "web_extract", "content": extract},
+        {"role": "tool", "tool_name": "web_search", "content": search},
+    ])
+    urls = [g["url"] for g in got]
+    assert urls == ["https://a.example/p", "https://b.example/q"], urls
+    assert got[0]["title"] == "A Title"
+    assert "alpha beta gamma" in got[0]["body"]
+    # search puts the page text in `description`, not `content`
+    assert "epsilon zeta" in got[1]["body"]
+
+
+def test_source_index_rejects_shells_errors_and_duplicates():
+    """A bot-mitigation shell must never become the evidence behind a citation --
+    msdvetmanual.com returned one for 1,265 of 1,284 fetches on the real corpus."""
+    si = _si()
+    shell = ('{"results":[{"url":"https://blocked.example/x",'
+             '"title":"There doesn no seem to be anything here.",'
+             '"content":"honeypot link ' + ("cookie notice " * 60) + '"}]}')
+    err = ('{"results":[{"url":"https://err.example/y","title":"t",'
+           '"content":"' + ("x " * 400) + '","error":"timeout"}]}')
+    stub = ('{"results":[{"url":"https://thin.example/z","title":"t",'
+            '"content":"tiny"}]}')
+    dupe = ('{"results":[{"url":"https://ok.example/1","title":"first",'
+            '"content":"' + ("real content here " * 50) + '"}]}')
+    dupe2 = ('{"results":[{"url":"https://ok.example/1","title":"second",'
+             '"content":"' + ("different text " * 50) + '"}]}')
+    got = si.parse_tool_sources([
+        {"role": "tool", "tool_name": "web_extract", "content": shell},
+        {"role": "tool", "tool_name": "web_extract", "content": err},
+        {"role": "tool", "tool_name": "web_extract", "content": stub},
+        {"role": "tool", "tool_name": "web_extract", "content": dupe},
+        {"role": "tool", "tool_name": "web_extract", "content": dupe2},
+    ])
+    assert [g["url"] for g in got] == ["https://ok.example/1"], got
+    # first occurrence wins, so dedup is stable rather than last-write
+    assert got[0]["title"] == "first"
+
+
+def test_source_index_block_is_capped_and_recent_first():
+    """The block rides in a prompt served at ctx 16384 beside a ~2,000-token
+    preamble, while a research session can retrieve 150+ urls."""
+    si = _si()
+    srcs = [{"url": "https://e.example/%d" % i, "title": "T" * 200, "body": "b"}
+            for i in range(120)]
+    blk = si.build_index_block(srcs, max_entries=40, title_chars=90)
+    lines = [l for l in blk.splitlines() if l.startswith("- ")]
+    assert len(lines) == 40, len(lines)
+    # most recent first: research converges, so the last pages read are the ones
+    # that answered the subtopic
+    assert "https://e.example/119" in lines[0], lines[0]
+    assert len(max(lines, key=len)) < 200
+    assert si.build_index_block([]) == ""
+
+
+def test_verify_ref_requires_verbatim_run_not_vocabulary_overlap():
+    """THE central guard. A bag-of-words rule produced 74 'recovered' refs on the
+    real corpus of which roughly 67 were false, because a 20,000-char page
+    contains the same words somewhere regardless of provenance."""
+    si = _si()
+    page = ("Urease producing bacteria primarily Staphylococcus and Proteus "
+            "drive struvite formation in most canine cases. " + "filler " * 500)
+    bodies = {"https://good.example/p": page}
+    quote = ("urease producing bacteria primarily staphylococcus and proteus "
+             "drive struvite formation")
+    assert si.verify_ref(quote, "https://good.example/p", bodies) is True
+    # identical VOCABULARY, no contiguous run -> must fail
+    scrambled = ("struvite proteus formation bacteria staphylococcus primarily "
+                 "producing urease canine drive")
+    assert si.verify_ref(scrambled, "https://good.example/p", bodies) is False
+
+
+def test_verify_ref_rejects_the_observed_false_positive_classes():
+    """Each case here is a real false citation this rule had to stop."""
+    si = _si()
+    page = ("Urinalysis findings include ammonium biurate crystalluria in dogs "
+            "with hepatic disease. Creatinine 125 micromol per litre is the "
+            "stage 1 cutoff. " + "padding " * 400)
+    bodies = {"https://p.example/a": page}
+    # 1. a three-word term of art: 29 chars, cleared a 25-CHAR guard, and proves
+    #    only that the page is about urinalysis. Count distinctiveness in WORDS.
+    assert si.verify_ref("ammonium biurate crystalluria",
+                         "https://p.example/a", bodies) is False
+    # 2. a number the page does not contain -> reject outright, no ratio
+    assert si.verify_ref("Creatinine 999 micromol per litre is the stage 1 cutoff",
+                         "https://p.example/a", bodies) is False
+    # 3. a url never retrieved this session: the model invented the url itself
+    assert si.verify_ref("Creatinine 125 micromol per litre is the stage 1 cutoff",
+                         "https://never-fetched.example/z", bodies) is False
+    # 4. the same quote against the page that DOES contain it -> accept
+    assert si.verify_ref("Creatinine 125 micromol per litre is the stage 1 cutoff",
+                         "https://p.example/a", bodies) is True
+    # 5. empty inputs never earn a ref
+    assert si.verify_ref("", "https://p.example/a", bodies) is False
+    assert si.verify_ref("anything at all here", "", bodies) is False
+
+
+def test_consolidation_verifies_refs_and_flags_quoteless_facts():
+    """Source-level invariants, in the style of the think:false test: the ref gate
+    and the no_quote marker must both exist AND be wired to the epoch counters, so
+    a later refactor cannot silently drop either half."""
+    path = os.path.join(PLUGIN_DIR, "consolidation.py")
+    src = open(path, encoding="utf-8").read()
+    assert "import source_index" in src, "source_index not imported"
+    # supply half
+    assert "build_index_block" in src, "url index never appended to transcript"
+    # verify half -- these two must travel together or the feature fabricates
+    assert "source_index.verify_ref" in src, "refs are supplied but never verified"
+    assert "refs_dropped" in src and "refs_verified" in src, \
+        "ref verification has no counters, so failures would be invisible"
+    # dropping the ref must NOT drop the fact
+    assert "source_ref = None" in src, "unearned ref should be nulled, fact kept"
+    # quote-less facts get an explicit status instead of a NULL that reads as
+    # "not checked yet"
+    assert "no_quote" in src, "quote-less facts still fall through as NULL"
+    # the feature must be flag-gated (default OFF in config_schema)
+    assert "_url_index_for_extraction" in src, "feature is not flag-gated"
+
+
+def test_url_index_config_defaults_off():
+    """Default OFF: it costs ~1,200 prompt tokens, stages page text, and only
+    helps agents that browse. Profiles that do not must be unaffected."""
+    import config_schema
+    schema = getattr(config_schema, "CONFIG_SCHEMA", None) or \
+        getattr(config_schema, "SCHEMA", None)
+    assert schema, "cannot locate the config schema list"
+    entry = next((e for e in schema
+                  if e.get("key") == "url_index_for_extraction"), None)
+    assert entry is not None, "url_index_for_extraction missing from schema"
+    assert entry["default"] is False, entry
+    assert "verif" in entry["description"].lower(), \
+        "schema description must state that refs are VERIFIED, not just supplied"
+
+
+def test_store_session_sources_roundtrip_and_prune():
+    """The bridge between sync_turn (which sees tool messages) and consolidation
+    (which sees only a session_id)."""
+    # _fresh_store() + close() in a finally, matching every other store test here.
+    # A TemporaryDirectory teardown fails on Windows with WinError 32 while the
+    # store still holds the sqlite handle, which reports as a test failure when in
+    # fact every assertion passed -- a misleading red is worse than no test.
+    st = _fresh_store()
+    try:
+        rows = [
+            {"url": "https://s.example/1", "title": "One", "body": "body one"},
+            {"url": "https://s.example/2", "title": "Two", "body": "body two"},
+        ]
+        st.add_session_sources("sess-A", rows)
+        # a replay of the same page is a no-op: hermes replays history on restart
+        st.add_session_sources("sess-A", rows)
+        got = st.get_session_sources("sess-A", with_body=True)
+        assert len(got) == 2, got
+        assert {g["url"] for g in got} == {"https://s.example/1",
+                                          "https://s.example/2"}
+        assert got[0]["body"] == "body one"
+        # bodies omitted unless asked for, so prompt building stays cheap
+        light = st.get_session_sources("sess-A")
+        assert light[0]["body"] == "", light[0]
+        # sessions are isolated: no cross-block citation
+        assert st.get_session_sources("sess-B") == []
+        # prune with a past cutoff clears it; nothing in the substrate depends on
+        # these rows surviving
+        assert st.prune_session_sources(older_than_hours=-1) >= 2
+        assert st.get_session_sources("sess-A") == []
+    finally:
+        st.close()
+
+
+
+
+def test_find_ref_attaches_the_page_that_contains_the_quote():
+    """MECHANICAL attachment, the primary path. Asking the model for the url was
+    measured to fail: an offered `url | title` index produced ZERO refs across 28
+    facts, including a real block with 30 urls available. The one case that worked
+    had urls inline beside each fact, where the model copied a 100-char url 3/3 --
+    so the failure was ASSOCIATION, not transcription, and the system has to do the
+    association itself."""
+    si = _si()
+    page_a = ("Urease producing bacteria primarily Staphylococcus and Proteus "
+              "drive struvite formation in dogs. " + "filler " * 300)
+    page_b = ("Calcium oxalate uroliths recur in 48 percent of dogs within 36 "
+              "months of removal. " + "other " * 300)
+    bodies = {"https://a.example/1": page_a, "https://b.example/2": page_b}
+
+    hit = si.find_ref("urease producing bacteria primarily staphylococcus and "
+                      "proteus drive struvite formation", bodies)
+    assert hit and hit[0] == "https://a.example/1", hit
+    hit = si.find_ref("calcium oxalate uroliths recur in 48 percent of dogs "
+                      "within 36 months", bodies)
+    assert hit and hit[0] == "https://b.example/2", hit
+    # no page contains it -> no ref, rather than the closest-looking one
+    assert si.find_ref("cystine stones dissolve readily with diet alone always",
+                       bodies) is None
+    # too short to identify a source, and no number to anchor it
+    assert si.find_ref("struvite formation dogs", bodies) is None
+
+
+def test_find_ref_refuses_an_ambiguous_match():
+    """Two pages carrying the same text do not identify a source. Picking one is a
+    coin-flip citation, which is the failure this whole module exists to prevent."""
+    si = _si()
+    shared = ("Cystine uroliths form because of an inherited defect in renal "
+              "tubular transport of cystine. " + "pad " * 300)
+    bodies = {"https://x.example/1": shared, "https://y.example/2": shared}
+    assert si.find_ref("cystine uroliths form because of an inherited defect in "
+                       "renal tubular transport of cystine", bodies) is None
+    # but once one page has strictly MORE of the quote, it wins on evidence
+    longer = shared + " Dissolution is not possible for cystine stones."
+    bodies2 = {"https://x.example/1": shared, "https://y.example/2": longer}
+    hit = si.find_ref("renal tubular transport of cystine. dissolution is not "
+                      "possible for cystine stones", bodies2)
+    assert hit and hit[0] == "https://y.example/2", hit
+
+
+def test_find_ref_requires_every_number_and_ignores_shell_pages():
+    """A number the page lacks is disqualifying, with no ratio and no tolerance --
+    a misattributed reference interval is worse than no reference at all."""
+    si = _si()
+    page = ("Blood creatinine 125 micromol per litre marks IRIS stage 1 in dogs. "
+            + "pad " * 300)
+    bodies = {"https://p.example/a": page}
+    assert si.find_ref("blood creatinine 125 micromol per litre marks iris "
+                       "stage 1 in dogs", bodies) is not None
+    assert si.find_ref("blood creatinine 999 micromol per litre marks iris "
+                       "stage 1 in dogs", bodies) is None
+    # empty inputs never produce a ref
+    assert si.find_ref("", bodies) is None
+    assert si.find_ref("anything here at all really", {}) is None
+
+
+def test_consolidation_attaches_refs_mechanically_not_by_asking():
+    """Source-level invariants. The mechanical path must be wired AND the prompt
+    half must be separately gated, so the measured-ineffective mechanism cannot
+    silently come back on and cost 1,200 tokens per consolidation for nothing."""
+    src = open(os.path.join(PLUGIN_DIR, "consolidation.py"), encoding="utf-8").read()
+    assert "source_index.find_ref" in src, "mechanical attachment not wired"
+    assert "refs_found" in src, "no counter for mechanically attached refs"
+    # verification of a model-supplied ref stays as defence in depth
+    assert "source_index.verify_ref" in src, "model-supplied refs no longer verified"
+    # the prompt index must be behind its own flag
+    assert "_url_index_in_prompt" in src, "prompt half is not separately gated"
+    # match on the ORIGINAL quote: attestation may null source_quote for being
+    # absent from the agent's paraphrase, but it can still be verbatim from a page
+    assert "_raw_quote" in src, "mechanical match should use the emitted quote"
+    # synthesis sessions fetched nothing, so they must not get a page ref
+    assert "not synthesis_session" in src, "synthesis sessions must be excluded"
+
+
+def test_url_index_prompt_half_defaults_off_and_is_documented_as_ineffective():
+    """The negative result has to survive in the schema, or someone will turn it
+    back on expecting it to help."""
+    import config_schema
+    schema = getattr(config_schema, "CONFIG_SCHEMA", None) or \
+        getattr(config_schema, "SCHEMA", None)
+    entry = next((e for e in schema if e.get("key") == "url_index_in_prompt"), None)
+    assert entry is not None, "url_index_in_prompt missing from schema"
+    assert entry["default"] is False, entry
+    d = entry["description"].lower()
+    assert "ineffective" in d and "12b" in d, \
+        "schema must record WHY this is off, with the measurement"
+    main = next((e for e in schema
+                 if e.get("key") == "url_index_for_extraction"), None)
+    assert "mechanical" in main["description"].lower(), \
+        "the main flag should describe the mechanical path, not the prompt one"
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = skipped = failed = 0

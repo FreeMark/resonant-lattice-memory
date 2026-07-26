@@ -196,6 +196,76 @@ class EpisodesMixin:
             )
             self._conn.commit()
 
+    # ---- session_sources: transient citation evidence -----------------------
+    #
+    # These three carry the url bridge between sync_turn (which sees the raw tool
+    # messages) and consolidation (which sees only a session_id). See
+    # SchemaMixin._migrate_add_session_sources for why the page body is staged, and
+    # source_index.py for what is done with it. The table is TRANSIENT: nothing in
+    # the substrate depends on a row surviving, so pruning is always safe.
+
+    def add_session_sources(self, session_id: str,
+                            sources: List[Dict[str, str]]) -> int:
+        """Stage retrieved (url, title, body) triples. Returns rows newly inserted.
+
+        INSERT OR IGNORE against the UNIQUE (session_id, url) index, because hermes
+        replays message history on restart and the same page will arrive repeatedly.
+        """
+        if not session_id or not sources:
+            return 0
+        rows = [(session_id, s.get("url") or "", s.get("title") or "",
+                 s.get("body") or "")
+                for s in sources if (s.get("url") or "").strip()]
+        if not rows:
+            return 0
+        with self._lock:
+            cur = self._conn.executemany(
+                "INSERT OR IGNORE INTO session_sources "
+                "(session_id, url, title, body) VALUES (?, ?, ?, ?)", rows,
+            )
+            self._conn.commit()
+            return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+
+    def get_session_sources(self, session_id: str, limit: int = 200,
+                            with_body: bool = False) -> List[Dict[str, str]]:
+        """Retrieved sources for a session, oldest first.
+
+        `with_body` is off by default so building the prompt index -- which needs
+        only url and title -- never pulls megabytes of page text into memory.
+        """
+        if not session_id:
+            return []
+        cols = "url, title, body" if with_body else "url, title, '' AS body"
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT %s FROM session_sources WHERE session_id = ? "
+                "ORDER BY id LIMIT ?" % cols, (session_id, int(limit)),
+            ).fetchall()
+        return [{"url": r[0], "title": r[1] or "", "body": r[2] or ""}
+                for r in rows]
+
+    def prune_session_sources(self, older_than_hours: float = 48.0) -> int:
+        """Drop staged evidence past its usefulness. Returns rows removed.
+
+        48h default: long enough that a slow or retried block can still verify its
+        own citations, short enough that page text does not accumulate. Nothing
+        references these rows once a session has consolidated.
+        """
+        # Sign is carried by %+f, not by a literal '-'. Writing "-%f" turns a
+        # negative argument into "--1.000000 hours", which sqlite rejects as a
+        # modifier and silently applies NOTHING -- the delete then reports 0 rows
+        # and looks like "there was nothing to prune". A negative value is
+        # legitimate and useful: it sets the cutoff in the FUTURE, which is how a
+        # caller (or a test) force-clears the staging table.
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM session_sources WHERE created_at < "
+                "datetime('now', ?)",
+                ("%+f hours" % (-float(older_than_hours)),),
+            )
+            self._conn.commit()
+            return cur.rowcount or 0
+
             
     def add_turn(self, session_id: str, user_content: str, assistant_content: str) -> None:
         """Append a full user+assistant turn atomically (single lock + commit).

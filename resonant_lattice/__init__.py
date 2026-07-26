@@ -101,6 +101,11 @@ from attestation import (
     _digit_core,
     _attest_source_quote,
 )
+# Citation evidence: harvests the urls a turn retrieved (tool results are NOT
+# episodes, so extraction never sees them) and verifies any ref the extractor
+# attaches. See source_index.py -- supplying urls without verifying them would be
+# a fabrication machine, so the two halves ship together.
+import source_index
 
 
 from consolidation import ConsolidationMixin
@@ -463,6 +468,13 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         self._verify_source_quote = bool(self._config.get("verify_source_quote", DEFAULTS["verify_source_quote"]))
         self._quote_match_threshold = float(self._config.get("quote_match_threshold", DEFAULTS["quote_match_threshold"]))
         self._enable_tool_memory = bool(self._config.get("enable_tool_memory", DEFAULTS["enable_tool_memory"]))
+        self._url_index_for_extraction = bool(self._config.get(
+            "url_index_for_extraction", DEFAULTS["url_index_for_extraction"]))
+        # Separate flag: the PROMPT half is measured ineffective at 12B (see
+        # config_schema). Mechanical attachment does not need it, and it costs
+        # ~1,200 prompt tokens, so it is off independently.
+        self._url_index_in_prompt = bool(self._config.get(
+            "url_index_in_prompt", DEFAULTS["url_index_in_prompt"]))
         # === Procedural (tool) memory: episodes -> distillation -> facts ===
         # Raw tool calls are logged as episodic events (store.tool_episodes) and
         # periodically generalized into reusable 'procedural' semantic facts by the
@@ -1064,6 +1076,21 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
                     prev_thread.join(timeout=30.0)
 
                 self._store.add_turn(sid, user_content, assistant_content)
+
+                # Source index: stage the urls this turn retrieved BEFORE the
+                # consolidation check below. Ordering is the whole point -- the
+                # epoch only receives a session_id and reads these rows back from
+                # the DB, so harvesting after it (where the tool-memory block sits)
+                # would make every url arrive exactly one turn too late to be
+                # citable. `messages` is the only place tool results exist; they
+                # never become episodes, which is why extraction cannot see them.
+                if self._url_index_for_extraction and messages:
+                    try:
+                        _srcs = source_index.parse_tool_sources(messages)
+                        if _srcs:
+                            self._store.add_session_sources(sid, _srcs)
+                    except Exception as e:                       # noqa: BLE001
+                        logger.debug("Source harvest failed (non-fatal): %s", e)
 
                 if turn_at_spawn % self._reflection_frequency == 0:
                     self._run_consolidation_epoch(sid)

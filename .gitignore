@@ -29,3 +29,9 @@ results/overnight_*
 
 # local RLM<->grok connection config (LAN host/key stays off GitHub)
 rlm-grok.conf
+
+# local-only working area, never publish
+_local_farm_patches/
+
+# journey-docs collection: raw copies, NOT yet privacy-scrubbed — never publish until curated
+docs/collected/

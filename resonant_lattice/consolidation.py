@@ -16,6 +16,7 @@ from attestation import _attest_source_quote
 from proc_lock import FinalizeLock, FINALIZE_LOCK_WAIT
 from store_common import hrr, _HRR_AVAILABLE
 from self_write_gate import is_task_process_meta
+import source_index
 
 logger = logging.getLogger(__name__)
 
@@ -264,9 +265,46 @@ class ConsolidationMixin:
                 return
 
             transcript = "\n".join([
-                f"{ep['role'].upper()}: {_strip_goal_injection(ep['content'])}" 
+                f"{ep['role'].upper()}: {_strip_goal_injection(ep['content'])}"
                 for ep in episodes
             ])
+
+            # === Source index (default OFF) ===================================
+            # Episodes carry only user/assistant rows, so the urls the agent read
+            # are absent from `transcript` and it cannot cite them. Append a
+            # compact `url | title` list harvested during sync_turn.
+            #
+            # This is HALF a feature on its own and would be a liability alone: a
+            # list of urls is a menu, and a model handed a menu picks a
+            # plausible-looking entry. The other half -- mechanical verification of
+            # every ref the extractor attaches, below at `_ref_bodies` -- is what
+            # makes supplying the list safe. Keep them together or neither.
+            #
+            # ATTESTED SEPARATELY from the quote channel on purpose: a wrong quote
+            # and a wrong url are different failures with different blast radius.
+            _ref_bodies: dict = {}
+            if getattr(self, "_url_index_for_extraction", False):
+                try:
+                    _srcs = self._store.get_session_sources(
+                        session_id, limit=400, with_body=True)
+                    if _srcs:
+                        _ref_bodies = {s["url"]: s["body"] for s in _srcs
+                                       if s.get("url") and s.get("body")}
+                        _blk = (source_index.build_index_block(_srcs)
+                                if getattr(self, "_url_index_in_prompt", False)
+                                else "")
+                        if _blk:
+                            transcript = "%s\n\n%s" % (transcript, _blk)
+                            # INFO, not DEBUG. Without this line there is no way to
+                            # tell "the index was absent" from "the index was
+                            # offered and the model ignored it" -- two problems with
+                            # completely different fixes. Diagnosing a zero-ref
+                            # result cost a round trip for exactly that reason.
+                            logger.info(
+                                "Source index: %d urls offered to extraction "
+                                "(%d chars)", len(_srcs), len(_blk))
+                except Exception as e:                           # noqa: BLE001
+                    logger.debug("Source index unavailable (non-fatal): %s", e)
 
             # Re-sync the logical clock from the DB before announcing/stamping:
             # in a long-lived process the cached counter lags behind one-shot
@@ -399,6 +437,9 @@ class ConsolidationMixin:
 
             # 5. Process each extracted fact
             quotes_dropped = 0   # facts dropped by source-quote attestation
+            refs_dropped = 0     # urls removed as unearned (ref verification)
+            refs_verified = 0    # model-supplied urls kept (page contains the quote)
+            refs_found = 0       # urls attached MECHANICALLY (the primary path)
             # Semantic ROLLBACK: stamp every fact this epoch writes with a batch id,
             # so a bad extraction run can be rolled back as a unit (closed in finally).
             if extracted_facts:
@@ -445,7 +486,24 @@ class ConsolidationMixin:
                 # flags it 'unattested'. quote_status records the verdict for the
                 # substrate (NULL when there is no quote; 'unverified' when off).
                 quote_status = None
-                if source_quote:
+                if not source_quote:
+                    # NO QUOTE AT ALL. The extraction prompt requires source_quote
+                    # on every fact and says to DROP a candidate with no supporting
+                    # snippet rather than guess -- so a quote-less fact is already a
+                    # rule violation, and until now it was banked anyway with
+                    # quote_status NULL. That is the worst of both worlds: NULL
+                    # reads as "not checked yet", so an unverifiable claim became
+                    # indistinguishable from a pending one. Measured on a live vet
+                    # corpus: 25 of 1,010 facts, 15 of them from a single session.
+                    #
+                    # Marked, not dropped, and marked EXPLICITLY. Dropping would
+                    # discard content that is often true, while a null status hides
+                    # it; 'no_quote' lets any consumer filter deliberately and lets
+                    # the operator see the class growing. Enforcement is mechanical
+                    # here rather than another line of prompt, because the prompt
+                    # has already asked twice.
+                    quote_status = "no_quote"
+                elif source_quote:
                     if not self._verify_source_quote:
                         quote_status = "unverified"
                     else:
@@ -460,6 +518,68 @@ class ConsolidationMixin:
                         if verdict == "unattested":
                             source_quote = None   # keep the fact, flag the weak quote
                         quote_status = verdict
+
+                # === Ref verification ============================================
+                # The url channel gets its own gate, and it is STRICTER than the
+                # quote channel: a quote that drifts is a weak citation, but a url
+                # pointing at a page that does not contain the claim is a FALSE
+                # one, and a fabricated citation is the single failure that would
+                # make a clinical corpus unsafe to hand to a professional.
+                #
+                # Measured justification for the strictness: on this corpus a
+                # bag-of-words matcher over full-page candidates produced 74
+                # "recovered" refs of which roughly 67 were false. Requiring a
+                # verbatim run instead cut that to 7. See source_index.verify_ref.
+                #
+                # DROP THE REF, KEEP THE FACT. Losing a citation costs recall;
+                # inventing one costs trust. Only refs the extractor chose from the
+                # supplied index are checked -- a `synthesized:` stamp is our own
+                # bookkeeping, not a claim about a page, so it passes through.
+                # The quote as the extractor emitted it. Attestation may have nulled
+                # source_quote above (verdict 'unattested'), but that verdict is
+                # about the TRANSCRIPT -- a quote absent from the agent's paraphrase
+                # can still be verbatim from a page the agent read, which is exactly
+                # the case worth citing. So match on the original.
+                _raw_quote = (fact.get("source_quote")
+                              or source_quote or content or "")
+
+                if (_ref_bodies and source_ref
+                        and source_ref.startswith("http")):
+                    if not source_index.verify_ref(_raw_quote, source_ref,
+                                                   _ref_bodies):
+                        logger.debug(
+                            "Ref verification: DROPPED unearned ref %s for '%s'",
+                            source_ref[:60], content[:50])
+                        refs_dropped += 1
+                        source_ref = None
+                    else:
+                        refs_verified += 1
+
+                # MECHANICAL ATTACHMENT -- the primary path.
+                #
+                # Asking the model for the url does not work. Offering a
+                # `url | title` index in the extraction prompt produced ZERO refs
+                # across 28 facts, including a real block with 30 urls on offer. The
+                # only case that worked had urls sitting inline beside each fact,
+                # where the model copied a 100-char url correctly 3/3 -- so the
+                # failure was ASSOCIATION (matching a fact to one of thirty titles),
+                # not transcription. Citation markers would have made the copying
+                # cheaper and left the association broken.
+                #
+                # So the system does the association itself: scan the pages this
+                # session actually retrieved and attach the one that verbatim
+                # contains the quote. Stronger than trusting the model, not just
+                # cheaper -- the model can only cite pages it noticed, this checks
+                # all of them -- and it cannot fabricate, because the match standard
+                # is the same one verify_ref enforces. Ties are refused rather than
+                # guessed (see find_ref).
+                if _ref_bodies and not source_ref and not synthesis_session:
+                    _hit = source_index.find_ref(_raw_quote, _ref_bodies)
+                    if _hit:
+                        source_ref = _hit[0]
+                        refs_found += 1
+                        logger.debug("Ref found mechanically: %s (%s) for '%s'",
+                                     source_ref[:60], _hit[1], content[:50])
 
                 emb = self._retriever._get_embedding(content)
                 if not emb:
@@ -516,6 +636,8 @@ class ConsolidationMixin:
                 f"✅ Memory Cycle {self._memory_cycle} completed - "
                 f"{len(extracted_facts)} facts processed"
                 + (f", {quotes_dropped} dropped (unverified specifics)" if quotes_dropped else "")
+                + (f", refs {refs_found} matched/{refs_verified} verified/{refs_dropped} unearned"
+                   if (refs_found or refs_verified or refs_dropped) else "")
             )
  
             # Determine whether a dream cycle should follow, but don't decide

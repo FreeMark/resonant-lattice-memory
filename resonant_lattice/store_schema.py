@@ -187,6 +187,50 @@ class SchemaMixin:
         self._migrate_add_canonical_facts()
         self._migrate_add_write_batches()
         self._migrate_add_consolidation_debt()
+        self._migrate_add_session_sources()
+
+
+    def _migrate_add_session_sources(self) -> None:
+        """Create session_sources: the urls a session actually retrieved (idempotent).
+
+        WHY THIS TABLE EXISTS. Extraction reads a transcript built from `episodes`,
+        which carry only user/assistant rows -- tool results are not episodes, so the
+        urls a research agent read never reach the extractor. This is the bridge, and
+        it is written during sync_turn (where the raw message list IS available) so
+        that consolidation, which only receives a session_id, can find them later.
+
+        WHY `body` IS STORED, and why that is not as heavy as it looks. A url is only
+        allowed onto a fact if the fact's quote is VERBATIM present in that page --
+        see source_index.verify_ref. That check needs the retrieved text, and it runs
+        at consolidation time, after the message list is long gone. So the body is
+        staged here, capped by the caller, and this table is TRANSIENT: rows are
+        prunable by age and carry no long-term meaning. It is evidence held just long
+        enough to check a citation, not part of the memory substrate.
+
+        The UNIQUE (session_id, url) index makes re-ingest of the same page a no-op,
+        which matters because hermes replays history on restart.
+        """
+        with self._lock:
+            try:
+                self._conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS session_sources (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        session_id TEXT NOT NULL,
+                        url TEXT NOT NULL,
+                        title TEXT,
+                        body TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_session_sources_uniq
+                        ON session_sources(session_id, url);
+                    CREATE INDEX IF NOT EXISTS idx_session_sources_session
+                        ON session_sources(session_id);
+                    CREATE INDEX IF NOT EXISTS idx_session_sources_created
+                        ON session_sources(created_at);
+                """)
+                self._conn.commit()
+            except Exception as e:                               # noqa: BLE001
+                logger.debug("session_sources migration skipped: %s", e)
 
 
     def _migrate_add_columns(self) -> None:

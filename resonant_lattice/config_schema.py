@@ -424,6 +424,27 @@ CONFIG_SCHEMA = [
                     "'procedural' facts during the dream cycle (no "
                     "per-call resonance; failures become avoidance rules)",
      "default": True},
+    {"key": "url_index_for_extraction",
+     "description": "Recover source_ref from tool results. Episodes hold only "
+                    "user/assistant rows, so the urls an agent read are invisible "
+                    "to extraction; this harvests them into session_sources "
+                    "(transient, prunable) and then attaches a ref MECHANICALLY -- "
+                    "the page whose text verbatim contains the fact's quote. Any "
+                    "ref the model supplies itself is verified the same way and "
+                    "dropped if it does not match. Nothing is ever attached on a "
+                    "guess, and ambiguous matches are refused. Default OFF - it "
+                    "only helps agents that browse.",
+     "default": False},
+    {"key": "url_index_in_prompt",
+     "description": "Additionally OFFER the 'url | title' list to the extraction "
+                    "model in its prompt. MEASURED INEFFECTIVE at 12B: zero refs "
+                    "across 28 facts, including a real research block with 30 urls "
+                    "on offer, because the model cannot associate a fact with one "
+                    "of thirty titles (it copies a url fine when one sits beside "
+                    "the fact). Costs ~1,200 prompt tokens for nothing at that "
+                    "size. Kept for larger extraction models; requires "
+                    "url_index_for_extraction. Default OFF.",
+     "default": False},
     {"key": "tool_distill_frequency",
      "description": "Distill procedural facts from tool episodes every N dream cycles",
      "default": 2},
