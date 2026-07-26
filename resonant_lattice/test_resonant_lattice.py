@@ -3134,6 +3134,47 @@ def test_finalize_lock_contention():
     print("  finalize lock OK: contention in-process + cross-process; clean handover")
 
 
+def test_every_reason_call_disables_thinking():
+    """EVERY /api/generate payload must carry think: False.
+
+    ollama exposes thinking as a per-request field and has no Modelfile parameter
+    for it, so a thinking-capable reason model silently loses its entire answer
+    into an unclosed think block: gemma4:12b returns 0 chars with
+    done_reason=length after 32.6s, versus correct JSON in 1.6s with think=false.
+    That failure already cost a run -- five overnight lanes did 571s of research
+    each and banked ZERO facts because consolidation received empty strings.
+
+    A source-level invariant rather than a behavioural one, deliberately: the
+    calls live in four different modules (extraction, conflict adjudication,
+    abstraction x3, relations, narrative) and the next one added would inherit
+    the bug silently. Counting sites is what catches that; mocking one call path
+    would not.
+    """
+    import glob
+    here = os.path.dirname(os.path.abspath(__file__))
+    offenders, checked = [], 0
+    for path in sorted(glob.glob(os.path.join(here, "*.py"))):
+        name = os.path.basename(path)
+        if name.startswith(("test_", "eval_")):
+            continue
+        with open(path, encoding="utf-8") as fh:
+            src = fh.read()
+        gens = src.count("api/generate")
+        if not gens:
+            continue
+        checked += 1
+        thinks = src.count('"think": False')
+        if gens != thinks:
+            offenders.append((name, gens, thinks))
+    assert checked >= 4, (
+        "expected to find the reason-call modules; found %d" % checked)
+    assert not offenders, (
+        "reason-model call sites without think: False -> "
+        + ", ".join("%s (%d generate, %d think)" % o for o in offenders))
+    print("  think-off invariant OK: %d modules, every /api/generate carries "
+          "think: False" % checked)
+
+
 def test_finalize_lock_scope_excludes_llm_stages():
     """The finalize lock must cover the WRITE phase only - not the LLM stages.
 

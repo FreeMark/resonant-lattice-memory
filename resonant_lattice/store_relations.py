@@ -345,7 +345,7 @@ class RelationsMixin:
         final_prompt = f"{base_prompt}\n\nTEXT:\n{content}\n\nJSON OUTPUT:"
         try:
             payload = {"model": reason_model, "prompt": final_prompt,
-                       "stream": False, "options": {"temperature": 0.1}}
+                       "stream": False, "think": False, "options": {"temperature": 0.1}}
             req = urllib.request.Request(
                 f"{ollama_endpoint}/api/generate",
                 data=json.dumps(payload).encode("utf-8"),

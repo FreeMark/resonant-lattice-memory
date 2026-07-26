@@ -279,7 +279,7 @@ class NarrativeMixin:
             final_prompt = f"{base_prompt}\n\nSESSION LOG:\n{body}\n\nSUMMARY:"
         try:
             payload = {"model": reason_model, "prompt": final_prompt,
-                       "stream": False, "options": {"temperature": 0.3}}
+                       "stream": False, "think": False, "options": {"temperature": 0.3}}
             req = urllib.request.Request(
                 f"{ollama_endpoint}/api/generate",
                 data=json.dumps(payload).encode("utf-8"),

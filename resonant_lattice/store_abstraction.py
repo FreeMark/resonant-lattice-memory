@@ -140,7 +140,7 @@ class AbstractionMixin:
 
             try:
                 payload = {"model": reason_model, "prompt": final_prompt,
-                           "stream": False, "options": {"temperature": 0.2}}
+                           "stream": False, "think": False, "options": {"temperature": 0.2}}
                 req = urllib.request.Request(
                     f"{ollama_endpoint}/api/generate",
                     data=json.dumps(payload).encode("utf-8"),
@@ -417,7 +417,7 @@ class AbstractionMixin:
             final_prompt = f"{base_prompt}\n\nFADING FACTS:\n{cluster_text}\n\nJSON OUTPUT:"
             try:
                 payload = {"model": reason_model, "prompt": final_prompt,
-                           "stream": False, "options": {"temperature": 0.2}}
+                           "stream": False, "think": False, "options": {"temperature": 0.2}}
                 req = urllib.request.Request(
                     f"{ollama_endpoint}/api/generate",
                     data=json.dumps(payload).encode("utf-8"),
@@ -700,7 +700,7 @@ class AbstractionMixin:
             )
             try:
                 payload = {"model": reason_model, "prompt": final_prompt,
-                           "stream": False, "options": {"temperature": 0.2}}
+                           "stream": False, "think": False, "options": {"temperature": 0.2}}
                 req = urllib.request.Request(
                     f"{ollama_endpoint}/api/generate",
                     data=json.dumps(payload).encode("utf-8"),

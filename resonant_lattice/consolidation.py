@@ -310,6 +310,17 @@ class ConsolidationMixin:
                 "model": self._reason_model,
                 "prompt": prompt,
                 "stream": False,
+                # ollama exposes thinking as a per-REQUEST field only - there is
+                # no Modelfile parameter for it ("unknown parameter 'think'"), so
+                # a thinking-capable reason model must be told here or it loses
+                # its whole answer into an unclosed think block. Measured on .46:
+                # gemma4:12b omitted -> 32.6s / done_reason=length / 0 chars;
+                # think=false -> 1.6s / done_reason=stop / correct JSON. This
+                # already cost a run: five lanes did 571s of research each and
+                # banked ZERO facts because consolidation got empty strings back.
+                # Safe on every profile - a model WITHOUT the capability accepts
+                # and ignores it (granite4.1:8b-q8: 0.9s, no error).
+                "think": False,
                 "options": {"temperature": 0.1}
             }
 
@@ -1036,6 +1047,10 @@ class ConsolidationMixin:
             "model": self._reason_model,
             "prompt": prompt,
             "stream": False,
+            # See the note at the extraction payload. This call runs with the
+            # FinalizeLock HELD, so a reason model that loses its answer into an
+            # unclosed think block stalls every OTHER lane too, not just this one.
+            "think": False,
             "options": {"temperature": 0.0},
         }
         try:
