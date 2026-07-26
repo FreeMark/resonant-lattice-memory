@@ -401,6 +401,40 @@ class LatticeStore(SchemaMixin, FactsMixin, DreamCycleMixin, AbstractionMixin,
                 )
             self._conn.commit()
 
+    def get_meta_int(self, key: str, default: int = -1) -> int:
+        """Read one integer bookkeeping value from meta, or `default` if unset.
+
+        Added for the dream-cadence claim (see _run_dream_cycle): that check has
+        to read and then write a marker, and it must see what OTHER PROCESSES
+        wrote, so a process-cached attribute cannot serve. Deliberately narrow -
+        integers only, no schema - because the alternative was another pair of
+        bespoke getters per counter.
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT value FROM meta WHERE key=?", (key,)
+            ).fetchone()
+        if not row:
+            return default
+        try:
+            return int(row["value"])
+        except (TypeError, ValueError):
+            return default
+
+    def set_meta_int(self, key: str, value: int) -> None:
+        """Persist one integer bookkeeping value in meta.
+
+        NOT for the cycle counters - those must go through increment_cycle(),
+        which does its read-modify-write inside a transaction. This is for
+        markers whose writer already holds an exclusive lock.
+        """
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+                (key, str(int(value))),
+            )
+            self._conn.commit()
+
     def increment_cycle(self, key: str) -> int:
         """Atomically advance a cycle counter IN THE DATABASE and return the
         new value.

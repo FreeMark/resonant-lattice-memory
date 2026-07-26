@@ -102,8 +102,15 @@ class LifecycleMixin:
         # wait_lock: under N-way overnight concurrency another process may be
         # mid-finalize - the session-end dream WAITS (non-daemon thread, the
         # process stays alive for it) instead of skipping its maintenance pass.
+        # respect_cadence: honour dream_every_n_consolidations HERE too. This path
+        # used to dream UNCONDITIONALLY, which made the dial inert for the batch
+        # workload that does nearly all the dreaming: 12 overnight lanes x 25
+        # blocks is 300 dreams, each holding the FinalizeLock ~18s (measured), so
+        # roughly 90 min per night that every other lane queues behind. The
+        # cadence claim is taken inside that lock, so concurrent session ends
+        # cannot all conclude they are the one to dream.
         t = threading.Thread(target=self._run_dream_cycle, daemon=False,
-                             kwargs={"wait_lock": True})
+                             kwargs={"wait_lock": True, "respect_cadence": True})
         self._last_dream_thread = t   # tracked so shutdown() drains it before close()
         t.start()
         t.join(timeout=60.0)

@@ -571,14 +571,42 @@ class ConsolidationMixin:
 
 
     # ====================== DREAM CYCLE (Hebbian Maintenance) ======================
-    def _run_dream_cycle(self, wait_lock: bool = False) -> None:
+    # Meta key for the cross-process dream-cadence claim. Lives in the DB, not on
+    # the instance: the whole point is that twelve separate hermes processes agree
+    # on when the last dream happened.
+    _DREAM_CLAIM_KEY = "last_dream_memory_cycle"
+
+    def _run_dream_cycle(self, wait_lock: bool = False,
+                         respect_cadence: bool = False) -> None:
         """Full Hebbian Dream Cycle - decay, promotion, abstraction, conflict resolution.
 
         ``wait_lock``: when another PROCESS is finalizing this DB, a scheduled
         dream (mid-session trigger, manual tool call) defers - the next trigger
         dreams. The session-end dream passes True and waits its turn so every
         session still gets its maintenance pass under N-way concurrency.
- 
+
+        ``respect_cadence``: honour dream_every_n_consolidations even on the
+        session-end path. OFF by default so a manual `rlm_dream` tool call or an
+        explicit maintenance request always dreams - a user who asks for a dream
+        should get one.
+
+        WHY IT EXISTS. on_session_end used to dream UNCONDITIONALLY, which meant
+        dream_every_n_consolidations - documented as "Dream cycle every N
+        consolidations" - had no effect on the path that does almost all the
+        dreaming in batch use. With one agent that is invisible (one session, one
+        dream). With twelve concurrent overnight lanes x 25 blocks it is 300
+        dreams, each holding the FinalizeLock for ~18s measured, so roughly 90
+        MINUTES per night of serialized lock time that every other lane queues
+        behind. At cadence 12 that is ~25 dreams, about 7.5 minutes.
+
+        Nothing is lost by dreaming less during bulk ingest: decay and promotion
+        are near-no-ops while nothing is being recalled, and conflict detection
+        over a fuller corpus is BETTER than over a corpus that grew by 20 facts
+        since the last pass.
+
+        The claim is read-and-written INSIDE the FinalizeLock, so two processes
+        cannot both decide they are the one to dream.
+
         Step order matters:
           0. increment_tier_cycles  - advance tier-dwell counters (short/mid)
           0.5 reencode_hrr_if_needed - one-shot encoding migration (self-gating)
@@ -615,6 +643,26 @@ class ConsolidationMixin:
             logger.info("Dream cycle deferred - another process is finalizing this DB")
             self._dream_lock.release()
             return
+
+        # Cadence claim, INSIDE the lock so it is a claim and not a guess: two
+        # processes reaching this line cannot both conclude the dream is due.
+        if respect_cadence:
+            _every = int(getattr(self, "_dream_every_n_consolidations", 2) or 1)
+            if _every > 1:
+                _now_mc = self._store.get_cycle_counts()[0]
+                _last = self._store.get_meta_int(self._DREAM_CLAIM_KEY, -1)
+                if _last >= 0 and (_now_mc - _last) < _every:
+                    logger.info(
+                        "Dream cycle skipped by cadence: %d consolidation(s) "
+                        "since cycle %d, dream_every_n_consolidations=%d",
+                        _now_mc - _last, _last, _every)
+                    _flock.release()
+                    self._dream_lock.release()
+                    return
+                # Claim it now, while still holding the lock. Recording BEFORE the
+                # work means a crashed dream costs one skipped cadence slot rather
+                # than letting every lane re-dream the same cycle on restart.
+                self._store.set_meta_int(self._DREAM_CLAIM_KEY, _now_mc)
 
         # === 0. Dwell + migrations ===
         try:

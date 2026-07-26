@@ -3134,6 +3134,135 @@ def test_finalize_lock_contention():
     print("  finalize lock OK: contention in-process + cross-process; clean handover")
 
 
+def test_dream_cadence_gates_session_end():
+    """dream_every_n_consolidations must govern the SESSION-END dream too.
+
+    It used to not: on_session_end dreamed unconditionally, so the dial did
+    nothing on the path that does nearly all the dreaming in batch use. With one
+    agent that is invisible; with 12 overnight lanes x 25 blocks it is 300 dreams
+    holding the FinalizeLock ~18s each -- ~90 minutes per night of serialized lock
+    time every other lane queues behind.
+
+    Four things are asserted, because three of them are the ways this could be
+    wrong rather than merely unimplemented:
+      1. the FIRST call dreams (no claim recorded yet -> nothing to skip)
+      2. an immediate second call SKIPS (cadence not satisfied)
+      3. advancing memory_cycle past the cadence lets it dream again
+      4. respect_cadence=False ALWAYS dreams -- a manual `rlm_dream` request must
+         never be silently swallowed by a cadence meant for batch ingest
+    """
+    try:
+        _inject_hermes_stubs()
+        prov = _load("__init__")
+    except Exception as e:
+        print(f"  SKIP dream cadence: {e}"); return
+    import tempfile
+    import threading
+
+    ran = []
+
+    class _CadStore:
+        def __init__(self, tmp):
+            self.db_path = os.path.join(tmp, "stub.db")
+            self._meta = {}
+            self._mc = 0
+            self.dream_cycle = 0
+
+        # --- the two calls the cadence claim depends on
+        def get_cycle_counts(self):
+            return (self._mc, self.dream_cycle)
+
+        def get_meta_int(self, key, default=-1):
+            return self._meta.get(key, default)
+
+        def set_meta_int(self, key, value):
+            self._meta[key] = int(value)
+
+        def increment_cycle(self, key):
+            self.dream_cycle += 1
+            ran.append(self.dream_cycle)
+            # Raise to abort the rest of the dream: this test is about the GATE,
+            # and the steps after it need the full store surface.
+            raise RuntimeError("stop-after-gate")
+
+    p = prov.LatticeMemoryProvider({})
+    tmp = tempfile.mkdtemp()
+    p._store = _CadStore(tmp)
+    p._write_enabled = True
+    p._dream_lock = threading.Lock()
+    p._dream_every_n_consolidations = 3
+
+    def dream(**kw):
+        try:
+            p._run_dream_cycle(**kw)
+        except RuntimeError:
+            pass          # expected: the stub aborts once the gate is passed
+        finally:
+            # the aborted run leaves both locks held; release for the next call
+            try:
+                p._dream_lock.release()
+            except RuntimeError:
+                pass
+
+    # 1. first call dreams (nothing claimed yet)
+    dream(respect_cadence=True)
+    assert len(ran) == 1, "first session-end dream should run: %r" % (ran,)
+    claim = p._store.get_meta_int(p._DREAM_CLAIM_KEY, -1)
+    assert claim == 0, "claim not recorded: %r" % (claim,)
+
+    # 2. immediately again -> skipped, 0 consolidations have happened
+    dream(respect_cadence=True)
+    assert len(ran) == 1, "second dream should be skipped by cadence: %r" % (ran,)
+
+    # 3. advance the consolidation clock past the cadence -> dreams again
+    p._store._mc = 3
+    dream(respect_cadence=True)
+    assert len(ran) == 2, "dream should run once cadence is satisfied: %r" % (ran,)
+
+    # 4. an explicit request ignores the cadence entirely
+    dream(respect_cadence=False)
+    assert len(ran) == 3, (
+        "respect_cadence=False must always dream -- a manual rlm_dream call "
+        "should never be swallowed: %r" % (ran,))
+    print("  dream cadence OK: first runs, second skipped, resumes after %d "
+          "consolidations, explicit request always dreams" % 3)
+
+
+def test_dream_cadence_claim_is_visible_cross_process():
+    """The cadence marker must live in the DB, not on the instance.
+
+    Twelve separate hermes processes end sessions independently; a claim held in
+    a Python attribute would let all twelve dream on the same cycle. This proves
+    set_meta_int/get_meta_int round-trip through SQLite and are visible to a
+    SEPARATE connection, which is what a second process actually is.
+    """
+    if not _STORE_OK:
+        print("  SKIP"); return
+    s = _fresh_store()
+    assert s.get_meta_int("last_dream_memory_cycle", -1) == -1, "unset should default"
+    s.set_meta_int("last_dream_memory_cycle", 7)
+    assert s.get_meta_int("last_dream_memory_cycle", -1) == 7
+
+    # A second connection to the same file == another process's view.
+    import sqlite3
+    other = sqlite3.connect(s.db_path)
+    row = other.execute(
+        "SELECT value FROM meta WHERE key='last_dream_memory_cycle'").fetchone()
+    other.close()
+    assert row and int(row[0]) == 7, (
+        "claim not visible to a second connection: %r" % (row,))
+    # Garbage must not crash the gate -- it degrades to "no claim recorded".
+    s.set_meta_int("last_dream_memory_cycle", 0)
+    s._conn.execute(
+        "INSERT OR REPLACE INTO meta(key, value) VALUES "
+        "('last_dream_memory_cycle', 'not-an-int')")
+    s._conn.commit()
+    assert s.get_meta_int("last_dream_memory_cycle", -1) == -1, "should fall back"
+    s.close()
+    print("  dream claim OK: persists in meta, visible cross-connection, "
+          "non-integer degrades to unset")
+
+
 def test_every_reason_call_disables_thinking():
     """EVERY /api/generate payload must carry think: False.
 
