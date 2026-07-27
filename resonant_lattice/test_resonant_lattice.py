@@ -5572,9 +5572,12 @@ def test_quoteless_guard_is_wired_and_documented():
     assert "_quoteless_retry_floor" in src, "floor knob not read"
     assert "_transcript_has_quotes" in src, "transcript-quote suppressor missing"
     assert "_n_quoted" in src, "quoted-fact counter missing"
-    assert "not synthesis_session" in src and "wholesale quote-field omission" in src, \
+    # Assert on a fragment that does not straddle a source line break: the retry log is
+    # wrapped as `"...retrying WITH a "` + `"correction naming the omission..."`, so the
+    # longer phrase never appears contiguously in the file.
+    assert "not synthesis_session" in src and "correction naming the omission" in src, \
         "synthesis exemption or its retry log is missing"
-    assert "ALL %d attempts returned quoteless batches" in src, \
+    assert "all %d attempts returned quoteless batches" in src, \
         "no loud signal when every attempt fails the same way"
     # the old break-on-non-empty must be gone, or the guard is unreachable
     assert "if extracted_facts or len(transcript) < 200:" not in src, \
@@ -5591,6 +5594,139 @@ def test_quoteless_retry_floor_is_in_the_schema_with_its_rationale():
     assert "synthesis" in d and "quotation marks" in d, \
         "schema must record both suppressors so they are not removed as dead code"
     assert config_schema.DEFAULTS["quoteless_retry_floor"] == 5
+
+
+def _simulate_quoteless_loop(results, max_attempts=5, quoteless_max=2, floor=5):
+    """Mirror of the loop's attempt accounting -> (calls, outcome, corrective_retries).
+
+    `results[i]` is the batch the model returns on call i (the last entry repeats). Kept
+    as a mirror for the same reason as `_should_retry`: changing production without
+    changing this makes the source assertions fail and forces a deliberate update.
+    """
+    transcript = 'a "quote" and "another". ' + "pad " * 200
+    def nq(fs):
+        return sum(1 for f in fs if str(f.get("source_quote") or "").strip())
+    pending, last_n, retries, calls, outcome, best, facts = "", None, 0, 0, "ok", [], []
+    for i in range(max_attempts):
+        facts = results[min(i, len(results) - 1)]
+        calls += 1
+        if (nq(facts), len(facts)) > (nq(best), len(best)):
+            best = facts
+        if not facts:
+            outcome = "zero_facts"
+            continue
+        if len(transcript) >= 200 and len(facts) >= floor and nq(facts) == 0:
+            n = len(facts)
+            if pending and n == last_n:
+                outcome = "quoteless_deterministic"
+                break
+            if retries >= quoteless_max:
+                break
+            last_n, retries, outcome, pending = n, retries + 1, "quoteless_retry", "CORRECTION"
+            continue
+        outcome = "ok"
+        break
+    if (nq(best), len(best)) > (nq(facts), len(facts)):
+        facts = best
+    if facts and nq(facts) == 0 and len(facts) >= floor:
+        if outcome != "quoteless_deterministic":
+            outcome = "quoteless_exhausted"
+    return calls, outcome, retries
+
+
+def test_an_identical_corrective_result_stops_instead_of_burning_the_budget():
+    """THE MEASURED FAILURE. Session 20260727_044913 spent five attempts returning the
+    same 44 quoteless facts, because the retry re-sent an identical payload at
+    temperature 0.1 -- one attempt billed five times, 5-10 min of a 36-min block.
+
+    With a corrective retry, an unchanged batch size proves the refusal is deterministic,
+    so the loop must stop at 2 calls rather than 5."""
+    same44 = [{"content": "c%d" % i} for i in range(44)]
+    calls, outcome, retries = _simulate_quoteless_loop([same44])
+    assert calls == 2, "identical corrective result must stop at 2 calls, got %d" % calls
+    assert outcome == "quoteless_deterministic", outcome
+    assert retries == 1, retries
+
+
+def test_a_quoteless_retry_that_changes_its_answer_gets_the_full_capped_budget():
+    """Varying batch sizes are consistent with flakiness rather than refusal, so the
+    corrective budget is spent -- but capped at quoteless_max_retries, never at
+    extraction_max_attempts (5 on the live profile)."""
+    batches = [[{"content": "c%d" % i} for i in range(n)] for n in (44, 40, 38, 36, 34)]
+    calls, outcome, retries = _simulate_quoteless_loop(batches)
+    assert calls == 3, "expected 1 initial + 2 corrective, got %d" % calls
+    assert retries == 2, retries
+    assert outcome == "quoteless_exhausted", outcome
+
+
+def test_a_corrective_retry_that_succeeds_ends_the_loop_immediately():
+    """The point of the whole exercise: the corrective prompt is meant to WORK."""
+    quoteless = [{"content": "c%d" % i} for i in range(44)]
+    quoted = [{"content": "c%d" % i, "source_quote": "verbatim"} for i in range(30)]
+    calls, outcome, retries = _simulate_quoteless_loop([quoteless, quoted])
+    assert (calls, outcome, retries) == (2, "ok", 1), (calls, outcome, retries)
+
+
+def test_the_retry_differs_from_the_call_it_retries():
+    """A retry that re-sends an identical request is one attempt billed N times. Both
+    levers must be present: a correction naming the omission, and a rising temperature."""
+    src = _quoteless_guard_source()
+    assert "_QUOTE_CORRECTION" in src, "no corrective instruction for the retry"
+    assert "_RETRY_TEMPS" in src, "temperature never varies between attempts"
+    assert "0.45" in src and "0.7" in src, "retry temperatures not escalating"
+    assert "source_quote" in src.split("_QUOTE_CORRECTION")[1][:900], \
+        "the correction must name the omitted field"
+    assert "CHARACTER-FOR-CHARACTER" in src, \
+        "the correction must restate the verbatim requirement"
+    assert "_extract_once(_pending_correction, _pending_attempt)" in src, \
+        "the loop must actually pass the correction into the call"
+
+
+def test_attempt_zero_still_sends_the_original_payload_byte_for_byte():
+    """Regression guard on the HEALTHY path, which is 489/489 facts quoted across 17
+    audited sessions. The fix must not perturb the first call at all."""
+    src = _quoteless_guard_source()
+    assert "_payload = payload" in src, \
+        "attempt 0 must reuse the original payload object, not a rebuilt one"
+    assert "if correction or attempt:" in src, \
+        "the payload is only allowed to change when a correction is actually pending"
+
+
+def test_the_correction_sits_at_the_prompt_tail_because_truncation_keeps_the_tail():
+    """Measured: ollama truncates an oversized prompt to the LAST ~8,195 tokens of a
+    16,384 window, and a marker placed at the front of a 26k-token prompt was gone. A
+    correction at the head would be the first thing discarded."""
+    src = _quoteless_guard_source()
+    i = src.find('f"{self._extraction_prompt}\\n\\nLOG:\\n{transcript}"')
+    assert i != -1, "retry prompt assembly not found"
+    tail = src[i:i + 200]
+    assert "{correction}" in tail, "correction not appended after the log"
+    assert tail.index("{correction}") < tail.index("JSON OUTPUT"), \
+        "correction must precede the output cue but follow the log"
+
+
+def test_quoteless_max_retries_is_in_the_schema_with_the_measurement():
+    import config_schema
+    e = next((x for x in config_schema.CONFIG_SCHEMA
+              if x.get("key") == "quoteless_max_retries"), None)
+    assert e is not None, "quoteless_max_retries missing from schema"
+    assert e["default"] == 2, e
+    d = e["description"].lower()
+    assert "identical" in d and "44" in d, \
+        "schema must record WHY the cap exists, with the measurement"
+    assert config_schema.DEFAULTS["quoteless_max_retries"] == 2
+
+
+def test_the_deterministic_label_is_not_flattened_into_exhausted():
+    """`quoteless_deterministic` and `quoteless_exhausted` mean different things: one says
+    the model was asked differently and refused anyway (re-run the RESEARCH), the other
+    says the budget ran out. Collapsing them loses the distinction that decides what to
+    do next."""
+    src = _quoteless_guard_source()
+    assert 'if _ea_outcome != "quoteless_deterministic":' in src, \
+        "the post-loop label would overwrite the more specific outcome"
+    same44 = [{"content": "c%d" % i} for i in range(44)]
+    assert _simulate_quoteless_loop([same44])[1] == "quoteless_deterministic"
 
 
 def test_store_extraction_audit_table_exists_and_accepts_a_row():

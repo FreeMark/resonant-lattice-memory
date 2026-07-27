@@ -405,11 +405,49 @@ class ConsolidationMixin:
                 "options": {"temperature": 0.1}
             }
 
-            def _extract_once() -> list:
-                """One reason-model call + robust JSON parse → list of fact dicts."""
+            # A RETRY MUST DIFFER FROM WHAT IT RETRIES. The first version of this guard
+            # re-sent an IDENTICAL payload at temperature 0.1, and a live run proved that
+            # buys nothing: session 20260727_044913 spent FIVE attempts on one block and
+            # every one returned the same 44 facts with zero source_quote, from a report
+            # whose own text carried quoted fragments on 28 of 47 fact lines. At that
+            # temperature the call is effectively deterministic, so N attempts are one
+            # attempt billed N times -- 5-10 minutes of a 36-minute block, for nothing.
+            # Each corrective retry now (a) names the omission in the prompt and
+            # (b) raises temperature, so the model is asked something genuinely new.
+            _QUOTE_CORRECTION = (
+                "\n\nCORRECTION - YOUR PREVIOUS RESPONSE WAS REJECTED. You returned {n} "
+                "facts and EVERY ONE omitted the \"source_quote\" field. The LOG above "
+                "contains {q} quotation characters, so the material to quote is present. "
+                "Re-extract now. Every object MUST carry \"source_quote\" copied "
+                "CHARACTER-FOR-CHARACTER from the LOG above - not paraphrased, not your "
+                "own wording. If you genuinely cannot find a supporting fragment in the "
+                "LOG for a fact, DROP that fact rather than emit it without a quote."
+            )
+            # Appended AFTER the log and before the output cue on purpose: ollama
+            # truncates an oversized prompt by keeping the TAIL (measured -- a marker at
+            # the front of a 26k-token prompt was gone, the window collapsing to the last
+            # 8,195 tokens), so a correction placed at the front is the first thing
+            # discarded, exactly when it matters most.
+            _RETRY_TEMPS = (0.1, 0.45, 0.7)
+
+            def _extract_once(correction: str = "", attempt: int = 0) -> list:
+                """One reason-model call + robust JSON parse → list of fact dicts.
+
+                With no correction and attempt 0 this sends the ORIGINAL payload
+                unchanged, so the healthy path is byte-for-byte what it always was.
+                """
+                _payload = payload
+                if correction or attempt:
+                    _payload = dict(payload)
+                    _payload["prompt"] = (
+                        f"{self._extraction_prompt}\n\nLOG:\n{transcript}"
+                        f"{correction}\n\nJSON OUTPUT:")
+                    _payload["options"] = dict(payload.get("options") or {})
+                    _payload["options"]["temperature"] = _RETRY_TEMPS[
+                        min(attempt, len(_RETRY_TEMPS) - 1)]
                 result = _ollama_post_with_retry(
                     f"{self._ollama_endpoint_reason}/api/generate",
-                    payload,
+                    _payload,
                     timeout=getattr(self, "_reason_timeout", 300.0),
                 )
                 rt = self._store._clean_llm_json(result.get("response", "[]").strip())
@@ -495,10 +533,17 @@ class ConsolidationMixin:
             _ea_attempts = 0
             _ea_quoteless_retries = 0
             _ea_outcome = "ok"
+            # Quoteless retries are capped SEPARATELY from _max_attempts. Two corrective
+            # attempts is the honest budget: the failure is a refusal far more often than
+            # flakiness, so attempts three through five measured as pure waste.
+            _quoteless_max = max(1, int(getattr(self, "_quoteless_max_retries", 2)))
+            _pending_correction = ""
+            _pending_attempt = 0
+            _last_quoteless_n = None
             _t0 = time.monotonic()
             for _ea in range(_max_attempts):
                 try:
-                    extracted_facts = _extract_once()
+                    extracted_facts = _extract_once(_pending_correction, _pending_attempt)
                     _ea_attempts += 1
                 except Exception as e:
                     logger.error("Reason model call failed after retries: %s", e)
@@ -528,18 +573,40 @@ class ConsolidationMixin:
                 if (not synthesis_session and _transcript_has_quotes
                         and len(extracted_facts) >= _quoteless_floor
                         and _n_quoted(extracted_facts) == 0):
+                    _n_q = len(extracted_facts)
+                    # A CORRECTIVE retry that comes back with the same batch size and
+                    # still no quotes is a deterministic refusal, not flakiness. Stop
+                    # instead of spending the remaining attempts re-asking a question
+                    # that has already been answered the same way twice.
+                    if _pending_correction and _n_q == _last_quoteless_n:
+                        _ea_outcome = "quoteless_deterministic"
+                        logger.warning(
+                            "Consolidation: corrective retry returned the SAME %d "
+                            "quoteless facts for session %s; treating as a deterministic "
+                            "refusal and stopping after %d attempts",
+                            _n_q, session_id, _ea_attempts,
+                        )
+                        break
+                    if _ea_quoteless_retries >= _quoteless_max:
+                        break   # budget spent; the post-loop block labels the outcome
                     # logger.info, not debug: this is exactly the observability that was
                     # missing while nine sessions failed this way unnoticed.
                     logger.info(
                         "Consolidation extraction returned %d facts with NO "
                         "source_quote on any of them (attempt %d/%d) from a %d-char "
-                        "transcript containing %d quotation marks; retrying "
-                        "(wholesale quote-field omission)",
-                        len(extracted_facts), _ea + 1, _max_attempts,
-                        len(transcript), (transcript or "").count('"'),
+                        "transcript containing %d quotation marks; retrying WITH a "
+                        "correction naming the omission at temperature %.2f",
+                        _n_q, _ea + 1, _max_attempts, len(transcript),
+                        (transcript or "").count('"'),
+                        _RETRY_TEMPS[min(_ea_quoteless_retries + 1,
+                                         len(_RETRY_TEMPS) - 1)],
                     )
+                    _last_quoteless_n = _n_q
                     _ea_quoteless_retries += 1
                     _ea_outcome = "quoteless_retry"
+                    _pending_correction = _QUOTE_CORRECTION.format(
+                        n=_n_q, q=(transcript or "").count('"'))
+                    _pending_attempt = _ea_quoteless_retries
                     continue
                 _ea_outcome = "ok"
                 break
@@ -556,11 +623,16 @@ class ConsolidationMixin:
                 # loudly, because this is the class that silently cost 252 facts their
                 # provenance.
                 logger.warning(
-                    "Consolidation: ALL %d attempts returned quoteless batches for "
+                    "Consolidation: all %d attempts returned quoteless batches for "
                     "session %s; banking %d facts as no_quote",
-                    _max_attempts, session_id, len(extracted_facts),
+                    _ea_attempts, session_id, len(extracted_facts),
                 )
-                _ea_outcome = "quoteless_exhausted"
+                # Do not flatten the more informative label: "deterministic" says the
+                # corrective retry was answered identically, which is the difference
+                # between a model that cannot quote this transcript and one that is
+                # merely flaky. Both bank, but only one is worth re-running research for.
+                if _ea_outcome != "quoteless_deterministic":
+                    _ea_outcome = "quoteless_exhausted"
 
             # One row per epoch that ran an extraction, written BEFORE the write lock is
             # taken and before anything can fail downstream: an audit that only survives

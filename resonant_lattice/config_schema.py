@@ -85,6 +85,17 @@ CONFIG_SCHEMA = [
                     "(a dream/abstraction cycle has no source page, so its facts should be "
                     "quote-less). Raise to retry less eagerly; a very low value burns model calls.",
      "default": 5},
+    {"key": "quoteless_max_retries",
+     "description": "How many CORRECTIVE re-extractions to spend on a fully quote-less batch, "
+                    "capped separately from extraction_max_attempts. Each retry differs from the "
+                    "one before it: the prompt gains a correction naming the omission and the "
+                    "temperature rises (0.1 -> 0.45 -> 0.7). This dial exists because the first "
+                    "version of the guard re-sent an IDENTICAL payload at temperature 0.1, and a "
+                    "live run measured five attempts returning the same 44 quote-less facts -- one "
+                    "attempt billed five times, 5-10 minutes of a 36-minute block. A corrective "
+                    "retry answered with the SAME batch size is treated as a deterministic refusal "
+                    "and stops at once, so the usual cost is 2-3 calls, not the full budget.",
+     "default": 2},
     {"key": "reconsolidate_zero_fact_sessions",
      "description": "Consolidation debt: never discard an experience the substrate has not "
                     "digested. A session that logged substantial episodes but banked ZERO facts "
