@@ -536,6 +536,16 @@ class ConsolidationMixin:
             # Quoteless retries are capped SEPARATELY from _max_attempts. Two corrective
             # attempts is the honest budget: the failure is a refusal far more often than
             # flakiness, so attempts three through five measured as pure waste.
+            #
+            # TWO IS ALSO THE FLOOR. Both recoveries observed live took attempts=3 -- they
+            # needed the SECOND corrective retry, the one at temperature 0.7 -- and no
+            # firing has ever recovered at attempts=2. Lowering this to 1 would have
+            # banked both batches unquoted (29/31 and 28/28 quoted respectively, instead
+            # of 0). Only two recoveries so far, so treat that as a floor argument, not a
+            # distribution. Transcript quote density is NOT the discriminator either: the
+            # 28/28 recovery came from a transcript with 38 quote characters while the
+            # pre-fix total failure had 70, which is why the fix targets how the model is
+            # ASKED rather than how much there is to quote.
             _quoteless_max = max(1, int(getattr(self, "_quoteless_max_retries", 2)))
             _pending_correction = ""
             _pending_attempt = 0

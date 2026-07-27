@@ -94,7 +94,13 @@ CONFIG_SCHEMA = [
                     "live run measured five attempts returning the same 44 quote-less facts -- one "
                     "attempt billed five times, 5-10 minutes of a 36-minute block. A corrective "
                     "retry answered with the SAME batch size is treated as a deterministic refusal "
-                    "and stops at once, so the usual cost is 2-3 calls, not the full budget.",
+                    "and stops at once, so the usual cost is 2-3 calls, not the full budget. "
+                    "DO NOT LOWER THIS TO 1. Two is the measured minimum, not padding: both "
+                    "recoveries observed so far took attempts=3, i.e. they needed the SECOND "
+                    "corrective retry (temperature 0.7), and NO firing has ever recovered at "
+                    "attempts=2. A cap of 1 would have banked both batches unquoted. Only two "
+                    "recoveries have been observed, so this is a floor argument rather than a "
+                    "claim about the distribution.",
      "default": 2},
     {"key": "reconsolidate_zero_fact_sessions",
      "description": "Consolidation debt: never discard an experience the substrate has not "
