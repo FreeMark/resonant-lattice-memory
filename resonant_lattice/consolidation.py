@@ -537,12 +537,15 @@ class ConsolidationMixin:
             # attempts is the honest budget: the failure is a refusal far more often than
             # flakiness, so attempts three through five measured as pure waste.
             #
-            # TWO IS ALSO THE FLOOR. Both recoveries observed live took attempts=3 -- they
-            # needed the SECOND corrective retry, the one at temperature 0.7 -- and no
-            # firing has ever recovered at attempts=2. Lowering this to 1 would have
-            # banked both batches unquoted (29/31 and 28/28 quoted respectively, instead
-            # of 0). Only two recoveries so far, so treat that as a floor argument, not a
-            # distribution. Transcript quote density is NOT the discriminator either: the
+            # WHY 2 AND NOT 1. Of the first three live recoveries, one landed on the FIRST
+            # corrective retry (34/34 quoted) and two needed the SECOND, at temperature 0.7
+            # (29/31 and 28/28). A cap of 1 would therefore have saved 34 facts and banked
+            # 59 unquoted. Worth recording how this was learned: an earlier revision of
+            # this comment asserted that no firing had ever recovered at attempts=2, on a
+            # sample of two -- and the very next firing recovered at attempts=2. The
+            # sample was too small for the absolute claim it was carrying, so the case for
+            # 2 is a cost comparison now, not a floor.
+            # Transcript quote density is NOT the discriminator either: the
             # 28/28 recovery came from a transcript with 38 quote characters while the
             # pre-fix total failure had 70, which is why the fix targets how the model is
             # ASKED rather than how much there is to quote.

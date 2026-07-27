@@ -5715,32 +5715,41 @@ def test_quoteless_max_retries_is_in_the_schema_with_the_measurement():
     assert "identical" in d and "44" in d, \
         "schema must record WHY the cap exists, with the measurement"
     assert config_schema.DEFAULTS["quoteless_max_retries"] == 2
-    # 2 is a measured FLOOR, not padding. Both live recoveries needed the SECOND
-    # corrective retry; a cap of 1 would have banked both batches unquoted. Someone
-    # trimming this "to save a call" must hit this assertion first.
+    # Someone trimming this "to save a call" must hit this assertion first.
     assert "do not lower this to 1" in d, \
-        "schema must warn that 1 disables the fix"
-    assert "measured minimum" in d, "schema must say 2 is a floor, not a default guess"
+        "schema must warn what a cap of 1 costs"
+    assert "cost comparison" in d, \
+        "the case for 2 is a cost comparison, not an absolute -- say so, because the " \
+        "absolute version of this note was falsified by the next firing"
 
 
-def test_two_corrective_retries_is_the_floor_not_padding():
-    """Live: firing id=25 recovered 29/31 and id=49 recovered 28/28, both at attempts=3
-    (the second corrective retry, temperature 0.7). NO firing has recovered at attempts=2.
-    So a budget of 1 would have banked both unquoted -- the simulation must agree that
-    quoteless_max=1 gives up before the attempt that actually works."""
-    # a model that fails twice then succeeds, i.e. the observed shape
-    q = [{"content": "c%d" % i} for i in range(31)]
-    q2 = [{"content": "c%d" % i} for i in range(30)]          # different size, so no
-    ok = [{"content": "c%d" % i, "source_quote": "v"} for i in range(29)]  # early stop
-    calls, outcome, retries = _simulate_quoteless_loop([q, q2, ok], quoteless_max=2)
-    assert (outcome, calls) == ("ok", 3), (outcome, calls)
+def test_a_budget_of_one_corrective_retry_gives_up_too_early():
+    """Live firings: id=55 recovered at attempts=2 (34/34), while id=25 and id=49 needed
+    attempts=3 (29/31 and 28/28). A cap of 1 keeps the first and loses the other two --
+    34 facts saved against 59 banked unquoted.
+
+    Both shapes are simulated here. NOTE: an earlier version of this test asserted that no
+    firing recovers at attempts=2, on a sample of two, and the very next firing did exactly
+    that. The invariant worth protecting is the BUDGET behaviour, not a claim about where
+    recoveries land."""
+    # shape A -- recovers on the second corrective retry (the id=25 / id=49 case)
+    q31 = [{"content": "c%d" % i} for i in range(31)]
+    q30 = [{"content": "c%d" % i} for i in range(30)]        # differs, so no early stop
+    ok29 = [{"content": "c%d" % i, "source_quote": "v"} for i in range(29)]
+    assert _simulate_quoteless_loop([q31, q30, ok29], quoteless_max=2)[:2] == (3, "ok")
     # with a budget of 1 the same model never reaches its working attempt
-    calls1, outcome1, _ = _simulate_quoteless_loop([q, q2, ok], quoteless_max=1)
-    assert outcome1 == "quoteless_exhausted", outcome1
-    assert calls1 == 2, calls1
+    calls1, outcome1, _ = _simulate_quoteless_loop([q31, q30, ok29], quoteless_max=1)
+    assert (calls1, outcome1) == (2, "quoteless_exhausted"), (calls1, outcome1)
+
+    # shape B -- recovers on the FIRST corrective retry (the id=55 case). A budget of 1 is
+    # enough here, which is why the cap is a trade-off rather than a floor.
+    ok34 = [{"content": "c%d" % i, "source_quote": "v"} for i in range(34)]
+    assert _simulate_quoteless_loop([q31, ok34], quoteless_max=1)[:2] == (2, "ok")
+    assert _simulate_quoteless_loop([q31, ok34], quoteless_max=2)[:2] == (2, "ok")
+
     src = _quoteless_guard_source()
-    assert "TWO IS ALSO THE FLOOR" in src, \
-        "the floor rationale must survive in the code, not only in the schema"
+    assert "WHY 2 AND NOT 1" in src, \
+        "the rationale must survive in the code, not only in the schema"
 
 
 def test_the_deterministic_label_is_not_flattened_into_exhausted():
