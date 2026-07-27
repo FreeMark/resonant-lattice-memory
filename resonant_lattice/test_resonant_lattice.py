@@ -5718,8 +5718,8 @@ def test_quoteless_max_retries_is_in_the_schema_with_the_measurement():
     # Someone trimming this "to save a call" must hit this assertion first.
     assert "do not lower this to 1" in d, \
         "schema must warn what a cap of 1 costs"
-    assert "cost comparison" in d, \
-        "the case for 2 is a cost comparison, not an absolute -- say so, because the " \
+    assert "strictly dominates" in d, \
+        "the case for 2 is a dominance argument, not an absolute -- say so, because the " \
         "absolute version of this note was falsified by the next firing"
 
 

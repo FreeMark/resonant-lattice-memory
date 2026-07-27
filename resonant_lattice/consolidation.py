@@ -537,14 +537,20 @@ class ConsolidationMixin:
             # attempts is the honest budget: the failure is a refusal far more often than
             # flakiness, so attempts three through five measured as pure waste.
             #
-            # WHY 2 AND NOT 1. Of the first three live recoveries, one landed on the FIRST
-            # corrective retry (34/34 quoted) and two needed the SECOND, at temperature 0.7
-            # (29/31 and 28/28). A cap of 1 would therefore have saved 34 facts and banked
-            # 59 unquoted. Worth recording how this was learned: an earlier revision of
-            # this comment asserted that no firing had ever recovered at attempts=2, on a
-            # sample of two -- and the very next firing recovered at attempts=2. The
-            # sample was too small for the absolute claim it was carrying, so the case for
-            # 2 is a cost comparison now, not a floor.
+            # WHY 2 AND NOT 1. Settled over one 131-block run: 6 firings in 119 audited
+            # sessions (5.0%), five of them recovered -- THREE on the first corrective
+            # retry (86 of 86 facts quoted) and TWO on the second at temperature 0.7 (57 of
+            # 59). A cap of 2 STRICTLY DOMINATES a cap of 1, because a session that
+            # recovers at attempts=2 breaks out there whatever the cap is: raising the cap
+            # costs nothing on those and gains the 57 facts the attempts=3 cases would
+            # otherwise have banked unquoted. The only price of a higher cap is one extra
+            # call on a genuine refusal. Corpus effect: no_quote fell 11.6% -> 1.4%.
+            #
+            # Worth recording how this was learned. An earlier revision of this comment
+            # asserted that no firing had ever recovered at attempts=2 -- on a sample of
+            # two -- and the very next firing did exactly that. The sample was far too
+            # small for the absolute claim it carried, which is why this is a dominance
+            # argument now and not a floor.
             # Transcript quote density is NOT the discriminator either: the
             # 28/28 recovery came from a transcript with 38 quote characters while the
             # pre-fix total failure had 70, which is why the fix targets how the model is

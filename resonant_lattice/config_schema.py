@@ -95,12 +95,17 @@ CONFIG_SCHEMA = [
                     "attempt billed five times, 5-10 minutes of a 36-minute block. A corrective "
                     "retry answered with the SAME batch size is treated as a deterministic refusal "
                     "and stops at once, so the usual cost is 2-3 calls, not the full budget. "
-                    "DO NOT LOWER THIS TO 1. Of the first three recoveries, ONE came on the "
-                    "first corrective retry (34/34 quoted) and TWO needed the SECOND, at "
-                    "temperature 0.7 (29/31 and 28/28). So a cap of 1 would have saved 34 facts "
-                    "and banked 59 unquoted. An earlier version of this note claimed no firing "
-                    "had ever recovered at attempts=2 -- the very next firing did, which is why "
-                    "the case for 2 is stated as a cost comparison and not as an absolute.",
+                    "DO NOT LOWER THIS TO 1. Settled sample, one 131-block run: 6 firings in 119 "
+                    "audited sessions (5.0%), of which FIVE recovered -- three on the first "
+                    "corrective retry (86 of 86 facts quoted) and two on the second at "
+                    "temperature 0.7 (57 of 59). A cap of 2 STRICTLY DOMINATES a cap of 1: a "
+                    "session that recovers at attempts=2 stops there whatever the cap, so raising "
+                    "it costs nothing on those and gains the 57 facts the attempts=3 cases would "
+                    "otherwise have banked unquoted. The only price of a higher cap is one extra "
+                    "call on a genuine refusal. Corpus effect: facts marked no_quote fell from "
+                    "11.6% before the guard to 1.4% after. (An early revision of this note "
+                    "claimed no firing had ever recovered at attempts=2, on a sample of two; the "
+                    "next firing did. Hence a dominance argument, not an absolute.)",
      "default": 2},
     {"key": "reconsolidate_zero_fact_sessions",
      "description": "Consolidation debt: never discard an experience the substrate has not "
