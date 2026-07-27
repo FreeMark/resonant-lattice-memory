@@ -1320,6 +1320,12 @@ class ConsolidationMixin:
                 cluster_hrr_similarity=self._cluster_hrr_similarity,
                 cluster_entity_overlap=self._cluster_entity_overlap,
                 dedup_threshold=self._abstraction_dedup_threshold,
+                # Embeddings go to the EMBED server, not the reasoning one. Those are
+                # the same host on a plain Ollama setup, and different the moment the
+                # reason model is fronted by an OpenAI-compatible endpoint: a vLLM shim
+                # serves the generate route but 404s the embeddings route, and that
+                # failure is swallowed -- abstractions then insert with no vector.
+                embed_endpoint=self._ollama_endpoint_embed,
             )
 
 
@@ -1344,6 +1350,7 @@ class ConsolidationMixin:
                     max_cluster_size=self._abstraction_max_cluster_size,
                     max_clusters=self._gist_max_clusters,
                     dedup_threshold=self._abstraction_dedup_threshold,
+                    embed_endpoint=self._ollama_endpoint_embed,
                 )
             except Exception as e:
                 logger.debug("Gist consolidation failed (non-fatal): %s", e)

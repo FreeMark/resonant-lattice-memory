@@ -29,8 +29,19 @@ class AbstractionMixin:
         cluster_hrr_similarity: float = 0.68,
         cluster_entity_overlap: float = 0.55,
         dedup_threshold: float = 0.82,
+        embed_endpoint: str = None,
     ) -> None:
         """Memory Abstraction / Generalization Layer.
+
+        `embed_endpoint` separates WHERE TEXT IS EMBEDDED from where it is generated.
+        Without it the embedding call reused `ollama_endpoint`, which breaks the moment
+        the reasoning model is not itself an Ollama server. Pointing this pass at the
+        ollama-vllm shim (its own README instructs exactly that, and adds "embed still
+        points at real Ollama + nomic") sent /api/embeddings to a service that 404s it;
+        the failure is swallowed, so abstractions were inserted with NO embedding --
+        dedup silently skipped, no semantic_vec row, invisible to vector recall, and
+        semantic_facts/semantic_vec parity broken. Defaults to ollama_endpoint so
+        existing single-server callers are unaffected.
  
         Clusters long-term facts using HRR similarity + entity overlap,
         then asks the reasoning model to synthesize higher-level abstractions.
@@ -179,7 +190,8 @@ class AbstractionMixin:
                     content = abstract.get("content", "").strip()
                     if not content or len(content) < 15:
                         continue
-                    emb = self._get_embedding_for_abstraction(content, ollama_endpoint)
+                    emb = self._get_embedding_for_abstraction(
+                        content, embed_endpoint or ollama_endpoint)
                     pending.append((content, emb, cluster))   # capture cluster for provenance
 
             except Exception as e:
@@ -197,7 +209,19 @@ class AbstractionMixin:
                     # Pass dedup_threshold as the real cutoff so the lookup and the
                     # gate agree. _find_semantic_match returns None unless the top
                     # hit already clears dedup_threshold, so the row is a true dup.
-                    similar = self._find_semantic_match(emb, threshold=dedup_threshold)
+                    #
+                    # EXCLUDE THE CLUSTER'S OWN SOURCES. This check exists to stop a
+                    # duplicate ABSTRACTION, but it was searching the whole corpus --
+                    # which still contains the very facts this abstraction was built
+                    # from. A faithful abstraction of 3-8 related facts is necessarily
+                    # ~0.85+ similar to them, so the check rejected it for resembling
+                    # its own inputs, and the better the abstraction the more certainly
+                    # it died. Measured on a 6,983-fact corpus before this fix: 9 of 9
+                    # candidates rejected, 8 against their own sources, leaving that
+                    # lattice with exactly ONE abstraction after 195 consolidations.
+                    similar = self._find_semantic_match(
+                        emb, threshold=dedup_threshold,
+                        exclude_ids={r["id"] for r in cluster})
                     if similar:
                         continue
 
@@ -354,6 +378,7 @@ class AbstractionMixin:
         max_cluster_size: int = 8,
         max_clusters: int = 3,
         dedup_threshold: float = 0.82,
+        embed_endpoint: str = None,
     ) -> int:
         """Phase 4 - gist-preserving forgetting (hippocampal→neocortical analogue).
 
@@ -455,7 +480,8 @@ class AbstractionMixin:
                     content = (g.get("content") or "").strip()
                     if not content or len(content) < 15:
                         continue
-                    emb = self._get_embedding_for_abstraction(content, ollama_endpoint)
+                    emb = self._get_embedding_for_abstraction(
+                        content, embed_endpoint or ollama_endpoint)
                     pending.append((content, emb, cluster))
                     break
             except Exception as e:
@@ -473,9 +499,17 @@ class AbstractionMixin:
                 # the dying facts it summarises (they prune moments later). Only a
                 # NON-source near-duplicate should block it. The abstraction_sources
                 # re-gist guard + UNIQUE content already prevent duplicate gists.
+                #
+                # Now expressed as exclude_ids rather than filtering the top-1 hit
+                # afterwards. The old form asked for the single nearest neighbour and
+                # let the gist through when that neighbour was one of its own sources
+                # -- which also let it through when the SECOND-nearest was a real
+                # non-source duplicate, because k=1 never returned it.
                 if emb:
-                    dup = self._find_semantic_match(emb, threshold=dedup_threshold)
-                    if dup and dup["id"] not in {src["id"] for src in cluster}:
+                    dup = self._find_semantic_match(
+                        emb, threshold=dedup_threshold,
+                        exclude_ids={src["id"] for src in cluster})
+                    if dup:
                         continue
                 entities = self._extract_entities(content)
                 hrr_vec = None

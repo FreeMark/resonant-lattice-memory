@@ -2645,6 +2645,86 @@ def test_narrative_digest_not_clipped():
     s.close()
 
 
+def test_store_semantic_match_can_exclude_its_own_sources():
+    """A synthesis caller must not be deduped against its own inputs.
+
+    THE BUG THIS FIXES, measured on a live 6,983-fact corpus: the abstraction pass built
+    an abstraction from a cluster, then asked "does this already exist?" against the whole
+    corpus -- which still held that cluster. A faithful abstraction of 3-8 related facts
+    is necessarily ~0.85+ similar to them, so 9 of 9 candidates were rejected, 8 of them
+    against their OWN sources, leaving that lattice with ONE abstraction after 195
+    consolidations. The better the abstraction, the more certainly it died.
+    """
+    if not _STORE_OK:
+        print("  SKIP"); return
+    s = _fresh_store()
+    a = "IRIS CKD stage 3 in dogs is creatinine 2.9-5.0 mg/dL"
+    _, fid = s.add_or_reinforce_fact(a, _emb(s, a), "staging", "sess1")
+
+    # the identical text must dedup against itself when nothing is excluded ...
+    hit = s._find_semantic_match(_emb(s, a), threshold=0.82)
+    assert hit is not None and hit["id"] == fid, hit
+    # ... and must NOT when that fact is named as one of its own sources
+    assert s._find_semantic_match(_emb(s, a), threshold=0.82,
+                                  exclude_ids={fid}) is None
+
+    # With the source excluded, a genuine NON-source duplicate must still be found.
+    # This is the case k=1 could never reach: the old gist workaround asked for one
+    # neighbour and let the candidate through whenever that neighbour was a source,
+    # even when the second-nearest was a real duplicate.
+    #
+    # Inserted directly, because the scenario needs TWO rows sharing one embedding and
+    # add_or_reinforce_fact would (correctly) reinforce the first instead of adding a
+    # second. _emb is a hash-seeded unit vector, so no two texts are near each other.
+    from store_common import serialize_vector
+    e = _emb(s, a)
+    cur = s._conn.execute(
+        "INSERT INTO semantic_facts (content, category, tier, resonance_count, "
+        "source_session) VALUES (?, 'staging', 'long', 5, 'sess2')",
+        (a + " (independent duplicate row)",))
+    fid2 = cur.lastrowid
+    s._conn.execute("INSERT INTO semantic_vec (id, embedding) VALUES (?, ?)",
+                    (fid2, serialize_vector(e)))
+    s._conn.commit()
+    got = s._find_semantic_match(e, threshold=0.82, exclude_ids={fid})
+    assert got is not None, "excluding the source hid a real non-source duplicate"
+    assert got["id"] == fid2, got
+    # excluding both leaves nothing
+    assert s._find_semantic_match(_emb(s, a), threshold=0.82,
+                                  exclude_ids={fid, fid2}) is None
+
+
+def test_abstraction_and_gist_exclude_sources_and_embed_separately():
+    """Source-level invariants for both synthesis paths.
+
+    Two distinct failures, both silent in production because hermes emits no stderr:
+      * dedup against own sources (above) -- the layer produces nothing;
+      * embedding sent to the REASON endpoint -- with a vLLM shim in front of the
+        reasoning model, /api/embeddings 404s, the exception is swallowed, and
+        abstractions insert with NO vector: dedup skipped, no semantic_vec row,
+        invisible to recall, facts/vec parity broken.
+    """
+    src = open(os.path.join(PLUGIN_DIR, "store_abstraction.py"), encoding="utf-8").read()
+    assert "exclude_ids={r[\"id\"] for r in cluster}" in src, \
+        "abstraction dedup no longer excludes its own cluster sources"
+    assert "exclude_ids={src[\"id\"] for src in cluster}" in src, \
+        "gist dedup no longer excludes its own cluster sources"
+    assert src.count("embed_endpoint or ollama_endpoint") >= 2, \
+        "an embedding call still uses the reason endpoint unconditionally"
+    assert "embed_endpoint: str = None" in src, \
+        "embed_endpoint parameter missing from a synthesis entry point"
+
+    con = open(os.path.join(PLUGIN_DIR, "consolidation.py"), encoding="utf-8").read()
+    assert con.count("embed_endpoint=self._ollama_endpoint_embed") >= 2, \
+        "a caller does not pass the embed endpoint through"
+
+    facts = open(os.path.join(PLUGIN_DIR, "store_facts.py"), encoding="utf-8").read()
+    assert "exclude_ids: Optional[set] = None" in facts, "no exclude_ids parameter"
+    assert "k = 1 + len(ex)" in facts, \
+        "k not inflated for exclusions -- excluded rows consume KNN slots and the " \
+        "query returns nothing instead of the nearest eligible row"
+
+
 def test_store_source_provenance_roundtrip():
     if not _STORE_OK:
         print("  SKIP"); return

@@ -201,35 +201,56 @@ class FactsMixin:
 
 
     def _find_semantic_match(self, embedding: List[float],
-                             threshold: Optional[float] = None) -> Optional[Dict]:
-        """Fast top-1 semantic lookup.
+                             threshold: Optional[float] = None,
+                             exclude_ids: Optional[set] = None) -> Optional[Dict]:
+        """Fast top-1 semantic lookup, optionally ignoring specified fact ids.
 
         semantic_vec uses distance_metric=cosine, so (1.0 - distance) is true
         cosine similarity. `threshold` defaults to self.similarity_threshold
         (recall/dedup); callers gating a silent *merge* pass self.reinforce_threshold
         so only near-identical facts are folded together.
+
+        `exclude_ids` exists because a SYNTHESIS caller must not be deduped against
+        its own inputs. The abstraction pass built an abstraction from a cluster and
+        then asked "does this already exist?" against the whole corpus -- which still
+        contains that cluster. A faithful abstraction of 3-8 related facts is by
+        construction ~0.85+ similar to them, so the more faithful it was, the more
+        certainly it was discarded. Measured on a live 6,983-fact corpus: 9 of 9
+        candidates rejected, 8 of them against their OWN source facts, which is why
+        that lattice held exactly one abstraction after 195 consolidations.
         """
         if not embedding or self.degraded:
             return None
         cutoff = self.similarity_threshold if threshold is None else threshold
         vec_bytes = serialize_vector(embedding)
+        ex = {int(x) for x in (exclude_ids or ())}
+        # k must exceed the number of excluded rows: this is a KNN scan and the
+        # non-vector predicates filter AFTER the k nearest are chosen, so excluded
+        # rows consume slots. With k=1 and one excluded neighbour the query returns
+        # nothing at all rather than the nearest eligible row.
+        k = 1 + len(ex)
         # Phase 1b: superseded facts are retired history - never a dedup/reinforce
         # target. If the nearest neighbour is superseded the gate returns no match,
         # so a re-asserted belief enters as a fresh live fact (and may re-conflict
         # with the current winner) rather than reinforcing a retired row.
-        row = self._conn.execute(
+        rows = self._conn.execute(
             """
             SELECT f.id, (1.0 - v.distance) as similarity
             FROM semantic_vec v
             JOIN semantic_facts f ON f.id = v.id
-            WHERE v.embedding MATCH ? AND k = 1
+            WHERE v.embedding MATCH ? AND k = ?
               AND f.tier != 'superseded'
-            ORDER BY v.distance LIMIT 1
+            ORDER BY v.distance
             """,
-            (vec_bytes,),
-        ).fetchone()
-        if row and row["similarity"] >= cutoff:
-            return dict(row)
+            (vec_bytes, k),
+        ).fetchall()
+        for row in rows:
+            if row["id"] in ex:
+                continue
+            # First non-excluded row is the nearest eligible neighbour. If it is
+            # below the cutoff there is no match; do not keep scanning further-away
+            # rows, which are by definition also below it.
+            return dict(row) if row["similarity"] >= cutoff else None
         return None
 
 
