@@ -5593,6 +5593,87 @@ def test_quoteless_retry_floor_is_in_the_schema_with_its_rationale():
     assert config_schema.DEFAULTS["quoteless_retry_floor"] == 5
 
 
+def test_store_extraction_audit_table_exists_and_accepts_a_row():
+    """The migration must be idempotent and the table writable. Without this row there
+    is no way to tell a retry that fired from a guard that never ran -- the ambiguity
+    that produced two opposite reports of the same night."""
+    st = _fresh_store()
+    try:
+        cols = {r[1] for r in st._conn.execute("PRAGMA table_info(extraction_audit)")}
+        for need in ("session_id", "attempts", "quoteless_retries", "facts", "quoted",
+                     "transcript_chars", "transcript_quotes", "synthesis", "outcome"):
+            assert need in cols, "extraction_audit missing %s (%s)" % (need, cols)
+        st._conn.execute(
+            "INSERT INTO extraction_audit (session_id, attempts, quoteless_retries, "
+            "facts, quoted, transcript_chars, transcript_quotes, synthesis, outcome) "
+            "VALUES ('s1', 3, 2, 39, 0, 27823, 72, 0, 'quoteless_exhausted')")
+        st._conn.commit()
+        # tuple(): the store sets sqlite3.Row as its row_factory, so a bare == against
+        # a tuple compares object identity and always fails.
+        row = tuple(st._conn.execute(
+            "select attempts, quoteless_retries, facts, quoted, outcome "
+            "from extraction_audit where session_id='s1'").fetchone())
+        assert row == (3, 2, 39, 0, "quoteless_exhausted"), row
+        # re-running the migration must not drop or duplicate anything
+        st._migrate_add_extraction_audit()
+        assert st._conn.execute(
+            "select count(*) from extraction_audit").fetchone()[0] == 1
+    finally:
+        st.close()
+
+
+def test_audit_extraction_never_raises_even_with_a_broken_store():
+    """An audit failure must not cost the epoch its facts. The point is to observe the
+    pipeline, not to become a new way for it to die."""
+    import consolidation as cons
+
+    class _NoStore:
+        _store = None
+
+    class _BadConn:
+        def execute(self, *a, **k):
+            raise RuntimeError("db is gone")
+
+        def commit(self):
+            raise RuntimeError("db is gone")
+
+    class _BadStore:
+        class _S:
+            _conn = _BadConn()
+            _lock = None
+        _store = _S()
+
+    for obj in (_NoStore(), _BadStore()):
+        # bound-method call on a foreign object: only needs self._store
+        cons.ConsolidationMixin._audit_extraction(
+            obj, "sX", 1, 0, 5, 5, 1000, 10, False, "ok")
+
+
+def test_retry_loop_records_its_own_behaviour():
+    """Source-level invariants. Each counter answers a question that logs cannot on this
+    deployment, because hermes emits no stderr and every logger call goes to a void."""
+    src = open(os.path.join(PLUGIN_DIR, "consolidation.py"), encoding="utf-8").read()
+    assert "_audit_extraction" in src, "audit writer not wired"
+    assert "_ea_attempts += 1" in src, "attempt counter missing -- attempts>1 is the " \
+        "only available proof the retry fired"
+    assert "_ea_quoteless_retries += 1" in src, "quoteless-retry counter missing"
+    assert "quoteless_exhausted" in src, "no outcome recorded when every attempt fails"
+    assert "call_failed" in src, "a hard model failure must still leave an audit row"
+    # transcript_quotes is the suppressor's input: a guard that DECLINED to retry is
+    # indistinguishable from one that never ran unless its reason is stored
+    assert 'count(\'"\')' in src, "transcript quote count not recorded"
+
+
+def test_extraction_audit_migration_is_registered():
+    """An unregistered migration is a table that exists only in the tests."""
+    src = open(os.path.join(PLUGIN_DIR, "store_schema.py"), encoding="utf-8").read()
+    i = src.find("self._migrate_add_extraction_audit()")
+    j = src.find("def _migrate_add_extraction_audit")
+    assert i != -1, "migration never called"
+    assert j != -1, "migration not defined"
+    assert i < j, "call should appear in the migration list, before the definition"
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = skipped = failed = 0

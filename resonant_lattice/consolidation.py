@@ -187,6 +187,49 @@ class ConsolidationMixin:
             logger.debug("Tool episode ingestion failed (non-fatal): %s", e)
 
 
+    def _audit_extraction(self, session_id, attempts, quoteless_retries, facts,
+                          quoted, t_chars, t_quotes, synthesis, outcome) -> None:
+        """Record what the extraction call returned, in the database.
+
+        Exists because `logger` is not a channel on this deployment: hermes emits no
+        stderr, so every consolidation log message -- including the retry guard's -- has
+        gone nowhere on every run. Without this row there is no way to distinguish "the
+        quoteless retry fired three times and the model kept omitting the field" from
+        "the guard never executed", and both were reported in one night because the
+        evidence could not settle it.
+
+        Never raises. An audit failure must not cost the epoch its facts -- the whole
+        point is to observe the pipeline, not to become a new way for it to die.
+        """
+        try:
+            store = getattr(self, "_store", None)
+            conn = getattr(store, "_conn", None)
+            if conn is None:
+                return
+            lock = getattr(store, "_lock", None)
+            cycle = None
+            try:
+                cycle = store._current_memory_cycle()
+            except Exception:                                    # noqa: BLE001
+                pass
+            sql = ("INSERT INTO extraction_audit (session_id, cycle, attempts, "
+                   "quoteless_retries, facts, quoted, transcript_chars, "
+                   "transcript_quotes, synthesis, outcome) "
+                   "VALUES (?,?,?,?,?,?,?,?,?,?)")
+            args = (session_id, cycle, int(attempts), int(quoteless_retries),
+                    int(facts), int(quoted), int(t_chars), int(t_quotes),
+                    1 if synthesis else 0, str(outcome))
+            if lock is not None:
+                with lock:
+                    conn.execute(sql, args)
+                    conn.commit()
+            else:
+                conn.execute(sql, args)
+                conn.commit()
+        except Exception as e:                                   # noqa: BLE001
+            logger.debug("extraction_audit write skipped (non-fatal): %s", e)
+
+
     def _attest_quote(self, quote: str, transcript: str) -> str:
         """Verify a model-emitted source_quote against the consolidation transcript.
 
@@ -444,12 +487,25 @@ class ConsolidationMixin:
                            and str(f.get("source_quote") or "").strip())
 
             _best: list = []
+            # Counters mirrored into extraction_audit. Logs are not a usable channel
+            # here -- hermes emits no stderr, so every logger call below has gone to a
+            # void on every run, which is why a deployed retry guard could not be
+            # evaluated at all. `_ea_attempts` being >1 in the table is the only
+            # available proof the retry actually fired.
+            _ea_attempts = 0
+            _ea_quoteless_retries = 0
+            _ea_outcome = "ok"
             _t0 = time.monotonic()
             for _ea in range(_max_attempts):
                 try:
                     extracted_facts = _extract_once()
+                    _ea_attempts += 1
                 except Exception as e:
                     logger.error("Reason model call failed after retries: %s", e)
+                    self._audit_extraction(
+                        session_id, _ea_attempts, _ea_quoteless_retries, 0, 0,
+                        len(transcript or ""), (transcript or "").count('"'),
+                        synthesis_session, "call_failed")
                     return  # skip this epoch on hard failure (non-fatal for agent)
 
                 # Prefer more QUOTED facts, tie-break on batch size. Ordering matters:
@@ -459,8 +515,10 @@ class ConsolidationMixin:
                     _best = extracted_facts
 
                 if len(transcript) < 200:
+                    _ea_outcome = "short_transcript"
                     break
                 if not extracted_facts:
+                    _ea_outcome = "zero_facts"
                     logger.info(
                         "Consolidation extraction returned 0 facts (attempt %d/%d) from "
                         "a %d-char transcript; retrying (reasoning-model flakiness "
@@ -480,7 +538,10 @@ class ConsolidationMixin:
                         len(extracted_facts), _ea + 1, _max_attempts,
                         len(transcript), (transcript or "").count('"'),
                     )
+                    _ea_quoteless_retries += 1
+                    _ea_outcome = "quoteless_retry"
                     continue
+                _ea_outcome = "ok"
                 break
 
             # Never end worse than the best attempt.
@@ -499,6 +560,16 @@ class ConsolidationMixin:
                     "session %s; banking %d facts as no_quote",
                     _max_attempts, session_id, len(extracted_facts),
                 )
+                _ea_outcome = "quoteless_exhausted"
+
+            # One row per epoch that ran an extraction, written BEFORE the write lock is
+            # taken and before anything can fail downstream: an audit that only survives
+            # the happy path would be missing exactly when it is needed.
+            self._audit_extraction(
+                session_id, _ea_attempts, _ea_quoteless_retries,
+                len(extracted_facts), _n_quoted(extracted_facts),
+                len(transcript or ""), (transcript or "").count('"'),
+                synthesis_session, _ea_outcome)
 
             _t_extract = time.monotonic() - _t0
 

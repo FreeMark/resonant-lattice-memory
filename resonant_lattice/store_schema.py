@@ -188,6 +188,59 @@ class SchemaMixin:
         self._migrate_add_write_batches()
         self._migrate_add_consolidation_debt()
         self._migrate_add_session_sources()
+        self._migrate_add_extraction_audit()
+
+
+    def _migrate_add_extraction_audit(self) -> None:
+        """Create extraction_audit: what the extraction call actually returned (idempotent).
+
+        WHY THIS IS A TABLE AND NOT A LOG LINE. Every diagnostic the consolidation emits
+        goes to `logger`, and on 2026-07-27 that channel was found to be a void: hermes
+        emits NO stderr, so all seven lane logs contain only their runner's own lines and
+        not one RLM message. The `Source index: N urls offered` line -- added specifically
+        so "the index was absent" could be told apart from "the index was offered and
+        ignored" -- has never appeared anywhere, on any run, since it was written.
+
+        The cost of that was concrete. A retry guard for wholesale source_quote omission
+        was deployed and then could not be evaluated at all: one such session occurred in
+        the following eleven, against a pre-guard base rate of eight in ~128, and there
+        was no way to tell whether the retry had fired three times and the model kept
+        omitting the field, or the guard had never executed. Both readings were reported
+        in one night, in opposite directions, because the evidence could not settle it.
+
+        So the outcome is recorded where everything else on this project gets verified:
+        in SQLite, queryable after the fact, surviving the process. One row per
+        consolidation epoch that ran an extraction.
+
+        `attempts` is the count actually made, so a row with attempts>1 is proof the
+        retry fired. `quoteless_retries` counts attempts rejected specifically for having
+        no quoted fact, which distinguishes the two failure modes the retry loop handles.
+        `transcript_quotes` records the suppressor's input, because a guard that declines
+        to retry is indistinguishable from one that never ran unless its reason is stored.
+        """
+        with self._lock:
+            try:
+                self._conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS extraction_audit (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        session_id TEXT,
+                        cycle INTEGER,
+                        attempts INTEGER NOT NULL DEFAULT 0,
+                        quoteless_retries INTEGER NOT NULL DEFAULT 0,
+                        facts INTEGER NOT NULL DEFAULT 0,
+                        quoted INTEGER NOT NULL DEFAULT 0,
+                        transcript_chars INTEGER NOT NULL DEFAULT 0,
+                        transcript_quotes INTEGER NOT NULL DEFAULT 0,
+                        synthesis INTEGER NOT NULL DEFAULT 0,
+                        outcome TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_extraction_audit_session
+                        ON extraction_audit(session_id);
+                """)
+                self._conn.commit()
+            except Exception as e:                               # noqa: BLE001
+                logger.debug("extraction_audit migration skipped: %s", e)
 
 
     def _migrate_add_session_sources(self) -> None:
