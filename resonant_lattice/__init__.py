@@ -165,9 +165,12 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         # ceiling silently times the whole epoch out and stores 0 facts. Raise further for very
         # slow/cloud reasoners; a one-off timeout is non-fatal (the next cycle retries).
         self._reason_timeout = float(self._config.get("reason_timeout", DEFAULTS["reason_timeout"]))
-        # Retry consolidation extraction when a reasoning model flakily returns 0 facts.
+        # Retry consolidation extraction when a reasoning model flakily returns 0 facts,
+        # or returns a batch with the source_quote field omitted from every fact.
         self._extraction_max_attempts = int(self._config.get(
             "extraction_max_attempts", DEFAULTS.get("extraction_max_attempts", 3)))
+        self._quoteless_retry_floor = int(self._config.get(
+            "quoteless_retry_floor", DEFAULTS.get("quoteless_retry_floor", 5)))
         # Synthesis-session signal (label gauntlet): sessions that READ their own
         # memory via lattice_store, tracked in-process by the tool handler.
         # Consolidation pairs this with a zero-web tool profile to stamp

@@ -397,8 +397,53 @@ class ConsolidationMixin:
             # transcript that plainly contains extractable facts (observed ~half the
             # time on the reason endpoint), which would silently drop a whole turn's
             # knowledge. Re-attempt a few times when the transcript is substantial.
+            #
+            # AND THE SAME FLAKINESS HAS A SECOND FACE: a full batch of facts with the
+            # source_quote field omitted from every single one. Measured on a live vet
+            # corpus of 2,357 facts: 279 (11.6%) carry no quote, and 252 of those --
+            # 90% -- came from just NINE sessions where NOT ONE fact had a quote. The
+            # distribution is switch-like rather than gradual: 8 sessions entirely
+            # quoteless, 6 mixed, 114 clean. One failing session banked 39 facts with
+            # zero quotes from a report whose own text held 42 quotation marks and a
+            # verbatim quotation in its first fact -- the material was there and the
+            # extraction call dropped the field wholesale.
+            #
+            # The old break condition (`if extracted_facts`) could not see this: a
+            # quoteless batch is non-empty, so it broke on the first attempt. Those
+            # facts get banked with quote_status='no_quote' -- unverifiable, and
+            # ineligible for mechanical ref attachment, which is how one bad extraction
+            # call costs a whole block its provenance. It also corrupted a measurement:
+            # the same failure sat inside BOTH arms of the verbatim-quote experiment and
+            # dragged its aggregate from 61% to 41%.
+            #
+            # Retrying is gated tightly, because a spurious retry buys nothing:
+            #   * the batch must be at least _quoteless_retry_floor facts. A 1-3 fact
+            #     turn with nothing quotable is ordinary; 39 is not.
+            #   * the TRANSCRIPT must itself contain quotation marks. With nothing to
+            #     quote, a quoteless extraction is the CORRECT answer, and retrying
+            #     would burn a model call on every tool-only turn.
+            #   * synthesis sessions are exempt outright. A dream/abstraction cycle has
+            #     no source page, so its facts SHOULD be quoteless.
+            #
+            # The best batch seen is kept rather than the last, so a retry that returns
+            # empty or worse can never leave this epoch with less than attempt 1 had.
             extracted_facts = []
             _max_attempts = max(1, int(getattr(self, "_extraction_max_attempts", 3)))
+            _quoteless_floor = max(1, int(getattr(self, "_quoteless_retry_floor", 5)))
+            # Two quote characters = ONE complete quoted phrase, the honest minimum for
+            # "there was something here to quote". Set at 4 first, which would have
+            # excused an extractor that missed the only quoted phrase in a 16KB report;
+            # the measured failure had 42, so the threshold was never load-bearing for
+            # it, and the looser bar costs at most one extra call on a turn that has
+            # exactly one quotation.
+            _transcript_has_quotes = (transcript or "").count('"') >= 2
+
+            def _n_quoted(fs) -> int:
+                return sum(1 for f in fs
+                           if isinstance(f, dict)
+                           and str(f.get("source_quote") or "").strip())
+
+            _best: list = []
             _t0 = time.monotonic()
             for _ea in range(_max_attempts):
                 try:
@@ -406,12 +451,53 @@ class ConsolidationMixin:
                 except Exception as e:
                     logger.error("Reason model call failed after retries: %s", e)
                     return  # skip this epoch on hard failure (non-fatal for agent)
-                if extracted_facts or len(transcript) < 200:
+
+                # Prefer more QUOTED facts, tie-break on batch size. Ordering matters:
+                # a 40-fact quoteless batch must not beat a 30-fact attested one.
+                if (_n_quoted(extracted_facts), len(extracted_facts)) > \
+                        (_n_quoted(_best), len(_best)):
+                    _best = extracted_facts
+
+                if len(transcript) < 200:
                     break
-                logger.info(
-                    "Consolidation extraction returned 0 facts (attempt %d/%d) from a "
-                    "%d-char transcript; retrying (reasoning-model flakiness guard)",
-                    _ea + 1, _max_attempts, len(transcript),
+                if not extracted_facts:
+                    logger.info(
+                        "Consolidation extraction returned 0 facts (attempt %d/%d) from "
+                        "a %d-char transcript; retrying (reasoning-model flakiness "
+                        "guard)", _ea + 1, _max_attempts, len(transcript),
+                    )
+                    continue
+                if (not synthesis_session and _transcript_has_quotes
+                        and len(extracted_facts) >= _quoteless_floor
+                        and _n_quoted(extracted_facts) == 0):
+                    # logger.info, not debug: this is exactly the observability that was
+                    # missing while nine sessions failed this way unnoticed.
+                    logger.info(
+                        "Consolidation extraction returned %d facts with NO "
+                        "source_quote on any of them (attempt %d/%d) from a %d-char "
+                        "transcript containing %d quotation marks; retrying "
+                        "(wholesale quote-field omission)",
+                        len(extracted_facts), _ea + 1, _max_attempts,
+                        len(transcript), (transcript or "").count('"'),
+                    )
+                    continue
+                break
+
+            # Never end worse than the best attempt.
+            if (_n_quoted(_best), len(_best)) > \
+                    (_n_quoted(extracted_facts), len(extracted_facts)):
+                extracted_facts = _best
+            if (extracted_facts and _n_quoted(extracted_facts) == 0
+                    and not synthesis_session and _transcript_has_quotes
+                    and len(extracted_facts) >= _quoteless_floor):
+                # Every attempt failed the same way. Bank the facts (they are often
+                # true, which is why quote_status marks rather than drops) but say so
+                # loudly, because this is the class that silently cost 252 facts their
+                # provenance.
+                logger.warning(
+                    "Consolidation: ALL %d attempts returned quoteless batches for "
+                    "session %s; banking %d facts as no_quote",
+                    _max_attempts, session_id, len(extracted_facts),
                 )
 
             _t_extract = time.monotonic() - _t0

@@ -68,11 +68,23 @@ CONFIG_SCHEMA = [
      "default": 1},
     {"key": "extraction_max_attempts",
      "description": "How many times the consolidation may re-call the reasoning model when it "
-                    "returns ZERO facts from a substantial transcript. Reasoning models "
-                    "non-deterministically emit an empty array for a log that plainly contains "
-                    "extractable knowledge; retrying recovers the turn's facts instead of silently "
-                    "dropping them. 1 = no retry (legacy).",
+                    "returns ZERO facts from a substantial transcript, OR returns a batch with "
+                    "no source_quote on any fact. Reasoning models non-deterministically emit an "
+                    "empty array for a log that plainly contains extractable knowledge, and they "
+                    "also drop the quote field wholesale: measured on a live corpus, 252 of 279 "
+                    "quote-less facts came from nine sessions where NOT ONE fact had a quote. "
+                    "Retrying recovers the turn instead of banking it unverifiable. "
+                    "1 = no retry (legacy).",
      "default": 3},
+    {"key": "quoteless_retry_floor",
+     "description": "Minimum batch size before a fully quote-less extraction counts as a format "
+                    "failure worth retrying. A 1-3 fact turn with nothing quotable is ordinary; a "
+                    "39-fact batch from a report containing 42 quotation marks is not. Retries are "
+                    "additionally suppressed when the transcript itself has no quotation marks "
+                    "(nothing to quote means quote-less is CORRECT) and for synthesis sessions "
+                    "(a dream/abstraction cycle has no source page, so its facts should be "
+                    "quote-less). Raise to retry less eagerly; a very low value burns model calls.",
+     "default": 5},
     {"key": "reconsolidate_zero_fact_sessions",
      "description": "Consolidation debt: never discard an experience the substrate has not "
                     "digested. A session that logged substantial episodes but banked ZERO facts "

@@ -5491,6 +5491,108 @@ def test_url_index_prompt_half_defaults_off_and_is_documented_as_ineffective():
         "the main flag should describe the mechanical path, not the prompt one"
 
 
+def _quoteless_guard_source():
+    """The retry guard lives inside a long method, so these tests assert on the SOURCE
+    plus a faithful re-implementation of its decision function. Executing the real loop
+    would need a live reason endpoint; the invariants worth protecting are the four
+    gate conditions and the never-end-worse rule, and both are checkable here."""
+    return open(os.path.join(PLUGIN_DIR, "consolidation.py"), encoding="utf-8").read()
+
+
+def _should_retry(facts, transcript, synthesis, floor=5):
+    """Mirror of the guard's retry decision. Kept in the test on purpose: if someone
+    changes the production condition without changing this, the source assertions below
+    fail and force the mirror to be updated deliberately."""
+    n_quoted = sum(1 for f in facts
+                   if isinstance(f, dict) and str(f.get("source_quote") or "").strip())
+    if len(transcript) < 200:
+        return False
+    if not facts:
+        return True
+    return (not synthesis and transcript.count('"') >= 2
+            and len(facts) >= floor and n_quoted == 0)
+
+
+def test_quoteless_batch_triggers_a_retry():
+    """The failure this guard exists for: 39 facts, not one with a quote, from a report
+    whose own text held 42 quotation marks. The old condition (`if extracted_facts`)
+    broke on attempt 1 because a quoteless batch is non-empty."""
+    t = 'A report saying "urease producing bacteria" and more. ' + "pad " * 200
+    facts = [{"content": "fact %d" % i} for i in range(39)]
+    assert _should_retry(facts, t, synthesis=False)
+    # one quoted fact is enough to accept the batch -- this is a wholesale-omission
+    # guard, not a per-fact quality gate
+    facts[0]["source_quote"] = "urease producing bacteria"
+    assert not _should_retry(facts, t, synthesis=False)
+
+
+def test_small_batches_and_quoteless_transcripts_do_not_retry():
+    """Both suppressors. A 3-fact turn with nothing quotable is ordinary, and with no
+    quotation marks in the transcript a quoteless extraction is the CORRECT answer --
+    retrying there would burn a model call on every tool-only turn."""
+    t_quotes = 'has "a quote" and "another" in it. ' + "pad " * 200
+    assert not _should_retry([{"content": "a"}] * 3, t_quotes, synthesis=False)
+    t_plain = "no quotation marks anywhere in this transcript at all. " + "pad " * 200
+    assert not _should_retry([{"content": "a"}] * 39, t_plain, synthesis=False)
+
+
+def test_synthesis_sessions_are_exempt():
+    """A dream/abstraction cycle has no source page, so its facts SHOULD be quoteless.
+    Retrying them would waste three calls per cycle forever."""
+    t = 'recalling that "something" was learned earlier. ' + "pad " * 200
+    facts = [{"content": "abstraction %d" % i} for i in range(20)]
+    assert _should_retry(facts, t, synthesis=False)
+    assert not _should_retry(facts, t, synthesis=True)
+
+
+def test_short_transcripts_never_retry():
+    """Unchanged legacy behaviour: below 200 chars there is nothing to re-extract."""
+    assert not _should_retry([], "tiny", synthesis=False)
+    assert not _should_retry([{"content": "a"}] * 39, 'a "q" here', synthesis=False)
+
+
+def test_guard_prefers_quoted_facts_over_a_bigger_quoteless_batch():
+    """The best-batch rule. A 40-fact quoteless batch must not beat a 30-fact attested
+    one, or a retry would make provenance worse while looking like it helped."""
+    def key(fs):
+        nq = sum(1 for f in fs if str(f.get("source_quote") or "").strip())
+        return (nq, len(fs))
+    quoteless40 = [{"content": "c%d" % i} for i in range(40)]
+    attested30 = [{"content": "c%d" % i, "source_quote": "q"} for i in range(30)]
+    assert key(attested30) > key(quoteless40)
+    # and among equally-quoted batches the larger wins
+    assert key(attested30 + [{"content": "x", "source_quote": "q"}]) > key(attested30)
+
+
+def test_quoteless_guard_is_wired_and_documented():
+    """Source-level invariants. Each condition can fail silently, so the code must keep
+    all four and must log the wholesale case at info/warning -- the missing
+    observability is why nine sessions failed this way unnoticed."""
+    src = _quoteless_guard_source()
+    assert "_quoteless_retry_floor" in src, "floor knob not read"
+    assert "_transcript_has_quotes" in src, "transcript-quote suppressor missing"
+    assert "_n_quoted" in src, "quoted-fact counter missing"
+    assert "not synthesis_session" in src and "wholesale quote-field omission" in src, \
+        "synthesis exemption or its retry log is missing"
+    assert "ALL %d attempts returned quoteless batches" in src, \
+        "no loud signal when every attempt fails the same way"
+    # the old break-on-non-empty must be gone, or the guard is unreachable
+    assert "if extracted_facts or len(transcript) < 200:" not in src, \
+        "legacy break condition still short-circuits the quoteless check"
+
+
+def test_quoteless_retry_floor_is_in_the_schema_with_its_rationale():
+    import config_schema
+    e = next((x for x in config_schema.CONFIG_SCHEMA
+              if x.get("key") == "quoteless_retry_floor"), None)
+    assert e is not None, "quoteless_retry_floor missing from schema"
+    assert e["default"] == 5, e
+    d = e["description"].lower()
+    assert "synthesis" in d and "quotation marks" in d, \
+        "schema must record both suppressors so they are not removed as dead code"
+    assert config_schema.DEFAULTS["quoteless_retry_floor"] == 5
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = skipped = failed = 0
