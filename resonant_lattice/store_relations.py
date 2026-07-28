@@ -99,10 +99,35 @@ _REL_PATTERNS: List[Tuple["re.Pattern", str, float]] = [
 
 _MAX_TRIPLES_PER_FACT = 8
 
-# Question/aux words that may be capitalized in a query but are never anchors.
+# Words that may be capitalized in a query but are never anchors.
+#
+# PRONOUNS ARE THE LOAD-BEARING ENTRY. The single-capitalized-token fallback below
+# skips only the SENTENCE-INITIAL word, so a "He" opening a SECOND sentence was taken
+# as an anchor - and in a corpus that stores the abbreviation HE (hepatic
+# encephalopathy) as a real subject, "I am worried. He never whines." returned
+# `acute liver failure --[results_in]--> he`. Measured with controls: capitalized
+# mid-query `He` bound to HE, while `She` and `The dog` correctly returned nothing.
+# Any corpus about a person or an animal asks questions in exactly that shape, so
+# this is a general defect rather than a veterinary one.
+#
+# Deliberately EXCLUDED: words that are also common proper nouns (May, Will, Mark,
+# June, Bill, Rose, Grace). Blocking those would cost real anchors, and the all-caps
+# escape hatch below cannot rescue a person named May.
 _QUERY_NON_ANCHORS = frozenset({
+    # question / auxiliary
     "who", "what", "which", "where", "whose", "whom", "when", "why", "how",
     "does", "do", "did", "is", "are", "was", "were", "the", "a", "an",
+    "can", "could", "should", "would", "shall", "must", "has", "have", "had",
+    "been", "being", "am", "be",
+    # personal + possessive pronouns
+    "i", "he", "she", "it", "we", "they", "you", "me", "him", "her", "us", "them",
+    "my", "his", "hers", "its", "our", "ours", "their", "theirs", "your", "yours",
+    "mine", "myself", "himself", "herself", "itself", "ourselves", "themselves",
+    # demonstratives + common clause openers
+    "this", "that", "these", "those", "there", "here",
+    "and", "but", "or", "if", "then", "so", "because", "since", "while",
+    "though", "although", "however", "also", "not", "no", "yes",
+    "please", "thanks", "thank",
 })
 
 # Phase 5c: relations whose composition with ITSELF is still meaningful, so a
@@ -900,7 +925,24 @@ class RelationsMixin:
             if low not in have and low not in _QUERY_NON_ANCHORS:
                 anchors.append(low)
                 have.add(low)
-        return relation, anchors
+
+        # (3) FINAL guard, applied to anchors from EVERY path above - the entity
+        # extractor included, not just the capitalized-token fallback. Filtering only
+        # the fallback was not enough: on an all-caps query `_extract_entities` itself
+        # returned the pronoun, so the stoplist was never consulted.
+        #
+        # ALL-CAPS ESCAPE: an all-caps spelling is an ABBREVIATION, not a pronoun, so
+        # "What does HE cause?" still reaches a stored HE node and "Is WHO the source?"
+        # still reaches the organisation - while "He never whines" no longer does. The
+        # escape reads the ORIGINAL query, because casing is gone by the time an anchor
+        # is lowercased. Suspended for a shouted query, where capitalisation carries no
+        # information and every word would qualify.
+        if any(c.islower() for c in query):
+            caps = {m.lower() for m in re.findall(r"\b[A-Z]{2,}\b", query)}
+        else:
+            caps = set()
+        return relation, [a for a in anchors
+                          if a not in _QUERY_NON_ANCHORS or a in caps]
 
     # ====================== TRANSITIVE INFERENCE (Phase 5c) ======================
     def infer_relations(self, subject: str, object: Optional[str] = None,

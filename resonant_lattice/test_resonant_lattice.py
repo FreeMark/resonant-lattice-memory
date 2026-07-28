@@ -2318,6 +2318,59 @@ def test_store_relational_recall_multiword_free_query():
     s.close()
 
 
+def test_store_relational_query_pronoun_does_not_bind_to_an_abbreviation():
+    """A capitalized PRONOUN mid-query must not be taken as an anchor.
+
+    Found live: a vet corpus stores the abbreviation HE (hepatic encephalopathy) as a
+    real subject, and "I am worried. He never whines." returned
+    `acute liver failure --[results_in]--> he` - liver-failure triples injected into a
+    question about pain. The single-token fallback skipped only the SENTENCE-INITIAL
+    word, so a `He` opening a second sentence sailed through. Every question about a
+    person or an animal has that shape.
+
+    Both polarities, because the fix must not cost the real anchor: an ALL-CAPS
+    spelling is an abbreviation, not a pronoun, so `HE` still binds.
+    """
+    if not _STORE_OK:
+        print("  SKIP"); return
+    s = _fresh_store()
+    content = "HE is part of hepatic failure"
+    ents = ["he", "hepatic failure"]
+    _, fid = s.add_or_reinforce_fact(content, _emb(s, content), "general", "x",
+                                     entities=ents)
+    s.extract_and_store_relations(fid, content, entities=ents)
+    # The negatives below are only meaningful if a `he` triple EXISTS to be wrongly
+    # recalled. A first version of this test used a relation the deterministic
+    # extractor does not implement, stored nothing, and passed its negatives vacuously.
+    assert s._conn.execute(
+        "SELECT count(*) FROM fact_relations WHERE subject='he' OR object='he'"
+    ).fetchone()[0] > 0, "fixture stored no `he` triple - the negatives would be vacuous"
+
+    # NEGATIVE: the pronoun must not anchor, at any position but 0.
+    for q in ("I am worried. He never whines.",
+              "How do I tell if he is hurting? He never whines.",
+              "The vet asked about him. His appetite is fine."):
+        _, anchors = s._parse_relational_query(q)
+        assert "he" not in anchors and "his" not in anchors and "him" not in anchors, (q, anchors)
+        assert s.relational_recall(query=q) == [], (q, s.relational_recall(query=q))
+
+    # POSITIVE: the ALL-CAPS abbreviation is still an anchor and still recalls.
+    q = "What is HE part of?"
+    _, anchors = s._parse_relational_query(q)
+    assert "he" in anchors, anchors
+    got = s.relational_recall(query=q)
+    assert any(x["subject"] == "he" or x["object"] == "he" for x in got), got
+
+    # POSITIVE: an ordinary proper noun is untouched by the stoplist.
+    _, anchors = s._parse_relational_query("Does Charlie have it?")
+    assert "charlie" in anchors, anchors
+
+    # A shouted query carries no capitalisation signal, so the stoplist still applies.
+    _, anchors = s._parse_relational_query("IS HE HURTING? HE NEVER WHINES.")
+    assert "he" not in anchors, anchors
+    s.close()
+
+
 def test_store_relational_recall_fuzzy_hrr():
     """Phase 5b: when no triple satisfies ALL slots, the HRR partial-binding probe
     surfaces the closest structural match (graceful fallback), labelled 'hrr'."""
