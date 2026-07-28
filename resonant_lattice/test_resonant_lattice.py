@@ -3651,6 +3651,297 @@ def test_relation_model_routing_and_default():
     print("  relation routing OK: default inherits reason; override reaches the store call")
 
 
+def test_relation_prompt_subject_kinds_domain_neutral():
+    """The built vocabulary prompt must not hardcode ONE domain's noun classes.
+
+    Field finding on a 6,983-fact veterinary corpus: the closed vocabulary was being
+    enforced perfectly (zero off-list predicates) yet 2 of 3 sampled facts extracted
+    NOTHING, because the built prompt asked for 'components, machines, models,
+    services, tools, settings, files, versions' -- so on 'Urine must be cultured prior
+    to antimicrobic administration' the model correctly reported no machines and
+    returned []. Default must stay byte-identical for operational profiles; an
+    override must replace the noun classes, not merely append to them."""
+    try:
+        rel = _load("store_relations")
+    except Exception as e:
+        print(f"  SKIP relation subject kinds: {e}"); return
+    build = rel.RelationsMixin._build_relation_prompt
+    vocab = ["treats", "causes"]
+
+    default = build(vocab, None)
+    assert "components, machines, models, services" in default, default[:200]
+    assert build(vocab, None, None) == default        # explicit None == omitted
+    assert build(vocab, None, "   ") == default       # blank falls back, not empties
+
+    kinds = "clinical signs, diseases, breeds, drugs, analytes, tests"
+    vet = build(vocab, None, kinds)
+    assert kinds in vet, vet[:200]
+    assert "machines" not in vet, "override must REPLACE the operational noun classes"
+    # everything else is domain-neutral: the rest of the prompt is unchanged
+    assert vet.replace(kinds, rel.RelationsMixin._DEFAULT_SUBJECT_KINDS) == default
+    print("  relation prompt OK: default byte-identical, override replaces noun classes")
+
+
+def test_relation_llm_accepts_positional_triples():
+    """A model that answers [["s","r","o"], ...] must not be silently discarded.
+
+    Field finding: few-shot examples written in the positional form taught the model
+    to answer in it, and the dict-only parser dropped every triple with no trace. The
+    same prompt returned dicts while the serving layer had reasoning ON and arrays
+    once it was OFF -- so extraction yield swung to zero on a flag that has nothing to
+    do with extraction. Both shapes must parse identically."""
+    import json                                # not imported at module scope here
+    try:
+        rel = _load("store_relations")
+        absm = _load("store_abstraction")      # _clean_llm_json lives on that mixin
+    except Exception as e:
+        print(f"  SKIP positional triples: {e}"); return
+
+    # LatticeStore composes these mixins; a bare RelationsMixin lacks the JSON
+    # cleaner and every call would fail into the non-fatal [] path -- which is
+    # exactly how this test first "passed the parser" while measuring nothing.
+    class _S(rel.RelationsMixin, absm.AbstractionMixin):
+        def _extract_entities(self, text):
+            return ["stranguria"]
+
+    s = _S()
+    assert hasattr(s, "_clean_llm_json"), "shim must carry the real JSON cleaner"
+    vocab = ["presents_as"]
+    payloads = {
+        "dict": '[{"subject":"stranguria","relation":"presents_as",'
+                '"object":"straining to urinate"}]',
+        "positional": '[["stranguria","presents_as","straining to urinate"]]',
+    }
+    got = {}
+    for shape, raw in payloads.items():
+        holder = {}
+
+        class _Resp:
+            def __init__(self, body):
+                self._b = body.encode()
+
+            def read(self):
+                return self._b
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        real_open = rel.urllib.request.urlopen
+        rel.urllib.request.urlopen = lambda req, timeout=None, _r=raw: _Resp(
+            json.dumps({"response": _r}))
+        try:
+            got[shape] = s._llm_extract_triples(
+                "Stranguria means straining to urinate.", "m", "http://x",
+                entities=["stranguria"], vocabulary=vocab)
+        finally:
+            rel.urllib.request.urlopen = real_open
+        assert holder == {}
+
+    assert len(got["positional"]) == 1, got["positional"]
+    key = lambda ts: [(t["subject"], t["relation"], t["object"]) for t in ts]
+    assert key(got["positional"]) == key(got["dict"]), got
+    print("  positional triples OK: [[s,r,o]] parses identically to {subject,...}")
+
+
+def test_relation_attribute_predicates_extend_exempt_set():
+    """relation_require_entity must not delete a domain's attribute triples.
+
+    _ATTRIBUTE_RELATIONS ships as {set_to, produces} -- operational. A clinical closed
+    list is mostly attributes (reference_interval -> a range, dosed_at -> a dose,
+    presents_as -> a sign phrase), and strict binding demands the OBJECT resolve to a
+    known entity, so every one of them would be dropped for want of an entity that a
+    measurement can never be. The declared list is the fix; without declaring, the
+    triple must still drop (the guard keeps working)."""
+    try:
+        rel = _load("store_relations")
+    except Exception as e:
+        print(f"  SKIP relation attribute predicates: {e}"); return
+
+    class _Bare(rel.RelationsMixin):
+        pass
+
+    class _Declared(rel.RelationsMixin):
+        relation_attribute_predicates = ("reference_interval", "DOSED_AT ")
+
+    bare, declared = _Bare(), _Declared()
+    assert bare._attribute_relations() == rel.RelationsMixin._ATTRIBUTE_RELATIONS
+    got = declared._attribute_relations()
+    assert {"set_to", "produces", "reference_interval", "dosed_at"} <= got, got
+
+    triple = [{"subject": "serum phosphorus", "relation": "reference_interval",
+               "object": "2.9-5.3 mg/dL", "confidence": 0.9}]
+    ents = ["serum phosphorus"]          # a RANGE is never an extracted entity
+    kept = declared._canonicalize_triples(
+        [dict(t) for t in triple], "", ents, None, require_entity=True)
+    assert len(kept) == 1, "declared attribute predicate must survive strict binding"
+    dropped = bare._canonicalize_triples(
+        [dict(t) for t in triple], "", ents, None, require_entity=True)
+    assert dropped == [], "undeclared predicate must still be held to entity grounding"
+    print("  attribute predicates OK: declared survive strict binding, undeclared drop")
+
+
+def test_attribute_object_keeps_its_value():
+    """An attribute predicate's object must survive as a VALUE, not be node-normalised.
+
+    Measured on a live re-extraction: every stage_defined_by object arrived as a bare
+    analyte name. Three independent mechanisms did it -- entity grounding returns the
+    matched ENTITY rather than the span, connector splitting cuts at 'and', and the
+    >3-word ceiling rejects intervals. A graph that looks populated and carries no
+    numbers is the worst outcome available, so all three are checked here, and the
+    node path is checked to be UNCHANGED."""
+    try:
+        rel = _load("store_relations")
+    except Exception as e:
+        print(f"  SKIP attribute object value: {e}"); return
+    ents = {"creatinine", "iris ckd stage 1", "serum phosphorus", "azotemia"}
+
+    # 1. entity-substring collapse
+    got, grounded = rel._resolve_arg("creatinine below 125 micromol/L", ents, "obj",
+                                     is_value=True)
+    assert got == "creatinine below 125 micromol/l", got
+    assert grounded is False, "a value is not a node and must not claim grounding"
+    assert rel._resolve_arg("creatinine below 125 micromol/L", ents, "obj")[0] \
+        == "creatinine", "node path must still collapse to the entity"
+
+    # 2. connector splitting
+    got, _ = rel._resolve_arg("drinking and urinating noticeably more than usual",
+                              ents, "obj", is_value=True)
+    assert got == "drinking and urinating noticeably more than usual", got
+    assert rel._resolve_arg("drinking and urinating noticeably more than usual",
+                            ents, "obj")[0] == "drinking", "node path unchanged"
+
+    # 3. the >3-word ceiling
+    got, _ = rel._resolve_arg("2.9-5.3 mg/dL as reported by MSD", ents, "obj",
+                              is_value=True)
+    assert got == "2.9-5.3 mg/dl as reported by msd", got
+    assert rel._resolve_arg("2.9-5.3 mg/dL as reported by MSD", ents, "obj")[0] is None
+
+    # determiner + punctuation trimming still applies; empties still rejected
+    assert rel._resolve_arg("the 75 mg/kg q12-24h.", ents, "obj", is_value=True)[0] \
+        == "75 mg/kg q12-24h"
+    assert rel._resolve_arg("  ", ents, "obj", is_value=True)[0] is None
+    print("  attribute object OK: value kept verbatim, node path unchanged")
+
+
+def test_alias_must_cover_the_span_before_replacing_it():
+    """A short alias must not swallow a composite identifier.
+
+    With iris -> 'international renal interest society', the span 'iris ckd stage 2'
+    was replaced WHOLESALE and the stage identifier was lost; 'usg >1.030' would
+    likewise become 'urine specific gravity' and drop the threshold. Coverage gates
+    the substring rule while whole-value matches still always win, so the intended
+    node collapses keep working."""
+    try:
+        rel = _load("store_relations")
+    except Exception as e:
+        print(f"  SKIP alias coverage: {e}"); return
+    amap = {
+        "iris": "international renal interest society",
+        "usg": "urine specific gravity",
+        "46": "node .46",
+        "nemotron-3-super:cloud": "nemotron",
+    }
+    # whole-value: always replaced, however short
+    assert rel._alias_canon("iris", amap) == "international renal interest society"
+    assert rel._alias_canon("usg", amap) == "urine specific gravity"
+    assert rel._alias_canon("46", amap) == "node .46"
+    assert rel._alias_canon("nemotron-3-super:cloud", amap) == "nemotron"
+    # composite spans survive: the alias covers too little of them
+    for span in ("iris ckd stage 2", "iris ckd stage 1", "usg >1.030",
+                 "usg below 1.030"):
+        assert rel._alias_canon(span, amap) == span, span
+    # a partial match that DOES cover most of the span still collapses
+    assert rel._alias_canon("nemotron-3-super:cloud model",
+                            amap) == "nemotron"
+    # query side must mirror storage side exactly
+    for span in ("iris", "iris ckd stage 2", "usg >1.030", "46"):
+        assert rel._canon_term(span, amap) == rel._alias_canon(span, amap), span
+    print("  alias coverage OK: whole-value wins, composite spans survive, "
+          "query mirrors storage")
+
+
+def test_relation_num_predict_bounds_the_generation():
+    """An uncapped relation call has a 300s tail that becomes a SILENT empty result.
+
+    Measured: typical calls emit 41 completion tokens, but against an endpoint whose
+    own default was 8192 the tail ran to the cap and hit this method's 300s timeout,
+    which is swallowed into the non-fatal [] path -- so a lost extraction is
+    indistinguishable from 'this fact states no relations'. Unset must keep the old
+    payload byte-for-byte; set must add num_predict and nothing else."""
+    import json
+    try:
+        rel = _load("store_relations")
+        absm = _load("store_abstraction")
+    except Exception as e:
+        print(f"  SKIP relation num_predict: {e}"); return
+
+    class _S(rel.RelationsMixin, absm.AbstractionMixin):
+        def _extract_entities(self, text):
+            return ["a"]
+
+    sent = {}
+
+    class _Resp:
+        def read(self):
+            return json.dumps({"response": "[]"}).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def _fake(req, timeout=None):
+        sent["opts"] = json.loads(req.data.decode())["options"]
+        sent["think"] = json.loads(req.data.decode()).get("think")
+        return _Resp()
+
+    real = rel.urllib.request.urlopen
+    try:
+        rel.urllib.request.urlopen = _fake
+        s = _S()
+        s._llm_extract_triples("x", "m", "http://x", entities=["a"], vocabulary=["treats"])
+        assert sent["opts"] == {"temperature": 0.1}, sent["opts"]
+        assert sent["think"] is False, "think must stay False on every reason call"
+
+        s.relation_num_predict = 512
+        s._llm_extract_triples("x", "m", "http://x", entities=["a"], vocabulary=["treats"])
+        assert sent["opts"] == {"temperature": 0.1, "num_predict": 512}, sent["opts"]
+
+        for bad in (0, -5, None, "nope"):
+            s.relation_num_predict = bad
+            s._llm_extract_triples("x", "m", "http://x", entities=["a"],
+                                   vocabulary=["treats"])
+            assert "num_predict" not in sent["opts"], (bad, sent["opts"])
+    finally:
+        rel.urllib.request.urlopen = real
+    print("  relation num_predict OK: unset unchanged, set caps, junk ignored")
+
+
+def test_relation_domain_knobs_reach_the_store():
+    """Both new keys must land ON the store, since the store reads them for itself
+    (no call signature carries them). Unset must leave the store's defaults alone."""
+    try:
+        prov = _load("__init__")
+    except Exception as e:
+        print(f"  SKIP relation domain knobs: {e}"); return
+
+    p = prov.LatticeMemoryProvider({})
+    assert p._relation_subject_kinds is None
+    assert p._relation_attribute_predicates is None
+
+    p2 = prov.LatticeMemoryProvider({
+        "relation_subject_kinds": "  clinical signs, diseases, drugs  ",
+        "relation_attribute_predicates": ["reference_interval", " Dosed_At ", ""],
+    })
+    assert p2._relation_subject_kinds == "clinical signs, diseases, drugs"
+    assert p2._relation_attribute_predicates == ("reference_interval", "dosed_at")
+    print("  domain knobs OK: stripped, lowercased, empties dropped, None when unset")
+
+
 def test_mirror_path_relation_hook():
     """on_memory_write mirror facts get the same Phase 5a relation hook as
     consolidation-extracted facts: gated, non-fatal, and routed through the

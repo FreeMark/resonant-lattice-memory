@@ -377,6 +377,25 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         # args are not named entities (fragment/pronoun noise). Both default off/empty.
         self._entity_aliases = self._config.get("entity_aliases") or None
         self._relation_require_entity = bool(self._config.get("relation_require_entity", False))
+        # The two keys that make a closed vocabulary usable OUTSIDE the operational
+        # domain it was designed in. Both are set on the store after construction.
+        #  relation_subject_kinds       -> the noun classes the built prompt asks for;
+        #     the default names components/machines/services, so a clinical or legal
+        #     lattice extracts almost nothing until this is set.
+        #  relation_attribute_predicates -> which predicates take a VALUE object, so
+        #     relation_require_entity does not delete every reference_interval /
+        #     dosed_at / presents_as triple for want of an entity to bind the object to.
+        self._relation_subject_kinds = (
+            str(self._config.get("relation_subject_kinds") or "").strip() or None)
+        self._relation_attribute_predicates = tuple(
+            str(p).strip().lower()
+            for p in (self._config.get("relation_attribute_predicates") or [])
+            if str(p).strip()) or None
+        try:
+            self._relation_num_predict = max(0, int(
+                self._config.get("relation_num_predict", 0) or 0))
+        except (TypeError, ValueError):
+            self._relation_num_predict = 0
         # Phase-4: also mine relations from the RAW transcript window at ingest (captures
         # conversational dependency/decision/usage edges that per-fact extraction loses),
         # with strict entity binding to control the higher speech-fragment noise. The ingest
@@ -741,6 +760,12 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         # Domain entity vocabulary onto the store (read by _extract_entities so domain
         # tool/config/concept names are recognized as entities + graph nodes).
         self._store._entity_vocabulary = self._entity_vocabulary
+        # Same pattern: domain knobs the store reads for itself during extraction, so
+        # no call signature has to carry them (see _build_relation_prompt and
+        # _attribute_relations). None leaves the store's own defaults in place.
+        self._store.relation_subject_kinds = self._relation_subject_kinds
+        self._store.relation_attribute_predicates = self._relation_attribute_predicates
+        self._store.relation_num_predict = self._relation_num_predict
         mc, dc = self._store.get_cycle_counts()
         self._memory_cycle = mc
         self._dream_cycle_count = dc

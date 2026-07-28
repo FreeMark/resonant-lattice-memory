@@ -131,7 +131,8 @@ _QUERY_REL_KEYWORDS: List[Tuple["re.Pattern", str]] = [
 ]
 
 
-def _resolve_arg(span: str, ent_set: set, side: str) -> Tuple[Optional[str], bool]:
+def _resolve_arg(span: str, ent_set: set, side: str,
+                 is_value: bool = False) -> Tuple[Optional[str], bool]:
     """Normalize one captured argument and try to ground it to a known entity.
 
     `side` is "subj" (keep the clause nearest the verb → rightmost segment) or
@@ -140,15 +141,34 @@ def _resolve_arg(span: str, ent_set: set, side: str) -> Tuple[Optional[str], boo
     recognized entity (highest precision). An ungrounded span survives only if it
     is a short (≤3-word) clean noun phrase; longer ungrounded spans return None so
     the triple is dropped. Lowercased throughout, matching entity-graph keys.
+
+    ``is_value`` marks the OBJECT of an ATTRIBUTE predicate (reference_interval,
+    dosed_at, presents_as, stage_defined_by ...), whose object is a measurement or a
+    phrase rather than a graph node. Node normalisation destroys those three separate
+    ways, all measured on a live re-extraction:
+
+      * entity grounding returns the matched ENTITY, not the span, so "creatinine
+        below 125 micromol/L" collapses to "creatinine" -- every stage_defined_by
+        object arrived as a bare analyte name carrying no number;
+      * connector splitting cuts at "and", so presents_as "drinking and urinating
+        noticeably more than usual" becomes "drinking";
+      * the >3-word ceiling rejects most intervals outright.
+
+    That is the worst failure mode available here: a graph that looks populated and
+    holds no values. For a value the span is kept verbatim apart from determiner and
+    punctuation trimming, and returned UNGROUNDED -- it is not a node and must not
+    claim to be one. Grounding of the SUBJECT is untouched, so relation_require_entity
+    still refuses fragment subjects.
     """
     if not span:
         return None, False
     s = span.strip().lower()
 
-    # Cut at clause connectors, keep the segment nearest the verb.
-    parts = [p.strip() for p in _CONNECTORS.split(s) if p and p.strip()]
-    if parts:
-        s = parts[-1] if side == "subj" else parts[0]
+    if not is_value:
+        # Cut at clause connectors, keep the segment nearest the verb.
+        parts = [p.strip() for p in _CONNECTORS.split(s) if p and p.strip()]
+        if parts:
+            s = parts[-1] if side == "subj" else parts[0]
 
     # Strip a leading determiner/possessive.
     for det in _LEADING_DETERMINERS:
@@ -159,6 +179,9 @@ def _resolve_arg(span: str, ent_set: set, side: str) -> Tuple[Optional[str], boo
     s = s.strip().strip("\"'.,;:!?()[]{}").strip()
     if len(s) < 2:
         return None, False
+
+    if is_value:
+        return s, False
 
     # Entity grounding: longest entity that is the whole span or a whole-word
     # substring of it (so "i think alice" grounds to the entity "alice").
@@ -183,20 +206,43 @@ def _resolve_arg(span: str, ent_set: set, side: str) -> Tuple[Optional[str], boo
     return " ".join(tokens), False
 
 
+# An alias replaces the WHOLE argument, so a short acronym that also PREFIXES
+# composite identifiers silently destroys them: with iris -> "international renal
+# interest society", the span "iris ckd stage 2" became the organisation and the stage
+# was lost; "usg >1.030" would likewise become "urine specific gravity" and drop the
+# threshold. Requiring the alias to cover most of the span keeps the intended
+# collapses ("46" -> "node .46", "nemotron-3-super:cloud" -> "nemotron", "usg" ->
+# "urine specific gravity") while leaving composite spans alone. A whole-VALUE match
+# always wins regardless of length.
+_ALIAS_MIN_COVERAGE = 0.6
+
+
+def _alias_canon(value: Optional[str], amap: dict) -> Optional[str]:
+    """Single implementation of alias canonicalisation, shared by the storage side
+    (_canonicalize_triples) and the query side (_canon_term) so the two cannot drift
+    apart -- if storage stops collapsing a span, a query for it must stop too."""
+    if not value or not amap:
+        return value
+    low = value.strip().lower()
+    if low in amap:
+        return amap[low]
+    best = None
+    for surf, canonical in amap.items():
+        if not surf or len(surf) < _ALIAS_MIN_COVERAGE * len(low):
+            continue
+        if re.search(rf"\b{re.escape(surf)}\b", low):
+            if best is None or len(surf) > len(best[0]):
+                best = (surf, canonical)      # longest alias wins, not dict order
+    return best[1] if best else value
+
+
 def _canon_term(term: Optional[str], amap: dict) -> Optional[str]:
     """Map a QUERY term to its canonical node via the alias map (whole-value or whole-word
     match), so the query side matches the aliased stored graph (asking about 'the node' finds
     'node .46'). Returns the term unchanged when no alias applies. Mirrors the storage-side
-    canonicalization in _canonicalize_triples."""
-    if not term or not amap:
-        return term
-    low = term.strip().lower()
-    if low in amap:
-        return amap[low]
-    for surf, canonical in amap.items():
-        if re.search(rf"\b{re.escape(surf)}\b", low):
-            return canonical
-    return term
+    canonicalization in _canonicalize_triples -- both delegate to _alias_canon so the two
+    sides cannot diverge."""
+    return _alias_canon(term, amap)
 
 
 class RelationsMixin:
@@ -274,21 +320,40 @@ class RelationsMixin:
                     return out
         return out
 
+    # The KINDS of thing a graph is made of. This list used to be hardcoded into the
+    # prompt below, which silently made the closed-vocabulary mechanism
+    # infrastructure-only: a clinical lattice instructed to extract "components,
+    # machines, services, settings, files, versions" returns [] on "Urine must be
+    # cultured prior to antimicrobic administration", because the model correctly
+    # reports that the note contains no machines. Measured on a 6,983-fact veterinary
+    # corpus, 2 of 3 sampled facts came back empty under this wording while the
+    # vocabulary itself was being enforced perfectly. Kept as the DEFAULT so existing
+    # operational profiles build a byte-identical prompt; override per profile with
+    # relation_subject_kinds.
+    _DEFAULT_SUBJECT_KINDS = ("components, machines, models, services, tools, "
+                              "settings, files, versions, people, places")
+
     @staticmethod
-    def _build_relation_prompt(vocabulary: List[str], examples: Optional[str]) -> str:
+    def _build_relation_prompt(vocabulary: List[str], examples: Optional[str],
+                               subject_kinds: Optional[str] = None) -> str:
         """Schema-constrained slot-filling prompt built from a closed relation vocabulary.
 
         Turns triple extraction from open generation ("invent a snake_case relation")
         into classification ("pick a relation from THIS list, name real things, or
         return []") - the task a small local model does reliably. Optional domain
         ``examples`` are appended verbatim (few-shot). Validated at scale to yield a
-        near-100%-canonical, recurring relation set."""
+        near-100%-canonical, recurring relation set.
+
+        ``subject_kinds`` names the kinds of thing THIS domain's graph is built from
+        (see _DEFAULT_SUBJECT_KINDS for why it is a parameter and not a constant). The
+        vocabulary, the examples and this phrase are the three places the domain
+        enters; everything else in the prompt is domain-neutral."""
         vocab_line = ", ".join(vocabulary)
         ex = ("\n" + examples) if examples else ""
+        kinds = (subject_kinds or "").strip() or RelationsMixin._DEFAULT_SUBJECT_KINDS
         return (
-            "You are building a KNOWLEDGE GRAPH of how a system is put together, from the note "
-            "below. Extract ONLY relationships between NAMED things (components, machines, models, "
-            "services, tools, settings, files, versions, people, places).\n"
+            "You are building a KNOWLEDGE GRAPH from the note "
+            f"below. Extract ONLY relationships between NAMED things ({kinds}).\n"
             f"Use ONLY these relation types (choose the closest; if none fit, omit the triple): "
             f"{vocab_line}.\n"
             "Rules:\n"
@@ -334,7 +399,9 @@ class RelationsMixin:
         if prompt:
             base_prompt = prompt                       # explicit override wins
         elif vocab_set:
-            base_prompt = self._build_relation_prompt(list(vocabulary), examples)
+            base_prompt = self._build_relation_prompt(
+                list(vocabulary), examples,
+                getattr(self, "relation_subject_kinds", None))
         else:
             base_prompt = (
                 "Extract explicit (subject, relation, object) triples STATED in the text "
@@ -344,8 +411,23 @@ class RelationsMixin:
             )
         final_prompt = f"{base_prompt}\n\nTEXT:\n{content}\n\nJSON OUTPUT:"
         try:
+            # BOUND THE GENERATION. A triple list is inherently short -- at most
+            # _MAX_TRIPLES_PER_FACT (8) objects, ~224 tokens -- but with no cap the
+            # endpoint's own default applies, and a model that occasionally fails to
+            # stop runs to it. Measured against a vLLM shim whose default was 8192:
+            # typical calls emitted 41 tokens while the tail hit the 300s timeout
+            # below, which this method then swallowed into a non-fatal [] -- a lost
+            # extraction indistinguishable from "this fact states no relations".
+            # 0/unset keeps the endpoint default (previous behaviour).
+            _np = getattr(self, "relation_num_predict", 0)
+            _opts = {"temperature": 0.1}
+            try:
+                if int(_np) > 0:
+                    _opts["num_predict"] = int(_np)
+            except (TypeError, ValueError):
+                pass
             payload = {"model": reason_model, "prompt": final_prompt,
-                       "stream": False, "think": False, "options": {"temperature": 0.1}}
+                       "stream": False, "think": False, "options": _opts}
             req = urllib.request.Request(
                 f"{ollama_endpoint}/api/generate",
                 data=json.dumps(payload).encode("utf-8"),
@@ -366,6 +448,14 @@ class RelationsMixin:
         out: List[Dict] = []
         seen: set = set()
         for item in parsed:
+            # POSITIONAL FORM TOLERATED. A model given few-shot examples written as
+            # [["subject","relation","object"], ...] returns that shape faithfully,
+            # and dict-only parsing discarded EVERY triple without a trace. Measured:
+            # the same prompt returned dicts while reasoning was on and arrays once it
+            # was off, so this silently halved to nothing depending on an unrelated
+            # serving flag. Accept both; a 3-element sequence is unambiguous.
+            if isinstance(item, (list, tuple)) and len(item) == 3:
+                item = {"subject": item[0], "relation": item[1], "object": item[2]}
             if not isinstance(item, dict):
                 continue
             rel_raw = item.get("relation")
@@ -376,8 +466,13 @@ class RelationsMixin:
                 continue
             if vocab_set is not None and relation not in vocab_set:
                 continue  # drop off-vocabulary relations (the free-form one-off noise)
+            # An attribute predicate's object is a VALUE, so it must not be collapsed
+            # to an entity, split at a conjunction, or length-capped. The subject is
+            # still normalised as a node.
+            _is_value = relation in self._attribute_relations()
             subj, subj_g = _resolve_arg(str(item.get("subject", "")), ent_set, "subj")
-            obj, obj_g = _resolve_arg(str(item.get("object", "")), ent_set, "obj")
+            obj, obj_g = _resolve_arg(str(item.get("object", "")), ent_set, "obj",
+                                      is_value=_is_value)
             if not subj or not obj or subj == obj:
                 continue
             conf = 0.7 + (0.1 if subj_g else 0.0) + (0.1 if obj_g else 0.0)
@@ -441,7 +536,20 @@ class RelationsMixin:
 
     # Relations whose OBJECT is a value/attribute (a number, a flag, a path), not a
     # graph node - so the object is NOT required to resolve to a known entity.
+    # Relations whose OBJECT is a VALUE rather than a graph node, so strict entity
+    # binding must not require it to be a known entity. The two built-ins are
+    # operational; a domain's closed vocabulary is typically mostly attributes
+    # (reference_interval -> a range, dosed_at -> a dose, presents_as -> a sign
+    # phrase), and with relation_require_entity on it would lose all of them. Extend
+    # per profile with relation_attribute_predicates rather than editing this set --
+    # the closed-vocabulary mechanism is incomplete without a way for a domain to say
+    # WHICH of its predicates take a value.
     _ATTRIBUTE_RELATIONS = frozenset({"set_to", "produces"})
+
+    def _attribute_relations(self) -> frozenset:
+        extra = getattr(self, "relation_attribute_predicates", None) or ()
+        return self._ATTRIBUTE_RELATIONS | {
+            str(p).strip().lower() for p in extra if str(p).strip()}
 
     def _canonicalize_triples(self, triples: List[Dict], content: str,
                               entities: Optional[List[str]],
@@ -465,14 +573,9 @@ class RelationsMixin:
         amap = {str(k).strip().lower(): str(v).strip() for k, v in (aliases or {}).items() if k and v}
 
         def canon(arg: str) -> str:
-            a = (arg or "").strip()
-            low = a.lower()
-            if low in amap:
-                return amap[low]
-            for surf, canonical in amap.items():           # whole-word alias inside the span
-                if re.search(rf"\b{re.escape(surf)}\b", low):
-                    return canonical
-            return a
+            # whole-value, else a whole-word alias that covers most of the span
+            # (see _ALIAS_MIN_COVERAGE for why partial coverage must NOT replace)
+            return _alias_canon((arg or "").strip(), amap) or (arg or "").strip()
 
         for t in triples:
             t["subject"] = canon(t["subject"])
@@ -487,8 +590,9 @@ class RelationsMixin:
                 a = (arg or "").strip().lower()
                 return bool(a) and (a in ent or any(
                     e == a or re.search(rf"\b{re.escape(e)}\b", a) for e in ent))
+            attrs = self._attribute_relations()
             triples = [t for t in triples if grounded(t["subject"]) and (
-                t["relation"] in self._ATTRIBUTE_RELATIONS or grounded(t["object"]))]
+                t["relation"] in attrs or grounded(t["object"]))]
 
         seen, out = set(), []                              # re-dedup (aliasing can merge)
         for t in triples:

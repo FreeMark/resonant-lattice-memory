@@ -304,6 +304,41 @@ CONFIG_SCHEMA = [
                     "supersedes; technical reference: uses/requires/returns/extends/configures/"
                     "implements/part_of. Empty = legacy free-form behaviour (one-off relations).",
      "default": []},
+    {"key": "relation_subject_kinds",
+     "description": "The KINDS of thing this lattice's graph is built from, as one short "
+                    "phrase (e.g. 'clinical signs, diseases, breeds, drugs, analytes, tests, "
+                    "anatomical structures'). Substituted into the built relation prompt when "
+                    "relation_vocabulary is set and relation_prompt is not overridden. The "
+                    "default names operational things (components, machines, services, "
+                    "settings, files, versions), which is correct for a systems lattice and "
+                    "WRONG for any other -- a clinical lattice told to find machines returns "
+                    "[] on 'Urine must be cultured prior to antimicrobic administration', "
+                    "because the model correctly reports there are none. Measured: 2 of 3 "
+                    "sampled veterinary facts extracted nothing under the default wording "
+                    "while the vocabulary was being enforced perfectly. Set this whenever "
+                    "relation_vocabulary is set. Empty = the operational default.",
+     "default": ""},
+    {"key": "relation_num_predict",
+     "description": "Cap the relation pass's generation length (num_predict). A triple "
+                    "list is at most 8 objects (~224 tokens), so a few hundred is ample; "
+                    "512 is a good default when set. Unset/0 uses the endpoint's own "
+                    "default, which on a vLLM shim was 8192 -- typical calls emitted 41 "
+                    "tokens while the tail ran to the cap and hit the 300s request "
+                    "timeout, which the relation pass then swallows into a non-fatal "
+                    "empty result. That makes a LOST extraction look identical to 'this "
+                    "fact states no relations'. Set it whenever relation_extract_llm is "
+                    "on against an endpoint you do not control the defaults of.",
+     "default": 0},
+    {"key": "relation_attribute_predicates",
+     "description": "Which of this domain's predicates take a VALUE as their object rather "
+                    "than another graph node (a list, e.g. ['reference_interval','dosed_at',"
+                    "'presents_as','prognosis_for']). Extends the built-in exempt set "
+                    "{set_to, produces} so relation_require_entity does not demand that a "
+                    "range, dose or sign phrase be a known entity. Without this, strict "
+                    "binding silently deletes every attribute triple a domain vocabulary "
+                    "produces -- so set it alongside relation_vocabulary whenever "
+                    "relation_require_entity is on. Empty = built-ins only.",
+     "default": []},
     {"key": "relation_examples",
      "description": "Optional domain few-shot examples appended to the built relation prompt "
                     "when relation_vocabulary is set and relation_prompt is not overridden. A "
