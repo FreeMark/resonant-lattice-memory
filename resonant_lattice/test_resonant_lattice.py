@@ -2318,6 +2318,86 @@ def test_store_relational_recall_multiword_free_query():
     s.close()
 
 
+def test_content_quote_numeric_conflict():
+    """A fact must not contradict its own source_quote numerically - and a correct
+    DERIVATION must not be mistaken for a contradiction.
+
+    Every case below is real, from a 6,983-fact clinical corpus. The positive is the
+    defect that motivated the check: it was stored 'attested', because attestation
+    verifies the quote against the TRANSCRIPT and nothing verified the fact against
+    its quote. The negatives are the reason this marks instead of dropping - a blanket
+    "content number absent from quote" rule fired on 17% of reference-range facts, and
+    reading them, nearly all were legitimate.
+    """
+    att = _load("attestation")
+    conflict = att.content_quote_numeric_conflict
+
+    # POSITIVE - the real defect (fact 3493). Same measurement, different values.
+    hits = conflict("Normal canine body temperature range is 99.5 to 102.5 degrees F "
+                    "(37.5 to 39.2 degrees C).",
+                    "normal body temperature for a dog is between 99.8-102.8 degrees F "
+                    "(37.6-39.3 degrees C)", 0.02)
+    assert hits, "the body-temperature contradiction must be caught"
+    assert any(abs(c - 99.5) < 1e-9 for c, _, _ in hits), hits
+
+    # POSITIVE - a stated range its own quote contradicts (fact 5421).
+    assert conflict("Plasma osmolality in dogs has a normal range of approximately "
+                    "280-300 mOsm/kg.",
+                    "The median measured osmolality for all dogs was 302 mOsm/kg", 0.02)
+
+    # NEGATIVE - correct unit DERIVATIONS. Orders of magnitude away, must not fire.
+    assert not conflict("The MCL for TTHM is 0.080 milligrams per liter (80 parts per billion).",
+                        "The maximum contaminant level (MCL) for TTHM is 0.080 [mg/L].", 0.02)
+    assert not conflict("Fibrinogen 1.24 to 4.30 g/L (124 to 430 mg/dL)",
+                        "reference intervals were 1.24-4.30 g/l", 0.02)
+    assert not conflict("up to 5 white blood cells per high power field (HPF, 400x)",
+                        "White blood cells are reported per HPF using the high dry "
+                        "objective (40x)", 0.02)
+
+    # NEGATIVE - ROUNDING, the dominant benign case. Not a different measurement.
+    assert not conflict("A caregiver placebo effect occurs in approximately 40% of cases.",
+                        "A caregiver placebo effect ... occurred 39.7% of the time.", 0.02)
+    assert not conflict("adverse reactions: systemic disorders (37.1%)",
+                        "adverse reactions ... systemic disorders (37.06%)", 0.02)
+    assert not conflict("median resting heart rate was approximately 60 beats per minute",
+                        "Apparently healthy dogs: HR 60.5 [55.2-65.3] beats/min", 0.02)
+
+    # NEGATIVE - citation numbers can never be in a quote and must not count.
+    assert not conflict("GGT reference range for dogs is <10 U/L (Laboklin 2024).",
+                        "canine GGT <10 U/L", 0.02)
+    assert not conflict("Ammonia reference interval is 24-36 ug/dL (as_of 2021).",
+                        "ammonia reference interval 24-36 ug/dL", 0.02)
+
+    # NEGATIVE - disabled by default, so no profile inherits this silently.
+    assert conflict("temperature is 99.5 F", "temperature is 99.8 F", 0.0) == []
+    assert conflict("temperature is 99.5 F", "temperature is 99.8 F", -1) == []
+
+    # NEGATIVE - a far-away number is a different quantity, not a contradiction.
+    assert not conflict("USG >1.030 indicates concentrating ability",
+                        "glomerular filtrate has specific gravity 1.008 to 1.012", 0.001)
+
+
+def test_content_quote_numeric_tolerance_defaults_off_and_is_wired():
+    """The knob must exist, default to OFF, and actually reach the provider - a check
+    that is configured but never read is worse than no check, because it reports safety
+    it is not providing."""
+    schema = _load("config_schema")
+    entry = next((e for e in schema.CONFIG_SCHEMA
+                  if e["key"] == "content_quote_numeric_tolerance"), None)
+    assert entry is not None, "config key missing from the schema"
+    assert entry["default"] == 0.0, "must default OFF: existing profiles keep their behaviour"
+    src = open(os.path.join(PLUGIN_DIR, "__init__.py"), encoding="utf-8").read()
+    assert "_content_quote_numeric_tolerance" in src, "provider never reads the key"
+    cons = open(os.path.join(PLUGIN_DIR, "consolidation.py"), encoding="utf-8").read()
+    assert "content_quote_numeric_conflict" in cons, "consolidation never calls the check"
+    assert "numeric_conflict" in cons, "verdict never recorded in quote_status"
+    # It must MARK, not drop: a `continue` here would discard the fact.
+    i = cons.find("content_quote_numeric_conflict(")
+    j = cons.find("quote_status = \"numeric_conflict\"", i)
+    assert i != -1 and j != -1 and "continue" not in cons[i:j], \
+        "the numeric conflict path must mark the fact, never drop it"
+
+
 def test_store_relational_query_pronoun_does_not_bind_to_an_abbreviation():
     """A capitalized PRONOUN mid-query must not be taken as an anchor.
 

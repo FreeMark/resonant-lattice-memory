@@ -456,6 +456,21 @@ CONFIG_SCHEMA = [
                     "numeric/entity specific DROPS the fact; an un-anchored quote is flagged. "
                     "Verdict stored in semantic_facts.quote_status.",
      "default": True},
+    {"key": "content_quote_numeric_tolerance",
+     "description": "Flag a fact whose CONTENT contradicts its own source_quote "
+                    "numerically. verify_source_quote checks the quote against the "
+                    "transcript; nothing checks the fact's content against its quote, so "
+                    "a fact reading '99.5 to 102.5 degrees F' whose quote says "
+                    "'99.8-102.8' is still 'attested' - a real defect found in a live "
+                    "clinical corpus. Fires only on a NEAR MISS: a content number absent "
+                    "from the quote while the quote holds a different value within this "
+                    "relative distance that is not a rounding of it. Deliberately narrow: "
+                    "a correct unit DERIVATION (0.080 mg/L -> 80 ppb) lands orders of "
+                    "magnitude away and must not fire. Sets quote_status="
+                    "'numeric_conflict'; MARKS, never drops - measured precision is "
+                    "roughly a third. 0 = off (default). 0.02 measured at 10 flags over "
+                    "6,640 quoted facts.",
+     "default": 0.0},
     {"key": "quote_match_threshold",
      "description": "Fuzzy prose-match ratio (0-1) for source_quote attestation, scored "
                     "over a transcript WINDOW (~the quote's length) around the best match, "

@@ -12,7 +12,7 @@ import time
 import urllib.request
 from reason_gate import reason_slot
 
-from attestation import _attest_source_quote
+from attestation import _attest_source_quote, content_quote_numeric_conflict
 from proc_lock import FinalizeLock, FINALIZE_LOCK_WAIT
 from store_common import hrr, _HRR_AVAILABLE
 from self_write_gate import is_task_process_meta
@@ -766,6 +766,21 @@ class ConsolidationMixin:
                         if verdict == "unattested":
                             source_quote = None   # keep the fact, flag the weak quote
                         quote_status = verdict
+                        # The quote is grounded in the transcript - but does the FACT
+                        # agree with its own quote? Nothing above asks that, so a fact
+                        # whose numbers contradict its own evidence still reads
+                        # 'attested'. MARKS, never drops: measured precision is about a
+                        # third and the misses are legitimate (a quote captured too
+                        # narrowly, or a correct unit derivation). Off unless configured.
+                        tol = getattr(self, "_content_quote_numeric_tolerance", 0.0)
+                        if tol > 0 and source_quote and verdict in ("attested", "soft"):
+                            clash = content_quote_numeric_conflict(content, source_quote, tol)
+                            if clash:
+                                quote_status = "numeric_conflict"
+                                logger.debug(
+                                    "Content/quote numeric conflict: %s | %s",
+                                    content[:60],
+                                    ", ".join("%g vs %g" % (c, q) for c, q, _ in clash[:3]))
 
                 # === Ref verification ============================================
                 # The url channel gets its own gate, and it is STRICTER than the

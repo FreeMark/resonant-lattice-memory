@@ -135,3 +135,110 @@ def _attest_source_quote(quote: str, transcript: str, entities: List[str],
     if prose_ok:
         return "attested" if has_hard else "soft"
     return "unattested"   # prose not anchored, but nothing hard contradicted → keep+flag
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CONTENT ↔ QUOTE numeric conflict - the link _attest_source_quote does not check.
+#
+# _attest_source_quote verifies the QUOTE against the TRANSCRIPT. Nothing verifies the
+# FACT's own content against its quote, so a fact can carry numbers contradicting the
+# very snippet stored as its evidence and still be 'attested'. Measured on a live
+# 6,983-fact clinical corpus:
+#
+#   content: "Normal canine body temperature range is 99.5 to 102.5 degrees F"
+#   quote  : "normal body temperature for a dog is between 99.8-102.8 degrees F"
+#   status : attested
+#
+# Both are plausible published ranges, so no reader catches it either.
+#
+# WHY THIS IS NARROW ON PURPOSE. "A content number absent from the quote" is far too
+# broad - on that corpus it fires on 17% of reference-range facts, and reading them,
+# nearly all are legitimate: the quote was captured too narrowly, or the model DERIVED
+# a value correctly (0.080 mg/L -> 80 ppb; 1.24 g/L -> 124 mg/dL; a 40x objective ->
+# 400x magnification). Shipping that as a drop would destroy ~83 good facts to catch 1.
+#
+# A derivation restates a value in other units and lands ORDERS OF MAGNITUDE from
+# anything in the quote. A CONTRADICTION states the same measurement with a different
+# value and lands right beside a quote number without matching it. So a conflict
+# requires a NEAR MISS, excluding rounding - the dominant benign case (58% for 57.9%,
+# 37.1% for 37.06%, "approximately 40%" for 39.7%).
+#
+# Measured at tolerance 0.02 over 6,640 quoted facts: 10 flags (0.15%), including the
+# real contradiction. Precision is roughly a third, which is why the caller MARKS
+# rather than drops, and why the check is OFF unless a tolerance is configured.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_DEC_NUM_RE = re.compile(r"\d+(?:\.\d+)?")
+_THOUSANDS_RE = re.compile(r"(?<=\d),(?=\d\d\d\b)")
+_DASH_MAP = dict.fromkeys(map(ord, "‐‑‒–—―−"), "-")
+# Bibliographic numbers can never appear in a source quote, so counting them as missing
+# clinical values inflates the signal: '(as_of 2021)' is an annotation this system adds,
+# '(Laboklin 2024)' is a citation, 'Table 3' a locator. Stripped by SHAPE, not by
+# removing every 4-digit number - a reference range may legitimately read "2000 mL".
+_CITATION_RES = (
+    re.compile(r"\(\s*as[_ ]of[^)]*\)", re.I),
+    re.compile(r"\((?=[^)]*\b(?:19|20)\d\d\b)[^)]*\)"),
+    re.compile(r"\b(?:table|figure|fig\.?|chapter|section|appendix|part)\s+\d+\b", re.I),
+)
+
+
+def _decimal_numbers(text: str, strip_citations: bool = False) -> set:
+    """Decimal-AWARE value set: 2.9 and 5.3 stay separate values.
+
+    Deliberately NOT _digit_core: stripping non-digits turns '2.9-5.3' into '2953' and
+    '3.5-6.2' into '3562' - unequal by luck rather than design - while '2.9 to 5.3' and
+    '2.9-5.3' come out unequal despite being the same interval.
+    """
+    s = (text or "").translate(_DASH_MAP)
+    s = _THOUSANDS_RE.sub("", s)
+    if strip_citations:
+        for rx in _CITATION_RES:
+            s = rx.sub(" ", s)
+    out = set()
+    for tok in _DEC_NUM_RE.findall(s):
+        try:
+            out.add(float(tok))
+        except ValueError:
+            pass
+    return out
+
+
+def _is_rounding(a: float, b: float) -> bool:
+    """True when one value is the other restated with fewer decimal places.
+
+    Checked in BOTH directions, and only for decimal-place rounding, so 99.8 -> 99.5 and
+    302 -> 300 are NOT exempted: those are different measurements, not shorter ones.
+    """
+    for d in range(0, 4):
+        if round(b, d) == a or round(a, d) == b:
+            return True
+    return False
+
+
+def content_quote_numeric_conflict(content: str, quote: str,
+                                   tolerance: float = 0.02) -> List[tuple]:
+    """[(content_value, nearest_quote_value, relative_distance), …]; empty if none.
+
+    A conflict is a number in ``content`` ABSENT from ``quote`` while ``quote`` holds a
+    DIFFERENT number within ``tolerance`` relative distance that is not merely a
+    rounding of it. ``tolerance <= 0`` disables the check and returns [].
+    """
+    if tolerance <= 0 or not content or not quote:
+        return []
+    cn = _decimal_numbers(content, strip_citations=True)
+    qn = _decimal_numbers(quote)
+    if not cn or not qn:
+        return []
+    out = []
+    for c in sorted(cn - qn):
+        best = None
+        for q in qn:
+            denom = max(abs(c), abs(q))
+            if q == c or denom == 0:
+                continue
+            d = abs(c - q) / denom
+            if d <= tolerance and not _is_rounding(c, q) and (best is None or d < best[1]):
+                best = (q, d)
+        if best is not None:
+            out.append((c, best[0], round(best[1], 4)))
+    return out

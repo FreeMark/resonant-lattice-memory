@@ -489,6 +489,10 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         # the fact but flags it. Default ON; threshold tunes the fuzzy prose match.
         self._verify_source_quote = bool(self._config.get("verify_source_quote", DEFAULTS["verify_source_quote"]))
         self._quote_match_threshold = float(self._config.get("quote_match_threshold", DEFAULTS["quote_match_threshold"]))
+        # Content-vs-quote numeric conflict (see attestation.content_quote_numeric_conflict).
+        # 0 = off, preserving existing behaviour for every profile that does not opt in.
+        self._content_quote_numeric_tolerance = float(self._config.get(
+            "content_quote_numeric_tolerance", DEFAULTS["content_quote_numeric_tolerance"]))
         self._enable_tool_memory = bool(self._config.get("enable_tool_memory", DEFAULTS["enable_tool_memory"]))
         self._url_index_for_extraction = bool(self._config.get(
             "url_index_for_extraction", DEFAULTS["url_index_for_extraction"]))
