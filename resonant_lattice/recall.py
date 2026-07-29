@@ -207,6 +207,7 @@ class RecallMixin:
         # stays ungated. The blind/HE retriever's search() takes no relevance_margin
         # (vector-only), so fall back gracefully there.
         margin = getattr(self, "_recall_relevance_margin", 0.0) or None
+        ceiling = getattr(self, "_recall_redundancy_ceiling", 0.0) or None
         # Procedural-prefetch cap (default -1 = OFF/legacy). Procedural (tool-use)
         # facts are numerous and, when embedding-similar to the query, can crowd the
         # on-topic CONTENT cluster out of the injected block and burn attention budget.
@@ -216,13 +217,15 @@ class RecallMixin:
         cap = getattr(self, "_recall_procedural_cap", -1)
         capping = cap is not None and cap >= 0
         fetch_limit = (self._recall_limit * 2) if capping else self._recall_limit
+        kw = {}
         if margin:
-            try:
-                results = self._retriever.search(query, limit=fetch_limit,
-                                                 relevance_margin=margin)
-            except TypeError:
-                results = self._retriever.search(query, limit=fetch_limit)
-        else:
+            kw["relevance_margin"] = margin
+        if ceiling:
+            kw["redundancy_ceiling"] = ceiling
+        try:
+            results = self._retriever.search(query, limit=fetch_limit, **kw)
+        except TypeError:
+            # the blind/HE retriever's search() is vector-only and takes neither knob
             results = self._retriever.search(query, limit=fetch_limit)
         if not results:
             return ""

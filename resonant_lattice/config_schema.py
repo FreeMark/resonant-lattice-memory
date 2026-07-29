@@ -629,6 +629,22 @@ CONFIG_SCHEMA = [
                     "tool stays ungated, so the agent can still pull full tool-use procedures on "
                     "demand. -1 = off (no cap, legacy); 0 = no procedural in prefetch; N = keep top-N.",
      "default": -1},
+    {"key": "recall_redundancy_ceiling",
+     "description": "Read-time redundancy gate: while filling a recall, hold back a "
+                    "candidate whose cosine to an ALREADY-CHOSEN result is at or above "
+                    "this, and append it after the rest instead. Relevance ranking alone "
+                    "returns the most on-topic facts, which in a corpus holding many "
+                    "sources per topic means the top of the list is many phrasings of one "
+                    "answer - measured on a clinical corpus, asking about blood in the "
+                    "urine returned five restatements of the same definition at ranks 1-5. "
+                    "This is the NON-DESTRUCTIVE alternative to deduplicating the store: "
+                    "16,432 pairs there sit above similarity_threshold and 65% carry "
+                    "DIFFERENT numbers, so that threshold is a TOPIC threshold, not a "
+                    "duplicate one, and merging would destroy multi-source variation a "
+                    "reference corpus should keep. Nothing is dropped - held-back rows are "
+                    "appended, so a caller asking for k still gets k. Costs stored-vector "
+                    "lookups and dot products, never a model call. 0 = off (default).",
+     "default": 0.0},
     {"key": "recall_relevance_margin",
      "description": "Prefetch precision gate (A6): drop recalled facts scoring more than this below the "
                     "top relevance, so only the on-topic cluster is injected into context (cleaner context, "

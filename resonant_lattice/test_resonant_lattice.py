@@ -2318,6 +2318,75 @@ def test_store_relational_recall_multiword_free_query():
     s.close()
 
 
+def test_store_recall_redundancy_gate_reorders_without_dropping():
+    """A top-k full of one answer's restatements is a READ problem, not a store problem.
+
+    Measured on a clinical corpus: "there's blood in his pee" returned five phrasings of
+    "hematuria means blood in the urine" at ranks 1-5. The destructive fix is to merge
+    those facts; the census says don't -- 16,432 pairs sit above the store's own 0.78
+    similarity_threshold and 65% carry DIFFERENT numbers, so 0.78 is a topic threshold
+    here, not a duplicate one.
+
+    So the gate must do two things and this asserts both: SUPPRESS the near-identical
+    neighbour from the head of the list, and NOT LOSE IT -- held-back rows are appended,
+    so a caller asking for k still gets k.
+    """
+    if not _STORE_OK:
+        print("  SKIP"); return
+    s = _fresh_store()
+    dupes = [
+        "Hematuria means blood in the urine; the owner sees red or pink urine.",
+        "Hematuria means blood in the urine; an owner notices pink or red urine.",
+        "Hematuria means blood in the urine, seen by the owner as reddish urine.",
+    ]
+    distinct = "Struvite uroliths dissolve with an acidifying therapeutic diet."
+    for c in dupes + [distinct]:
+        s.add_or_reinforce_fact(c, _emb(s, c), "general", "x")
+
+    from retrieval import LatticeRetriever
+
+    class _R(LatticeRetriever):
+        def _get_embedding(self, text):     # deterministic, no Ollama
+            return _emb(s, text)
+
+    r = _R(s, "http://unused", "test-embed", min_similarity=0.0)
+    q = "blood in the urine"
+    plain = r.search(q, limit=4)
+    gated = r.search(q, limit=4, redundancy_ceiling=0.95)
+    assert len(gated) == len(plain), (len(gated), len(plain))   # nothing lost
+    assert {h["id"] for h in gated} == {h["id"] for h in plain}, "the gate must not DROP"
+
+    # the near-identical siblings must not all crowd the head of the list
+    def _dupe_run(res):
+        texts = [h["content"] for h in res]
+        return sum(1 for t in texts[:2] if t in dupes)
+    assert _dupe_run(gated) <= _dupe_run(plain), (
+        [h["content"][:40] for h in gated], [h["content"][:40] for h in plain])
+
+    # OFF by default: identical ordering when no ceiling is passed
+    assert [h["id"] for h in r.search(q, limit=4)] == [h["id"] for h in plain]
+    s.close()
+
+
+def test_recall_redundancy_ceiling_defaults_off_and_is_wired():
+    """A knob that is documented but never read reports a safety it does not provide."""
+    schema = _load("config_schema")
+    entry = next((e for e in schema.CONFIG_SCHEMA
+                  if e["key"] == "recall_redundancy_ceiling"), None)
+    assert entry is not None, "config key missing from the schema"
+    assert entry["default"] == 0.0, "must default OFF so existing profiles are unchanged"
+    src = open(os.path.join(PLUGIN_DIR, "__init__.py"), encoding="utf-8").read()
+    assert "_recall_redundancy_ceiling" in src, "provider never reads the key"
+    rec = open(os.path.join(PLUGIN_DIR, "recall.py"), encoding="utf-8").read()
+    assert "redundancy_ceiling" in rec, "prefetch never passes it to search()"
+    ret = open(os.path.join(PLUGIN_DIR, "retrieval.py"), encoding="utf-8").read()
+    i = ret.find("def _drop_redundant")
+    assert i != -1, "the gate is not implemented"
+    # It must APPEND held-back rows, never truncate them away.
+    assert "kept + held" in ret[i:i + 2600], \
+        "held-back rows must be appended, so the gate reorders rather than censors"
+
+
 def test_content_quote_numeric_conflict():
     """A fact must not contradict its own source_quote numerically - and a correct
     DERIVATION must not be mistaken for a contradiction.

@@ -37,6 +37,19 @@ def _significant_tokens(text: str) -> set:
     return out
 
 
+def _cosine(u, v) -> float:
+    """Cosine over two stored embeddings. Both come from semantic_vec, so they are the
+    same model and dimension; a length mismatch means a degraded index and scores 0
+    rather than raising, because a redundancy filter must never break recall."""
+    if not u or not v or len(u) != len(v):
+        return 0.0
+    du = sum(x * x for x in u) ** 0.5
+    dv = sum(x * x for x in v) ** 0.5
+    if du == 0.0 or dv == 0.0:
+        return 0.0
+    return sum(x * y for x, y in zip(u, v)) / (du * dv)
+
+
 def _relevance_tier(score: float) -> str:
     """Coarse, agent-facing contextual-relevance label (A22) - distinct from resonance/strength."""
     if score >= 0.60:
@@ -120,9 +133,49 @@ class LatticeRetriever:
         logger.debug("Embedding fetch failed after retries: %s", last_err)
         return None
 
+    def _drop_redundant(self, scored: List[Dict], ceiling: float, limit: int) -> List[Dict]:
+        """Greedy redundancy filter over an already-ranked list.
+
+        Reads each candidate's STORED embedding (semantic_vec) rather than re-embedding,
+        so this adds SQL lookups and dot products, never a model call. A candidate whose
+        cosine to any already-admitted result is >= ceiling is held back; anything whose
+        embedding is unavailable is admitted unchanged, so a degraded vec index can never
+        cause a fact to silently vanish from recall.
+        """
+        ids = [h["id"] for h in scored[:max(limit * 4, limit)]]
+        if len(ids) < 2:
+            return scored
+        vecs = {}
+        try:
+            # store._lock is an RLock and search() already holds it, so the store's own
+            # tested read-back is safe to re-enter here - no second unpack to keep in
+            # sync with serialize_vector's float32 packing.
+            for fid in ids:
+                v = self.store.get_fact_embedding(fid)
+                if v:
+                    vecs[fid] = v
+        except Exception as e:
+            logger.debug("Redundancy gate: embeddings unavailable (%s); ranking unchanged", e)
+            return scored
+        kept, held, chosen = [], [], []
+        for h in scored:
+            v = vecs.get(h["id"])
+            if v is None or all(_cosine(v, c) < ceiling for c in chosen):
+                kept.append(h)
+                if v is not None:
+                    chosen.append(v)
+            else:
+                held.append(h)
+            if len(kept) >= limit:
+                break
+        # Held-back rows are APPENDED, never discarded: this reorders recall, it does
+        # not censor it, so a caller asking for k still gets k when the corpus has k.
+        return kept + held
+
     def search(self, query: str, limit: int = 8, *,
                keyword_weight: float = 0.25, relevance_margin: "float | None" = None,
-               dormant_floor: "float | None" = None, strong_cue: float = 0.6) -> List[Dict]:
+               dormant_floor: "float | None" = None, strong_cue: float = 0.6,
+               redundancy_ceiling: "float | None" = None) -> List[Dict]:
         """Hybrid search: vector + FTS5 keyword, unified re-rank by CONTEXTUAL RELEVANCE.
 
         Both passes always run (keyword catches exact technical names that embed poorly). Candidates
@@ -269,6 +322,26 @@ class LatticeRetriever:
             if relevance_margin is not None and scored:
                 cutoff = scored[0]["_score"] - float(relevance_margin)
                 scored = [h for h in scored if h["_score"] >= cutoff]
+
+            # REDUNDANCY GATE (opt-in). Relevance ranking alone returns the most
+            # on-topic facts, and in a corpus that deliberately holds many sources on
+            # one topic that means the top of the list is many phrasings of one answer.
+            # Measured on a 6,983-fact clinical corpus: asking "there's blood in his
+            # pee" returned five restatements of "hematuria means blood in the urine"
+            # at ranks 1-5, and five more at 6-10.
+            #
+            # The tempting fix is to MERGE those facts. The census says otherwise:
+            # 16,432 pairs sit above the store's own 0.78 similarity_threshold and 65%
+            # of them carry DIFFERENT numbers, so 0.78 is a TOPIC threshold here, not a
+            # duplicate one - three laboratories' reference intervals are three facts.
+            # Merging is destructive and irreversible; skipping a redundant neighbour at
+            # READ time costs nothing and keeps every source.
+            #
+            # Greedy: walk the ranked list, admit a candidate only when it is below
+            # `redundancy_ceiling` cosine to everything already admitted. Off (None)
+            # preserves the exact previous ordering.
+            if redundancy_ceiling is not None and scored:
+                scored = self._drop_redundant(scored, float(redundancy_ceiling), limit)
 
             final_results: List[Dict] = []
             for hit in scored[:limit]:

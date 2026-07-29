@@ -218,6 +218,11 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         # explicit search tool stays ungated.
         self._recall_procedural_cap = int(
             self._config.get("recall_procedural_cap", DEFAULTS["recall_procedural_cap"]))
+        # Read-time redundancy gate (default 0 = off). The non-destructive answer to a
+        # top-5 full of one answer's restatements; see recall_redundancy_ceiling.
+        self._recall_redundancy_ceiling = float(
+            self._config.get("recall_redundancy_ceiling",
+                             DEFAULTS["recall_redundancy_ceiling"]))
 
         # Near-identity gate for silently merging a new fact into an existing one.
         # The 0.78-0.95 band is left to conflict detection so contradictory updates
