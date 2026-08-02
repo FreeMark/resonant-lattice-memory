@@ -6418,6 +6418,23 @@ def test_extraction_audit_migration_is_registered():
     assert i < j, "call should appear in the migration list, before the definition"
 
 
+def test_release_version_is_consistent_across_init_and_plugin_manifest():
+    """plugin.yaml sat at 1.4.2 across three minor releases because the release
+    ritual bumped only __init__. The manifest is what hermes plugin discovery and
+    the fleet's provenance stamp read, so drift here misreports every deploy.
+    Text-parse both files (importing the package would drag in store deps)."""
+    import re as _re
+    here = os.path.dirname(os.path.abspath(__file__))
+    init_txt = open(os.path.join(here, "__init__.py"), encoding="utf-8").read()
+    yaml_txt = open(os.path.join(here, "plugin.yaml"), encoding="utf-8-sig").read()
+    v_init = _re.search(r'^__version__ = "([^"]+)"', init_txt, _re.M)
+    v_yaml = _re.search(r'^version:\s*"([^"]+)"', yaml_txt, _re.M)
+    assert v_init and v_yaml, "version line missing from __init__.py or plugin.yaml"
+    assert v_init.group(1) == v_yaml.group(1), (
+        "release version drift: __init__.py %s vs plugin.yaml %s"
+        % (v_init.group(1), v_yaml.group(1)))
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = skipped = failed = 0
