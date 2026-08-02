@@ -6418,6 +6418,28 @@ def test_extraction_audit_migration_is_registered():
     assert i < j, "call should appear in the migration list, before the definition"
 
 
+def test_readme_quickstart_count_matches_the_suite():
+    """The README quickstart said 'expect: 140 passed' for three minor releases while
+    the suite grew to 199 -- the second number to go stale by ritual (plugin.yaml was
+    the first). The README's core promise is that an agent can run the suite and check
+    the result against this file, so a wrong expectation actively breaks verification.
+    Only enforceable in a repo checkout: a deployed plugin dir has no README above it."""
+    import re as _re
+    readme = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "README.md")
+    if not os.path.isfile(readme):
+        return
+    txt = open(readme, encoding="utf-8").read()
+    stated = [_re.search(r"expect: (\d+) passed, 0 failed", txt),
+              _re.search(r"\*\*(\d+)-test\*\* unit suite", txt)]
+    assert all(stated), "README no longer states the suite count where the pin expects it"
+    actual = sum(1 for k, v in globals().items()
+                 if k.startswith("test_") and callable(v))
+    for m in stated:
+        assert int(m.group(1)) == actual, (
+            "README states %s tests but the suite defines %d -- update the two README "
+            "numbers with the release" % (m.group(1), actual))
+
+
 def test_release_version_is_consistent_across_init_and_plugin_manifest():
     """plugin.yaml sat at 1.4.2 across three minor releases because the release
     ritual bumped only __init__. The manifest is what hermes plugin discovery and
