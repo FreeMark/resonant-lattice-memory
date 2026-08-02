@@ -27,6 +27,45 @@ ready-made preset profiles (Scholar, Sovereign Vault, Overnight, Low-VRAM, and m
 
 ## What's new
 
+- **v1.7.3 (2026-08-02): portable relations + recall quality.**
+  - **The relation layer ports across domains.** Five silent config gaps made the closed-vocabulary
+    mechanism unusable outside the operational domain it was designed in (a clinical corpus enforced
+    the vocabulary perfectly and still returned `[]`): `relation_subject_kinds` (the built prompt
+    hardcoded "components, machines, services…"), `relation_attribute_predicates` (attribute objects
+    for predicates like `reference_interval` survive strict entity binding), value-preserving
+    attribute objects (no longer collapsed to the matched entity, so a `stage_defined_by` object
+    keeps its numbers), alias substitution scoped to the matched span, and `relation_num_predict`
+    (an uncapped relation call ran to the endpoint default and timed out into a silent empty
+    result). Positional `[[s,r,o]]` triples now also parse. Defaults unchanged — existing profiles
+    build a byte-identical prompt.
+  - **Abbreviation-safe relational queries.** A corpus storing `HE` (hepatic encephalopathy) took
+    "…He never whines." and injected liver-failure triples into a question about pain.
+    `_QUERY_NON_ANCHORS` now drops pronouns/demonstratives/clause-openers as a *final* pass over
+    anchors from every path, with an all-caps escape so the abbreviation itself stays queryable
+    (and common proper nouns — May, Will, Mark — deliberately still anchor).
+  - **A fact can no longer contradict its own quote silently (opt-in).** Attestation verified
+    quote↔transcript, never content↔quote, so `99.5–102.5 °F` sat `attested` on a quote saying
+    `99.8–102.8`. The new check requires a *near miss* and exempts rounding — measured on 6,640
+    quoted facts: the naive rule fires 84 times (mostly legitimate unit derivations), near-miss 14,
+    rounding-exempt 10, with the real contradiction caught at every tolerance. It **marks**
+    `numeric_conflict`, never drops. Default off.
+  - **Read-time redundancy gate (opt-in).** `recall_redundancy_ceiling`: a top-k candidate too
+    cosine-close to an already-chosen result is held back and **appended**, never dropped — the
+    caller still gets k, and the rank-1 answer survived every measured ceiling. Why not dedupe the
+    store: a census found 16,432 pairs at or above the store's own 0.78 `similarity_threshold`
+    with **65% carrying different numbers** — 0.78 is a *topic* threshold on a reference corpus,
+    and merging on it would destroy multi-source variation. Node suite **186 → 198**.
+- **v1.7.2 (2026-07-27): extraction integrity + observability.** A new `extraction_audit` table
+  writes one row per consolidation epoch (attempts, quoteless retries, fact/quote tallies, outcome)
+  outside the write lock — hermes swallows plugin stderr, so this is what makes a deployed retry
+  guard evaluable at all. The quoteless retry now actually *differs* per attempt (names the
+  omission, escalates temperature 0.1/0.45/0.7, capped by `quoteless_max_retries`); measured over a
+  131-block campaign, `no_quote` facts fell **11.6% → 1.4%** of corpus. Abstraction unblocked:
+  `_find_semantic_match(exclude_ids=)` stops a synthesis being deduped against its own inputs, and
+  the abstraction passes take an explicit `embed_endpoint` so an OpenAI-shim reasoning endpoint
+  can't silently insert vector-less abstractions. Also: mechanical `source_ref` recovery from tool
+  results (default off), `think: false` on every reason call, and the FinalizeLock held for the
+  write phase only. Node suite **164 → 186**.
 - **v1.7.1 (2026-07-17): grok aperture polish.** Small surfacing + parity fixes on top of v1.7.0
   (the core changes are documentation-only; hermes runtime behavior is unchanged).
   - **Prefetch clock parity (grok).** The reference hermes provider stamps a `<current_datetime>` on
@@ -65,175 +104,19 @@ ready-made preset profiles (Scholar, Sovereign Vault, Overnight, Low-VRAM, and m
   - MCP surface **16 -> 18 tools** (`rlm_narrative`, `rlm_dream`). Backward-compatible throughout: the
     structured/digest paths are opt-in, so the reference hermes narrative path is unchanged. Node test
     suite **140 -> 146**.
-- **v1.6.9 (2026-07-17): grok narrative spans the whole session.** The session narrative
-  (`summarize_session`) used to see only the last 40 episodes, so granite's `--context-shift` clipped
-  the oldest and a long multi-window grok ingest narrated only its tail (a thin "paused for compact"
-  gist). The grok ingest now builds a hierarchical, born-fact-grounded digest of the *whole* session -
-  per-window born facts (the belief store's own distillation) + an open/decision roll-up + a
-  head/mid/tail spine of user turns - and hands it to `summarize_session` through a new optional
-  `digest=` param that skips the episode cap. No extra LLM calls. A tuned "remembered arc" narrative
-  prompt asks for a throughline, locked decisions, open loops with resumable handles, and closed work
-  in past tense; every stored narrative is ASCII-sanitized (em/en dashes, smart quotes, ellipsis ->
-  ASCII) and the length cap is raised 1500 -> 2200 for the richer structured form. Verified on a real
-  12-window session: the same session went from a 373-char tail-only gist to a 1368-char full-span
-  arc. Backward-compatible - with no `digest` the original episode path is unchanged, so the reference
-  hermes narrative keeps working exactly as before. grok-integration only.
-- **v1.6.8 (2026-07-16): grok re-compact deduplication.** grok's `chat_history.jsonl` is
-  append-only, so compacting the *same* session a second time re-snapshots from turn 1 and the ingest
-  used to re-mine everything the previous compact already processed (wasted compute + near-duplicate
-  facts). `rlm_ingest.py` now keeps a per-session line high-water mark (an `ingest_watermarks` table,
-  keyed on the stable grok session id with the `_HHMMSS` compact suffix stripped) and ingests only
-  the new tail on a later compact. Verified on a live double-compact: 16 windows dropped to 4. The
-  mark advances only on a clean finish, so a crash safely re-processes. grok-integration only.
-- **v1.6.7 (2026-07-16): grok compact/ingest observability.** A new `rlm_watch_ingest.py` (with the
-  `rlm-watch.cmd` launcher) watches a `/compact` -> ingest "memory cycle" to completion and signals
-  when it is safe to continue the conversation. It is buffer-immune: it keys off the `rlm_ingest.py`
-  process plus the live `semantic_facts` count rather than the block-buffered ingest log, whose
-  per-window lines can lag. `rlm_ingest_worker.py` now launches the node ingest with `python -u`, so
-  those log lines stream live instead of flushing only at process exit. grok-integration only.
-- **v1.6.6 (2026-07-15): grok transport stdin fix.** `rlm_grok_conf.run()` now gives the spawned
-  node process `DEVNULL` stdin whenever no `input` is passed, instead of letting it inherit fd 0. In
-  the long-lived MCP server fd 0 is grok's live JSON-RPC pipe; v1.6.4 concurrency made the main read
-  loop read that pipe while a worker's `ssh` (for an input-less call) also inherited it, so the call
-  deadlocked to its timeout and failed open. This deterministically broke `external_rlm_search`
-  `lattice=list` (returned "no lattices" after a 30s hang) and would have stalled `rlm_stats`,
-  `rlm_conflict`, `transfer_knowledge`, and the v1.6.5 prefetch reinforce (90-180s each). One
-  chokepoint fix; named search was unaffected because it already passes `input`. grok-integration only.
-- **v1.6.5 (2026-07-15): grok's per-turn prefetch.** Closes the last gap between the reference
-  in-loop agent (which recalls memory on every turn) and grok (which auto-injects only on the first
-  turn and after compaction). A new `UserPromptSubmit` hook detaches a worker that recalls against
-  the user's actual message and stages a `<resonant_memory>` block; a new `rlm_prefetch` MCP tool
-  (16 total) serves it instantly with no query to formulate, and reinforces the recalled facts only
-  when the agent actually reads it (precompute does not reinforce, use does). The projection is also
-  reshaped into chunk-aligned sections (<=1400 chars, each under its own heading) so grok's own
-  indexer injects and searches whole topics instead of headingless fragments. grok-integration only.
-- **v1.6.4 (2026-07-15): concurrent MCP dispatch.** The grok MCP server now handles each `tools/call`
-  in its own worker thread (bounded by a semaphore, with stdout serialized by a lock), so a blocking
-  node call no longer head-of-line-blocks a parallel tool turn. Fixes the 120s timeouts grok hit when
-  it fired several memory tools at once; in-flight calls are joined on stdin EOF. grok-integration only.
-- **v1.6.3 (2026-07-15): local transport by default.** The grok hooks and MCP server run the node
-  scripts directly when grok is on the RLM machine (the common case, no ssh, no key), and switch to
-  ssh/scp only when `SSH_HOST` is set. Transport is centralized in `rlm_grok_conf.py` (`run` / `push`)
-  so nothing is hardcoded and updating any piece is a plain copy of the published file. grok-integration only.
-- **v1.6.2 (2026-07-15): domain terms become entities.** A new `entity_vocabulary` config key is a
-  high-precision allowlist of domain tool/config/concept names the generic entity patterns miss
-  (single words like `resonance` / `relational`, and identifiers like `rlm_pin`). They are recognized
-  as entities, so they become graph nodes and survive strict relation binding. The snake_case pattern
-  was widened for leading and double underscores (`_run_dream_cycle`, MCP-namespaced tool ids), and
-  those shapes score as unambiguous identifiers. Validated to lift strict recall (edges like
-  `grok uses rlm_pin` and `get_fact uses fact_history` now survive) with zero prose over-generation.
-  Domain-agnostic and backward-compatible (empty vocabulary = prior behaviour).
-- **v1.6.1 (2026-07-15): transcript-source relations.** `relation_extract_from_transcript` (default
-  off) also mines relations from the raw ingest window, not only from consolidated facts, capturing
-  the conversational dependency / decision / usage edges compression flattens away. Raw dialogue is
-  noisier, so this path forces strict entity binding (the mode too aggressive for clean facts is
-  exactly right for noisy transcripts); each triple attaches to the born fact it best matches and
-  merges with the per-fact relations.
-- **v1.6.0 (2026-07-15): domain-configurable relation graph.** The relation layer is fixed at the
-  core so it produces a traversable typed graph for any domain, not just the interpersonal one it
-  shipped with. A closed `relation_vocabulary` constrains both extraction paths (the LLM pass becomes
-  a validated slot-filler), so relations recur into a queryable graph instead of free-form one-offs;
-  `entity_aliases` canonicalizes surface forms into single nodes so multi-hop chains form. The grok
-  integration gains `rlm_relational` (typed graph query) and `rlm_infer` (bounded multi-hop
-  inference). Personal / operational / technical presets are documented. Backward-compatible.
-- **v1.5.4 (2026-07-15): grok's aperture batch.** Four MCP verbs round out the grok tool surface:
-  `rlm_feedback` (a soft resonance nudge between pin and forget), `rlm_inspect` (one fact plus its
-  belief history), `rlm_entity` (walk the entity graph), and `rlm_self_model` (read, or update an
-  allowlisted identity key). The projection also gains a pinned authority block and a contested
-  (unresolved-conflict) quarantine.
-- **v1.5.3 (2026-07-15): grok's read aperture widens.** Four improvements to how the grok agent
-  perceives and maintains its own memory:
-  - **Self-model and narrative in the projection.** The `MEMORY.md` the agent wakes up with now
-    leads with its self-model (identity) and ends with the recent narrative (autobiographical gist),
-    not just a fact list, so it wakes up knowing who it is and what has been happening.
-  - **Reinforce on recall.** `rlm_search` now reinforces the facts it returns (self-lattice only,
-    saturating at a cap), so memories the agent actually uses grow stronger and rise toward the long
-    tier. This is the mechanism that makes *use* drive promotion. External lattices stay read-only.
-  - **`rlm_stats`** reports a health snapshot: fact count, tier distribution, cycle clocks, pins,
-    relations, narratives, and pending conflicts.
-  - **`rlm_conflict`** lets the agent manage contradictions the dream cycle surfaces: list pending
-    conflict groups, resolve one (pick a winner, retire the rest as history), or dismiss a false
-    positive (keep both).
-- **v1.5.2 (2026-07-15): grok can search its own memory and read external domain lattices.** Three
-  new MCP tools extend the grok integration's read side:
-  - **`rlm_search`** runs a live hybrid (vector + keyword) search over the agent's *own* lattice,
-    which is deeper and more relevant than the static top-N projection it wakes up with.
-  - **`external_rlm_search`** searches read-only *domain* lattices (reference corpora from other
-    trained agents) dropped into a node-side folder beside the agent's own DB. Lattices are
-    auto-discovered by filename (no registry), so calling it with `lattice='list'` returns whatever
-    is available. External lattices are opened read-only and can never be modified.
-  - **`transfer_knowledge`** imports selected facts from a domain lattice into the agent's own memory
-    by id (deduped against existing knowledge, provenance-tagged `import:<lattice>:<id>` so borrowed
-    knowledge stays distinct from what the agent learned firsthand).
-
-  All three share one read-only search primitive; every lattice using the same embedder is directly
-  searchable with no re-embedding.
-- **v1.5.1 (2026-07-15): grok ingest reads the current transcript format.** The grok ingest parser
-  was still reading the old flat `type` / `role` / `content` transcript shape, but grok now writes an
-  ACP (Agent Client Protocol) session-update stream (the message text is nested under
-  `params.update.content`). The parser silently matched nothing, so every ingest processed zero turns
-  and the passive learning path (extraction, dreaming, narrative) never ran on real conversation; only
-  the direct `rlm_pin` / `rlm_remember` writes landed. The parser now reads the ACP envelope, merges
-  streaming message chunks into whole turns, and keeps backward compatibility with the flat format.
-- **v1.5.0 (2026-07-15): the grok memory lifecycle is complete.** The out-of-loop grok integration
-  now runs the whole loop, not just read and write:
-  - **Curation.** Two inverse write tools: `rlm_unpin` (drop a fact's `[PRIORITY]` authority while
-    keeping the fact, the inverse of `rlm_pin`) and `rlm_forget` (prune a fact, the inverse of
-    `rlm_remember`). Together they let the agent supersede and curate its own memory, not just
-    accumulate it. A fact is targeted by its content or its id; an ambiguous match returns candidate
-    ids without acting, so a destructive edit is never a fuzzy guess.
-  - **Dreaming.** The ingest driver now runs one full dream cycle after each ingest (per-window
-    consolidation stays fast, then a single post-ingest dream), so the temporal dynamics (decay,
-    tier promotion, prune, conflict detection) actually fire for a grok-only lattice. Pinned
-    authority facts stay exempt from decay and prune.
-  - **Narrative.** A rolling autobiographical paragraph is written per ingest so the agent wakes up
-    with continuity. It runs on a configurable model (`narrative_model` / `narrative_endpoint`), so
-    summarization can be offloaded to a small local model while the reasoning lane stays free.
-  - **Unicode write fix.** Writes are sent as explicit UTF-8, so em-dashes and other non-ASCII
-    characters survive the Windows-to-node hop instead of failing.
-
-  The config template also gains the retention and layer dials, including a note that a read-only
-  recall path needs `initial_resonance` above the promotion threshold for facts to passively reach
-  the long tier.
-- **v1.4.8 (2026-07-15): open-ended extraction categories.** The grok integration's config
-  template (`integrations/grok/node/config.example.yaml`) replaces the fixed category enum in the
-  extraction prompt with an open-ended rule: pick a self-evident, plain-language category, let
-  natural overlap happen, and never drop or distort a fact just because it does not match a fixed
-  label. The category is a hint for recall, not a gate on what gets remembered.
-- **v1.4.7 (2026-07-14): grok memory scope (per-repo or global).** The grok integration's
-  SessionStart projection now takes an `RLM_MEMORY_SCOPE` lever: `workspace` (default, per-repo
-  memory keyed by git origin) or `global` (project the lattice into grok's global memory so it
-  surfaces in every repo, written as a preserved managed block). The integration README gains a
-  "Memory scope" section explaining the origin-keyed model and the trade-offs.
-- **v1.4.6 (2026-07-14): grok can write to the lattice.** The grok integration gains durable
-  memory-write tools, `rlm_pin` (write + pin as `[PRIORITY]` authority) and `rlm_remember` (write a
-  durable fact), through a small dependency-free MCP server that routes the agent's writes into the
-  node lattice (embedded, deduped, provenance-tagged). It is the write-side complement to
-  `memory_search`, and the durable alternative to grok's native `remember`, which only touches the
-  local file and is overwritten each session.
-- **v1.4.5 (2026-07-14): memory for the grok CLI agent.** A new out-of-loop integration
-  ([`integrations/grok/`](integrations/grok/)) gives the xAI `grok` coding agent an RLM memory
-  through grok's own seams: a `PreCompact` hook ingests each session into the lattice, and a
-  `SessionStart` hook projects the lattice into grok's native memory, so the agent wakes up
-  already knowing it (first-turn injection) and can search it on demand (`memory_search`), with
-  RLM as the sole writer. No fork of grok, no plugin API.
-- **v1.4.4 (2026-07-14): operator-hardening.** From an expert-operator review of the config
-  surface: real bug fixes (`detect_policy_conflicts` / `detect_procedural_conflicts` now actually
-  thread from the provider into the store instead of being inert; `infer` hop-floor corrected so
-  `hops=1` means no multi-hop; the six reason-model prompts promoted to first-class config dials
-  sharing one source of truth), plus a structural `<authority_rules>` block that lifts pinned
-  `[PRIORITY RULE]`s into their own section of the recall injection. Unit suite **140/0**.
-- **v1.4.2 (2026-07-12): GPU blind-recall accelerator seam (off by default).** An optional GPU
-  backend for the homomorphic blind-recall scoring: bit-exact parity with the CPU path,
-  order-of-magnitude faster scoring, and fully inert unless enabled.
-- **v1.4.1 (2026-07-11): bounded-RAM blind recall.** Homomorphic recall streams ciphertexts in
-  auto-sized batches instead of loading the whole encrypted corpus at once. On a 4,952-fact
-  corpus the recall working set dropped **5.0 GB to 0.65 GB** (7.7x) with **identical** top-10
-  results.
-- **v1.4.0 (2026-07-11): trained in the open, sealed after the fact.** A lattice trained entirely
-  in plaintext was run through the full encryption stack afterward and sealed, and stayed
-  searchable while encrypted. Added consolidation-debt retries and the `[SYNTHESIZED]` provenance
-  label for facts the agent forms by reflecting on its own memory.
+- **Earlier (one-liners; full detail in the release notes):**
+  - **v1.6.9** grok narrative spans the whole session: hierarchical born-fact digest replaces the tail-40-episode cap.
+  - **v1.6.8** grok re-compact dedup: per-session ingest high-water mark, only the new tail is re-mined.
+  - **v1.6.7** grok compact/ingest observability: `rlm_watch_ingest.py`, unbuffered ingest logging.
+  - **v1.6.6** grok transport stdin fix: input-less node calls no longer swallow the MCP JSON-RPC pipe.
+  - **v1.6.5** grok per-turn prefetch: staged `<resonant_memory>` per user turn, `rlm_prefetch`, reinforce-on-use.
+  - **v1.6.4** concurrent MCP dispatch: per-call worker threads, no head-of-line blocking.
+  - **v1.6.3** local transport by default for the grok hooks; ssh only when `SSH_HOST` is set.
+  - **v1.6.2** `entity_vocabulary`: domain terms become graph entities; snake_case patterns widened.
+  - **v1.6.1** `relation_extract_from_transcript` (default off): mine relations from the raw ingest window.
+  - **v1.6.0** domain-configurable relation graph: closed `relation_vocabulary`, `entity_aliases`, `rlm_relational` + `rlm_infer`.
+  - **v1.5.x** the grok memory lifecycle completes: hybrid search over its own lattice + read-only external domain lattices + `transfer_knowledge`; write/curation verbs (`rlm_pin`/`rlm_unpin`/`rlm_remember`/`rlm_forget`); dreaming + rolling narrative per ingest; `rlm_stats`/`rlm_conflict`/`rlm_feedback`/`rlm_inspect`/`rlm_entity`/`rlm_self_model`; ACP transcript parsing.
+  - **v1.4.x** the grok integration is born (PreCompact ingest + SessionStart projection, out-of-loop, RLM sole writer); operator-hardening (`<authority_rules>`, prompt dials, conflict-detection fixes); GPU blind-recall seam (off by default); bounded-RAM blind recall (5.0 GB -> 0.65 GB on a 4,952-fact corpus); train-in-the-open, seal-after-the-fact.
 
 Full history in the [Releases](https://github.com/FreeMark/resonant-lattice-memory/releases).
 
