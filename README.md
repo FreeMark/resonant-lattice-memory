@@ -52,6 +52,24 @@ ready-made preset profiles (Scholar, Sovereign Vault, Overnight, Low-VRAM, and m
     answered them sat below `max_results`. Candidates are now ranked by overlap with the
     query text before truncation. Structured calls, and queries whose terms match nothing,
     are unaffected. Node suite **198 → 204**.
+  - **Give a deep lattice a real recall budget.** Measured across 26 questions on the FHE
+    corpus, the graph is nowhere near exhausted at the small limits a harness tends to
+    inherit — and it has not saturated even at 60:
+
+    | `limit` | triples returned | mean per question |
+    |---|---|---|
+    | 8 | 113 | 4.3 |
+    | 25 | 317 | **12.2** |
+    | 40 | 452 | 17.4 |
+    | 60 | 632 | 24.3 |
+
+    The difference is an answer, not just volume: *"Which FHE library should I use?"*
+    returns **three** `implemented_in` edges (concrete, concrete-ml, tfhe) at 25 slots and
+    **one** at 8. `tool_handler` already takes `limit` from the caller (default 10), so an
+    agent with context to spare can ask for more today; a per-profile default is the
+    follow-up. **What a bigger budget does not fix:** the count of questions returning *no*
+    relations is **identical (18 of 26 answered) at every limit from 8 to 60** — the
+    remaining empties are an anchoring limit, not a truncation one.
 - **v1.7.3 (2026-08-02): portable relations + recall quality.**
   - **The relation layer ports across domains.** Five silent config gaps made the closed-vocabulary
     mechanism unusable outside the operational domain it was designed in (a clinical corpus enforced

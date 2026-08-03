@@ -2632,13 +2632,19 @@ def test_store_relational_recall_ranks_a_hub_by_the_question():
     assert ("implemented_in", "concrete") in conc, conc
     assert prod != conc, (prod, conc)
 
-    # THE LIMIT, ASSERTED SO IT IS NOT MISTAKEN FOR A CAPABILITY. This is lexical overlap,
-    # not semantics: "Which FHE library should I use?" cannot reach `implemented_in
-    # concrete`, because `fhe` matches every candidate (so it cannot reorder) and `library`
-    # matches none -- the triple says "concrete". Closing that needs embedding the triples,
-    # which is a different change with a different cost.
+    # THE LIMIT, ASSERTED SO IT IS NOT MISTAKEN FOR A CAPABILITY -- and stated precisely,
+    # because the first wording of this overstated it. Ranking is lexical overlap, not
+    # semantics: "Which FHE library should I use?" cannot PROMOTE `implemented_in concrete`,
+    # since `fhe` matches every candidate (so it cannot reorder) and `library` matches none.
+    # It does NOT follow that the triple is unreachable -- on the live corpus it comes back
+    # at rank 3 of 8, and at a 25-slot budget three library edges do. What ranking cannot do
+    # is surface it when the budget is too small to hold it; that is a budget question, not
+    # a ranking one. Here max_results=2 makes the distinction visible.
     lib = top("Which FHE library should I use?")
     assert ("implemented_in", "concrete") not in lib, lib
+    wider = [(r["relation"], r["object"]) for r in
+             s.relational_recall(query="Which FHE library should I use?", max_results=4)]
+    assert ("implemented_in", "concrete") in wider, wider
 
     # Nothing in the query matches any triple -> previous confidence order, untouched.
     plain = [(r["relation"], r["object"]) for r in
