@@ -775,6 +775,10 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         self._store.relation_subject_kinds = self._relation_subject_kinds
         self._store.relation_attribute_predicates = self._relation_attribute_predicates
         self._store.relation_num_predict = self._relation_num_predict
+        # The QUERY path needs the vocabulary too, not just the extraction path: without it
+        # _parse_relational_query cannot tell that a relation it detected is one this corpus
+        # can never contain. See that method for the failure it caused.
+        self._store.relation_vocabulary = self._relation_vocabulary
         mc, dc = self._store.get_cycle_counts()
         self._memory_cycle = mc
         self._dream_cycle_count = dc

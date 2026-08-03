@@ -2556,6 +2556,43 @@ def test_store_relational_query_span_drops_only_the_grammatical_capital():
     print("  span/capital OK: 'Does Charlie'->charlie, 'Is Charlie Brown'->charlie brown")
 
 
+def test_store_relational_query_ignores_a_relation_the_corpus_cannot_contain():
+    """A generic question verb must not filter the graph walk to a predicate with no edges.
+
+    _QUERY_REL_KEYWORDS is a personal-assistant set (has, uses, lives_in, works_at). A
+    domain corpus with a closed relation_vocabulary shares none of it, so "What HAS changed
+    in bootstrapping research?" detected `has` and relational_recall filtered to a predicate
+    with zero edges -- returning nothing while the anchor was a hub with 473 edges. Four of
+    26 recall questions were blanked this way on the FHE corpus, which is why doubling the
+    graph did not move the metric.
+
+    Both directions are asserted: an out-of-vocabulary detection is dropped, and an
+    IN-vocabulary one still filters, because a fix that ignored every detected relation
+    would throw away the constraint that makes a relational query precise."""
+    if not _STORE_OK:
+        print("  SKIP"); return
+    s = _fresh_store()
+    s.relation_vocabulary = ["based_on", "improves_on", "refreshes"]
+
+    # `uses` / `has` are not in this corpus's vocabulary -> must not constrain the walk.
+    for q in ("Which FHE library should I use and why?",
+              "What has changed in bootstrapping research?"):
+        rel, _ = s._parse_relational_query(q)
+        assert rel is None, (q, rel)
+
+    # An in-vocabulary detection must still be honoured.
+    s.relation_vocabulary = ["based_on", "uses"]
+    rel, _ = s._parse_relational_query("Which FHE library should I use and why?")
+    assert rel == "uses", rel
+
+    # No vocabulary configured = legacy behaviour, unchanged.
+    s.relation_vocabulary = None
+    rel, _ = s._parse_relational_query("Which FHE library should I use and why?")
+    assert rel == "uses", rel
+    s.close()
+    print("  query relation vocab OK: out-of-vocab dropped, in-vocab kept, legacy unchanged")
+
+
 def test_store_relational_recall_fuzzy_hrr():
     """Phase 5b: when no triple satisfies ALL slots, the HRR partial-binding probe
     surfaces the closest structural match (graceful fallback), labelled 'hrr'."""

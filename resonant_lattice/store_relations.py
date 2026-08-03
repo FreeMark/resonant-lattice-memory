@@ -922,6 +922,22 @@ class RelationsMixin:
             if pattern.search(query):
                 relation = canonical
                 break
+        # A DETECTED RELATION THE CORPUS CANNOT CONTAIN MUST NOT FILTER THE TRAVERSAL.
+        # _QUERY_REL_KEYWORDS is a generic personal-assistant set (has, uses, lives_in,
+        # works_at ...). A domain corpus with a closed relation_vocabulary shares none of
+        # it, so an ordinary question verb -- "What HAS changed in bootstrapping research?"
+        # -- was detected as `has`, and relational_recall then filtered the walk to a
+        # predicate with zero edges and returned NOTHING. Measured on an FHE corpus:
+        # `bootstrapping` is a hub with 473 edges, relational_recall(subject=...) returned
+        # 8, and the same question through the query path returned 0. Four of 26 recall
+        # questions were blanked this way, which is also why doubling the graph did not
+        # move the metric. Falling back to anchor-only traversal is strictly better than
+        # filtering on a predicate that cannot exist.
+        if relation:
+            vocab = getattr(self, "relation_vocabulary", None)
+            if vocab and relation.strip().lower() not in {
+                    str(v).strip().lower() for v in vocab}:
+                relation = None
         try:
             anchors = list(self._extract_entities(query))
         except Exception:
