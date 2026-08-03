@@ -27,6 +27,31 @@ ready-made preset profiles (Scholar, Sovereign Vault, Overnight, Low-VRAM, and m
 
 ## What's new
 
+- **v1.7.4 (2026-08-03): relation extraction and relational query, both unblocked.** Three
+  silent failures, each found by measuring a live corpus rather than by an error.
+  - **A model that thinks out loud no longer loses every triple.** `_llm_extract_triples`
+    spliced `text[find("[") : rfind("]")+1]` into `json.loads`. A reasoning model emits a
+    *complete* valid array and then keeps talking — trailing prose, or a whole second array
+    after it reconsiders — so the span covered array1 + prose + array2, `json.loads` raised
+    `Extra data`, and the blanket `except` returned `[]` **indistinguishably from "this fact
+    states no relations"**. 8 of 23 measured calls lost everything that way.
+    `first_json_array()` takes the first well-formed array via `raw_decode`, scanning
+    successive `[` candidates because prose can contain one, and keeps `None` (parse
+    failure) distinct from `[]` (nothing here). Re-extracting one corpus: **2,866 → 5,723
+    triples, zero-relation facts 71.8% → 42.1%**, and the graph *densified* rather than
+    dissolving — node recurrence 36.1% → 39.6%, largest component 82.5% → 88.0%.
+  - **A question verb no longer blanks the graph.** `_QUERY_REL_KEYWORDS` is a generic
+    personal-assistant set (`has`, `uses`, `lives_in`, `works_at`); a corpus with a closed
+    `relation_vocabulary` shares none of it, yet a detected match still filtered the walk.
+    "What **has** changed in bootstrapping research?" returned nothing while `bootstrapping`
+    was a hub with 473 edges. An out-of-vocabulary detection is ignored (anchor-only
+    traversal); an in-vocabulary one still filters. The store also never *received*
+    `relation_vocabulary` — the query path could not know its own predicates.
+  - **A hub anchor is ranked by the question, not just by confidence.** Two different
+    questions on a 141-edge anchor returned the *same* triples, while the ones that actually
+    answered them sat below `max_results`. Candidates are now ranked by overlap with the
+    query text before truncation. Structured calls, and queries whose terms match nothing,
+    are unaffected. Node suite **198 → 204**.
 - **v1.7.3 (2026-08-02): portable relations + recall quality.**
   - **The relation layer ports across domains.** Five silent config gaps made the closed-vocabulary
     mechanism unusable outside the operational domain it was designed in (a clinical corpus enforced
@@ -126,7 +151,7 @@ Full history in the [Releases](https://github.com/FreeMark/resonant-lattice-memo
 
 | Path | What it is |
 |---|---|
-| `resonant_lattice/` | The plugin (runtime code, `plugin.yaml`, `recommended_config.yaml`, architecture docs, the **203-test** unit suite, the eval harness). |
+| `resonant_lattice/` | The plugin (runtime code, `plugin.yaml`, `recommended_config.yaml`, architecture docs, the **204-test** unit suite, the eval harness). |
 | `integrations/grok/` | RLM memory for the **xAI `grok` CLI agent**, out-of-loop through grok's own hooks + native memory. See [its README](integrations/grok/README.md). |
 | `tests/` | The behaviour / trust / scale / durability suite, plus the live end-to-end exercise `live_e2e.py`. |
 | `results/` | All test evidence: per-test outputs, metrics (`.jsonl`), model-comparison summaries, and the single-file [`CONSOLIDATED_RESULTS.md`](results/CONSOLIDATED_RESULTS.md). |
@@ -156,7 +181,7 @@ pip install numpy sqlite-vec
 
 **Unit suite (no LLM needed, pure SQLite/HRR substrate, ~seconds):**
 ```bash
-python resonant_lattice/test_resonant_lattice.py     # expect: 203 passed, 0 failed
+python resonant_lattice/test_resonant_lattice.py     # expect: 204 passed, 0 failed
 ```
 
 **Behaviour / trust / scale suite (needs Ollama for embeddings; a few also need a reasoning

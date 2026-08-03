@@ -2593,6 +2593,61 @@ def test_store_relational_query_ignores_a_relation_the_corpus_cannot_contain():
     print("  query relation vocab OK: out-of-vocab dropped, in-vocab kept, legacy unchanged")
 
 
+def test_store_relational_recall_ranks_a_hub_by_the_question():
+    """Two different questions on the same hub anchor must not return the same triples.
+
+    Measured on an FHE corpus: `fhe` carries 141 edges, so with max_results=8 the ordering
+    (graph-tier, then confidence) truncated to a set that had nothing to do with the
+    question -- "Which FHE library should I use?" and "Has anyone shipped FHE in
+    production?" returned an identical six, while the graph held `fhe implemented_in
+    concrete` and `fhe reported_by production deployments` below the cut. The anchor was
+    right and the graph had the answer; only the ranking was blind to the question.
+
+    Also asserts the no-op case, because a scorer that reorders when nothing matches would
+    silently churn every existing result."""
+    if not _STORE_OK:
+        print("  SKIP"); return
+    s = _fresh_store()
+    # Without a vocabulary the sibling guard stays inert (by design), so "should I USE"
+    # detects `uses`, filters the walk to a predicate with no edges, and this test would
+    # measure an empty list instead of the ranking.
+    s.relation_vocabulary = ["based_on", "consumes", "implemented_in", "reported_by"]
+    content = "FHE background"
+    _, fid = s.add_or_reinforce_fact(content, _emb(s, content), "general", "x")
+    triples = [{"subject": "fhe", "relation": "based_on", "object": "ring-lwe",
+                "confidence": 0.99},
+               {"subject": "fhe", "relation": "consumes", "object": "gpu",
+                "confidence": 0.98},
+               {"subject": "fhe", "relation": "implemented_in", "object": "concrete",
+                "confidence": 0.70},
+               {"subject": "fhe", "relation": "reported_by",
+                "object": "production deployments", "confidence": 0.70}]
+    s.store_fact_relations(fid, triples, min_confidence=0.5)
+
+    top = lambda q: [(r["relation"], r["object"]) for r in
+                     s.relational_recall(query=q, max_results=2)]
+    prod = top("Has anyone shipped FHE in a production product?")
+    conc = top("Is FHE implemented in concrete?")
+    assert ("reported_by", "production deployments") in prod, prod
+    assert ("implemented_in", "concrete") in conc, conc
+    assert prod != conc, (prod, conc)
+
+    # THE LIMIT, ASSERTED SO IT IS NOT MISTAKEN FOR A CAPABILITY. This is lexical overlap,
+    # not semantics: "Which FHE library should I use?" cannot reach `implemented_in
+    # concrete`, because `fhe` matches every candidate (so it cannot reorder) and `library`
+    # matches none -- the triple says "concrete". Closing that needs embedding the triples,
+    # which is a different change with a different cost.
+    lib = top("Which FHE library should I use?")
+    assert ("implemented_in", "concrete") not in lib, lib
+
+    # Nothing in the query matches any triple -> previous confidence order, untouched.
+    plain = [(r["relation"], r["object"]) for r in
+             s.relational_recall(subject="fhe", max_results=2)]
+    assert plain == [("based_on", "ring-lwe"), ("consumes", "gpu")], plain
+    s.close()
+    print("  hub ranking OK: same anchor, different question, different (correct) triples")
+
+
 def test_store_relational_recall_fuzzy_hrr():
     """Phase 5b: when no triple satisfies ALL slots, the HRR partial-binding probe
     surfaces the closest structural match (graceful fallback), labelled 'hrr'."""

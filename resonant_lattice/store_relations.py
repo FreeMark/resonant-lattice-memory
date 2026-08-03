@@ -882,12 +882,48 @@ class RelationsMixin:
                 "tier": row["tier"], "match": "graph" if full else "hrr",
                 "score": score,
             })
-        # Exact graph matches first (by confidence), then fuzzy by HRR score.
+        # RANK BY WHAT WAS ASKED BEFORE TRUNCATING. A hub anchor has far more edges than
+        # max_results, and ordering them by confidence alone makes the answer independent of
+        # the question: measured on an FHE corpus, "Which FHE library should I use?" and
+        # "Has anyone shipped FHE in production?" both anchored on `fhe` (141 edges) and
+        # returned the SAME six triples -- while the graph held `fhe implemented_in
+        # concrete/concrete-ml/tfhe` and `fhe reported_by production deployments`, i.e. the
+        # answer to each, ranked below the cut. Overlap with the query text lifts those.
+        # Only applies to the free-text path; a structured subject=/relation= call is
+        # already as specific as the caller wanted, and a query whose terms match nothing
+        # scores every candidate 0 and falls back to the previous order exactly.
+        qtok = self._query_tokens(query) if query else frozenset()
+
+        def relevance(r):
+            if not qtok:
+                return 0
+            hay = ("%s %s %s" % (r.get("subject", ""), r.get("relation", ""),
+                                 r.get("object", ""))).lower()
+            return sum(1 for t in qtok if t in hay)
+
         results.sort(key=lambda r: (
             0 if r["match"] == "graph" else 1,
+            -relevance(r),
             -(r["confidence"] if r["match"] == "graph" else (r["score"] or 0.0)),
         ))
         return results[:max_results]
+
+    # Words that appear in almost any question and would score every triple equally.
+    _QUERY_STOPWORDS = frozenset({
+        "the", "and", "for", "are", "was", "were", "you", "your", "how", "what", "which",
+        "who", "why", "when", "where", "does", "did", "can", "could", "should", "would",
+        "with", "from", "that", "this", "these", "those", "there", "here", "about",
+        "into", "than", "then", "them", "they", "have", "has", "had", "been", "being",
+        "use", "used", "using", "get", "got", "actually", "really", "any", "some", "all",
+        "one", "two", "not", "but", "its", "it's", "i'm", "i've", "need", "want", "make",
+    })
+
+    @classmethod
+    def _query_tokens(cls, query: str) -> frozenset:
+        """Content words of a question, for scoring a triple's relevance to it."""
+        return frozenset(
+            w for w in re.findall(r"[a-z0-9][a-z0-9._-]{2,}", (query or "").lower())
+            if w not in cls._QUERY_STOPWORDS)
 
     @staticmethod
     def _opens_a_sentence(text: str, phrase: str) -> bool:
