@@ -208,6 +208,14 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
         self._similarity_threshold = float(self._config.get("similarity_threshold", DEFAULTS["similarity_threshold"]))
         
         self._recall_limit = int(self._config.get("recall_limit", DEFAULTS["recall_limit"]))
+        # Explicit search tool: how many results come back, and how many candidates are
+        # considered to produce them. These are DIFFERENT numbers and conflating them was
+        # the bug - search() picks its candidates by raw cosine and re-ranks afterwards,
+        # so a hardcoded 10 capped what could be REACHED, not just what was shown.
+        self._search_tool_limit = int(
+            self._config.get("search_tool_limit", DEFAULTS["search_tool_limit"]))
+        self._search_tool_pool_factor = int(
+            self._config.get("search_tool_pool_factor", DEFAULTS["search_tool_pool_factor"]))
         # Prefetch precision gate (A6): inject only the on-topic cluster into context.
         # Applied in _compute_prefetch; the explicit search tool stays ungated.
         self._recall_relevance_margin = float(

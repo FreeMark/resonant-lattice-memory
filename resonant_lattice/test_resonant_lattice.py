@@ -5349,6 +5349,74 @@ def test_store_canonical_tool_dispatch():
         handler._store.close()
 
 
+def test_search_tool_overfetches_its_pool_then_truncates():
+    """The explicit search tool must CONSIDER more than it RETURNS.
+
+    `limit` is not a display cap. search() gathers candidates by raw cosine and only then
+    re-ranks them on relevance (cosine + keyword boost), so a small limit decides what can
+    be REACHED, not merely what is shown. Measured on a 163-fact math lattice: at limit 10
+    a wanted fact was absent from the results entirely, while at 25 it ranked 7th -- and the
+    rows it displaced scored LOWER (0.678 vs 0.700), they were just nearer in raw cosine.
+
+    So this asserts the two numbers stay DIFFERENT: a wide pool is requested, and the caller
+    still receives exactly search_tool_limit rows.
+    """
+    import json
+    import types as _types
+    if "tools.registry" not in sys.modules:
+        _pkg = _types.ModuleType("tools")
+        _reg = _types.ModuleType("tools.registry")
+        _reg.tool_error = lambda m: json.dumps({"error": m})
+        _pkg.registry = _reg
+        sys.modules["tools"] = _pkg
+        sys.modules["tools.registry"] = _reg
+    th = _load("tool_handler")
+    handler = th.ToolHandlerMixin.__new__(th.ToolHandlerMixin)
+    handler._store = _fresh_store()
+    handler._write_enabled = True
+    handler._memory_cycle = 1
+    seen = {}
+
+    class _SpyRetriever:
+        def search(self, query, limit=8, **kw):
+            seen["limit"] = limit
+            # more rows than the tool may return, so truncation is observable
+            return [{"id": i, "content": "fact %d" % i, "category": "general",
+                     "relevance": 1.0 - i / 1000.0} for i in range(limit)]
+
+    handler._retriever = _SpyRetriever()
+    handler._search_tool_limit = 10
+    handler._search_tool_pool_factor = 4
+    # These live on sibling mixins the bare ToolHandlerMixin does not carry; conflict
+    # containment and reinforcement are covered elsewhere and are not what this asserts.
+    handler._quarantine_conflicts = lambda res: (res, {})
+    handler._apply_recall_reinforcement = lambda res: None
+    try:
+        out = json.loads(handler.handle_tool_call(
+            "lattice_store", {"action": "search", "query": "anything"}))
+        assert seen["limit"] >= 40, "pool was not over-fetched: %r" % seen
+        assert out["count"] == 10, out["count"]
+        assert len(out["results"]) == 10, len(out["results"])
+
+        # factor 1 is the documented opt-out: pool == limit, legacy exact-k behaviour.
+        handler._search_tool_pool_factor = 1
+        handler._search_tool_limit = 5
+        out = json.loads(handler.handle_tool_call(
+            "lattice_store", {"action": "search", "query": "anything"}))
+        assert seen["limit"] == 5, seen
+        assert out["count"] == 5, out
+
+        # A provider built before these attributes existed must still work.
+        del handler._search_tool_limit
+        del handler._search_tool_pool_factor
+        out = json.loads(handler.handle_tool_call(
+            "lattice_store", {"action": "search", "query": "anything"}))
+        assert out["count"] == 10, out
+        assert seen["limit"] >= 40, seen
+    finally:
+        handler._store.close()
+
+
 def test_store_canonical_missing_list_and_review():
     s = _fresh_store()
     try:

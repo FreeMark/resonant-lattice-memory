@@ -183,7 +183,19 @@ class ToolHandlerMixin:
                 query = args.get("query", "")
                 if not query:
                     return tool_error("Missing required parameter: query")
-                results = self._retriever.search(query, limit=10)
+                # OVER-FETCH, RE-RANK, THEN TRUNCATE. `limit` is not a display cap:
+                # search() gathers its candidates by RAW COSINE and only afterwards scores
+                # them on relevance (cosine + keyword boost), so a small limit decides what
+                # can be REACHED. Measured on a 163-fact math lattice: at limit 10 a wanted
+                # fact was absent from the results entirely, while at 25 it ranked 7th - and
+                # the rows it displaced scored LOWER (0.678 vs 0.700). They had simply been
+                # nearer in raw cosine. Fetching a wider pool and cutting back to the same
+                # number returns BETTER facts at identical context cost.
+                limit = max(1, getattr(self, "_search_tool_limit", 10))
+                pool = max(limit, limit * max(1, getattr(self, "_search_tool_pool_factor", 4)))
+                if getattr(self, "_search_tool_pool_factor", 4) > 1:
+                    pool = max(pool, 40)
+                results = self._retriever.search(query, limit=pool)[:limit]
                 # Conflict CONTAINMENT (the explicit search surface is contained too,
                 # not just autonomous prefetch): withhold high-stakes unresolved-conflict
                 # unpinned values and return only the conflict metadata, so an agent that

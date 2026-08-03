@@ -619,6 +619,25 @@ CONFIG_SCHEMA = [
     # above (Hebbian block) - do NOT re-add them here or they double-list in the
     # `hermes memory setup` wizard. Only genuinely-new keys belong below.
     {"key": "recall_limit", "description": "Max facts considered per recall", "default": 300},
+    {"key": "search_tool_limit",
+     "description": "How many results the EXPLICIT search tool returns. Was hardcoded to 10, "
+                    "and that is the surface an agent uses when it deliberately goes looking "
+                    "for something, so on a large corpus it was the binding constraint. The "
+                    "fix is not merely about showing more: search() gathers candidates by RAW "
+                    "COSINE and only then re-ranks by relevance (cosine + keyword boost), so "
+                    "the limit caps the POOL, not just the display. Measured on a 163-fact "
+                    "math lattice: at 10 a wanted fact was absent entirely, at 25 it ranked "
+                    "7th, and the entries it displaced scored LOWER (0.678 vs 0.700). A "
+                    "keyword-boosted fact outside the k nearest by cosine never enters the "
+                    "pool to be re-ranked at all.",
+     "default": 10},
+    {"key": "search_tool_pool_factor",
+     "description": "Candidate over-fetch for the explicit search tool: the pool is "
+                    "search_tool_limit * this (floor 40), re-ranked, then truncated back to "
+                    "search_tool_limit. Mirrors the over-fetch _compute_prefetch already does. "
+                    "Raising it improves WHICH facts come back without returning more of them, "
+                    "so it costs no extra context. 1 = off (legacy exact-k behaviour).",
+     "default": 4},
     {"key": "recall_procedural_cap",
      "description": "Procedural-prefetch cap: keep at most N procedural (tool-use) facts in the "
                     "injected recall block, choosing the most relevant (candidates are over-fetched "
