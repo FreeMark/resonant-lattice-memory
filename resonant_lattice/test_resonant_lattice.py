@@ -2520,6 +2520,42 @@ def test_store_relational_query_pronoun_does_not_bind_to_an_abbreviation():
     s.close()
 
 
+def test_store_relational_query_span_drops_only_the_grammatical_capital():
+    """A sentence-opening aux/question word must not be glued onto the name after it.
+
+    "Does Charlie have it?" produced the anchor `does charlie` -- both words are
+    capitalized, so the multi-word-span pass took them as one entity, and it also marked
+    `charlie` as already-seen so the single-token pass could not recover the real name.
+    The existing Acme Robotics test could not catch this: its query opens with a
+    lowercase "where", so the span sits mid-sentence and the sentence-initial path is
+    never exercised.
+
+    Both directions are asserted, because a strip that runs too far is the obvious way to
+    "fix" this and would quietly cost real multi-word names."""
+    if not _STORE_OK:
+        print("  SKIP"); return
+    s = _fresh_store()
+
+    # The grammatical capital goes; the name survives as its own anchor.
+    _, a = s._parse_relational_query("Does Charlie have it?")
+    assert "charlie" in a and "does charlie" not in a, a
+
+    # The strip is BOUNDED: it eats leading stopwords, never the name's own words.
+    _, a = s._parse_relational_query("Is Charlie Brown hurting?")
+    assert "charlie brown" in a, a
+    assert not any(x.startswith("is ") for x in a), a
+
+    # A real multi-word entity OPENING the query keeps both words.
+    _, a = s._parse_relational_query("Acme Robotics is located where?")
+    assert "acme robotics" in a, a
+
+    # Mid-sentence spans are untouched by the sentence-initial rule.
+    _, a = s._parse_relational_query("where is Acme Robotics located?")
+    assert "acme robotics" in a, a
+    s.close()
+    print("  span/capital OK: 'Does Charlie'->charlie, 'Is Charlie Brown'->charlie brown")
+
+
 def test_store_relational_recall_fuzzy_hrr():
     """Phase 5b: when no triple satisfies ALL slots, the HRR partial-binding probe
     surfaces the closest structural match (graceful fallback), labelled 'hrr'."""
@@ -3946,6 +3982,79 @@ def test_relation_llm_accepts_positional_triples():
     key = lambda ts: [(t["subject"], t["relation"], t["object"]) for t in ts]
     assert key(got["positional"]) == key(got["dict"]), got
     print("  positional triples OK: [[s,r,o]] parses identically to {subject,...}")
+
+
+def test_relation_llm_survives_model_thinking_out_loud():
+    """A complete array followed by MORE TEXT must not lose every triple.
+
+    Field finding (fhe corpus, 2026-08-03): the model emits a valid array, then keeps
+    reasoning in prose ("Wait, let me re-examine the text more carefully...") and often
+    emits a SECOND array. The old parser spliced find("[")..rfind("]"), which spans
+    array1 + prose + array2, so json.loads raised and the blanket except returned [] --
+    silently, with no stderr, indistinguishable from "this fact states no relations".
+    8 of 23 measured calls lost everything this way; replaying 12 saved responses,
+    fixing it took 23 triples/7 facts to 45 triples/11 facts.
+
+    The empty case is part of the contract, not a footnote: `[]` is the model answering
+    "nothing here" and must stay 0 triples, NOT be reported as a parse failure."""
+    import json
+    try:
+        rel = _load("store_relations")
+        absm = _load("store_abstraction")
+        common = _load("store_common")
+    except Exception as e:
+        print(f"  SKIP thinking-out-loud: {e}"); return
+
+    # None vs [] must stay distinguishable at the helper level -- collapsing them is what
+    # made the original bug undetectable.
+    assert common.first_json_array("no array here at all") is None
+    assert common.first_json_array("[]") == []
+    assert common.first_json_array("") is None
+
+    class _S(rel.RelationsMixin, absm.AbstractionMixin):
+        def _extract_entities(self, text):
+            return ["ckks"]
+
+    s = _S()
+    good = '[{"subject":"ckks","relation":"based_on","object":"rlwe"}]'
+    cases = {
+        "two_arrays": good + '\n\nWait, let me re-examine the text more carefully.\n\n'
+                      '[{"subject":"ckks","relation":"based_on","object":"lwe"}]',
+        "trailing_prose_with_bracket": good + '\n\nNote: see [1] for the reduction.',
+        "preamble_bracket": 'Looking at [the text] I extract:\n' + good,
+        "truncated_second": good + '\n\nActually, reconsidering:\n[{"subject":"ckks",',
+        "empty": '[]',
+    }
+    expected = {"two_arrays": 1, "trailing_prose_with_bracket": 1, "preamble_bracket": 1,
+                "truncated_second": 1, "empty": 0}
+
+    class _Resp:
+        def __init__(self, body):
+            self._b = body.encode()
+
+        def read(self):
+            return self._b
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    real_open = rel.urllib.request.urlopen
+    try:
+        for name, raw in cases.items():
+            rel.urllib.request.urlopen = lambda req, timeout=None, _r=raw: _Resp(
+                json.dumps({"response": _r}))
+            out = s._llm_extract_triples("CKKS is based on RLWE.", "m", "http://x",
+                                         entities=["ckks"], vocabulary=["based_on"])
+            assert len(out) == expected[name], (name, out)
+            if expected[name]:
+                # the FIRST array is the answer taken, not the reconsidered one
+                assert out[0]["object"] == "rlwe", (name, out)
+    finally:
+        rel.urllib.request.urlopen = real_open
+    print("  thinking-out-loud OK: trailing prose / second array / [] all handled")
 
 
 def test_relation_attribute_predicates_extend_exempt_set():

@@ -19,6 +19,7 @@ in store.py so importing the store still fails (and the store tests still skip)
 when sqlite-vec is unavailable.
 """
 
+import json
 import logging
 import os
 import struct
@@ -129,3 +130,52 @@ except Exception as e:
 
 def serialize_vector(vector: List[float]) -> bytes:
     return struct.pack(f"{len(vector)}f", *vector)
+
+
+def first_json_array(text: str):
+    """The first well-formed JSON array in ``text``, ignoring anything after it.
+
+    WHY THIS EXISTS. Callers used to splice ``text[text.find("[") : text.rfind("]") + 1]``
+    and hand that to ``json.loads``. A reasoning model reliably emits a COMPLETE valid
+    array and then keeps talking -- trailing prose, or a whole SECOND array after it
+    reconsiders ("Wait, let me re-examine the text more carefully..."). The span then covers
+    array1 + prose + array2, ``json.loads`` raises ``Extra data``, and in
+    ``_llm_extract_triples`` the blanket ``except`` turned that into ``[]`` -- non-fatal, no
+    stderr, and INDISTINGUISHABLE FROM "this fact states no relations". Trailing prose
+    containing a bare ``]`` breaks the span identically with only one array present.
+
+    Measured on the fhe corpus 2026-08-03: of 23 relation calls, 8 lost every triple this
+    way. Replaying 12 saved responses, first-array recovered 45 triples across 11/12 facts
+    where the span logic recovered 23 across 7/12 -- +22 triples, no regressions.
+
+    ``raw_decode`` stops at the end of the first valid value, so this is immune both to the
+    trailing prose and to a second array truncated by a ``num_predict`` cap.
+
+    Returns the parsed list, or ``None`` when no well-formed array is present. ``None`` and
+    ``[]`` are DIFFERENT ANSWERS and callers must keep them apart: ``[]`` is the model
+    saying "nothing here", ``None`` is a parse failure. Collapsing the two is exactly what
+    kept the original bug invisible for the life of the corpus.
+    """
+    if not text:
+        return None
+    decoder = json.JSONDecoder()
+    fallback = None
+    i = text.find("[")
+    while i != -1:
+        try:
+            value, end = decoder.raw_decode(text[i:])
+        except ValueError:
+            # Prose can contain a bracket ("see [1]"), so one failure is not the end --
+            # step to the next candidate instead of giving up on the whole response.
+            i = text.find("[", i + 1)
+            continue
+        if isinstance(value, list):
+            # Prefer an array that actually looks like records; keep the first valid list
+            # (which may legitimately be empty) as the fallback answer.
+            if value and any(isinstance(x, dict) or
+                             (isinstance(x, (list, tuple)) and len(x) == 3) for x in value):
+                return value
+            if fallback is None:
+                fallback = value
+        i = text.find("[", i + end)
+    return fallback

@@ -20,7 +20,7 @@ import urllib.request
 from reason_gate import reason_slot
 from typing import Dict, List, Optional, Tuple
 
-from store_common import hrr, _HRR_AVAILABLE
+from store_common import hrr, _HRR_AVAILABLE, first_json_array
 
 logger = logging.getLogger(__name__)
 
@@ -461,9 +461,15 @@ class RelationsMixin:
             with reason_slot(), urllib.request.urlopen(req, timeout=300.0) as response:
                 raw = json.loads(response.read().decode("utf-8")).get("response", "[]")
             cleaned = self._clean_llm_json(raw)
-            start_idx, end_idx = cleaned.find("["), cleaned.rfind("]")
-            parsed = json.loads(cleaned[start_idx:end_idx + 1]
-                                if start_idx != -1 and end_idx != -1 else cleaned)
+            # TAKE THE FIRST WELL-FORMED ARRAY, not find("[")..rfind("]"). The model emits a
+            # complete array and then keeps thinking out loud, often emitting a second one;
+            # the old span covered both plus the prose between them, so json.loads raised
+            # and the except below silently returned [] -- losing every triple for that
+            # fact. Measured: 8 of 23 calls on the fhe corpus. See first_json_array().
+            parsed = first_json_array(cleaned)
+            if parsed is None:
+                logger.debug("LLM triple extraction: no well-formed JSON array in response")
+                return []
         except Exception as e:
             logger.debug("LLM triple extraction failed (non-fatal): %s", e)
             return []
@@ -883,6 +889,24 @@ class RelationsMixin:
         ))
         return results[:max_results]
 
+    @staticmethod
+    def _opens_a_sentence(text: str, phrase: str) -> bool:
+        """Does ``phrase`` occur in ``text`` at the start of the text or of a sentence?
+
+        Capitalisation only carries information away from a sentence boundary: the `Does`
+        in "Does Charlie have it?" is capitalised by grammar, not because it names
+        anything. Any occurrence counts - a phrase that opens a sentence anywhere in the
+        query is grammatically capitalised there."""
+        low, i = text.lower(), text.lower().find(phrase)
+        while i != -1:
+            j = i - 1
+            while j >= 0 and text[j].isspace():
+                j -= 1
+            if j < 0 or text[j] in ".!?":
+                return True
+            i = low.find(phrase, i + 1)
+        return False
+
     def _parse_relational_query(self, query: str) -> Tuple[Optional[str], List[str]]:
         """Best-effort parse of a free-text relational question (Phase 5b).
 
@@ -941,7 +965,29 @@ class RelationsMixin:
             caps = {m.lower() for m in re.findall(r"\b[A-Z]{2,}\b", query)}
         else:
             caps = set()
-        return relation, [a for a in anchors
+
+        # (3a) A multi-word anchor that OPENS A SENTENCE loses its leading grammatical
+        # capitals: "Does Charlie have it?" yielded the anchor `does charlie`, gluing an
+        # auxiliary onto the name. Like the stoplist above this runs over anchors from
+        # EVERY path, because `_extract_entities` returns that same span itself - fixing
+        # only the capitalized-span fallback left `does charlie` arriving by the other
+        # route, which is how the first attempt at this produced BOTH anchors.
+        # The strip is bounded to leading stopwords, so "Is Charlie Brown hurting?"
+        # keeps `charlie brown`.
+        normalised: List[str] = []
+        for a in anchors:
+            words = a.split()
+            if len(words) > 1 and words[0] in _QUERY_NON_ANCHORS \
+                    and self._opens_a_sentence(query, a):
+                while words and words[0] in _QUERY_NON_ANCHORS:
+                    words.pop(0)
+            if not words:
+                continue
+            cand = " ".join(words)
+            if cand not in normalised:
+                normalised.append(cand)
+
+        return relation, [a for a in normalised
                           if a not in _QUERY_NON_ANCHORS or a in caps]
 
     # ====================== TRANSITIVE INFERENCE (Phase 5c) ======================
