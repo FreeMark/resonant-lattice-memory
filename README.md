@@ -169,7 +169,7 @@ Full history in the [Releases](https://github.com/FreeMark/resonant-lattice-memo
 
 | Path | What it is |
 |---|---|
-| `resonant_lattice/` | The plugin (runtime code, `plugin.yaml`, `recommended_config.yaml`, architecture docs, the **208-test** unit suite, the eval harness). |
+| `resonant_lattice/` | The plugin (runtime code, `plugin.yaml`, `recommended_config.yaml`, architecture docs, the **209-test** unit suite, the eval harness). |
 | `integrations/grok/` | RLM memory for the **xAI `grok` CLI agent**, out-of-loop through grok's own hooks + native memory. See [its README](integrations/grok/README.md). |
 | `tests/` | The behaviour / trust / scale / durability suite, plus the live end-to-end exercise `live_e2e.py`. |
 | `results/` | All test evidence: per-test outputs, metrics (`.jsonl`), model-comparison summaries, and the single-file [`CONSOLIDATED_RESULTS.md`](results/CONSOLIDATED_RESULTS.md). |
@@ -199,7 +199,7 @@ pip install numpy sqlite-vec
 
 **Unit suite (no LLM needed, pure SQLite/HRR substrate, ~seconds):**
 ```bash
-python resonant_lattice/test_resonant_lattice.py     # expect: 208 passed, 0 failed
+python resonant_lattice/test_resonant_lattice.py     # expect: 209 passed, 0 failed
 ```
 
 **Behaviour / trust / scale suite (needs Ollama for embeddings; a few also need a reasoning

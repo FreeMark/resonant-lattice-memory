@@ -809,6 +809,8 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
             freshness_halflife=self._freshness_halflife_cycles,   # Phase 2 ranking nudge
             embed_timeout=self._embed_timeout,
             embed_keep_alive=self._embed_keep_alive,
+            rank_fusion_k=float(self._config.get(     # 0 = off; orders by fused rank when set
+                "rank_fusion_k", DEFAULTS["rank_fusion_k"])),
         )
         # Tier-1 blind (collaborator): when encryption_mode=blind, BlindTier owns the HE
         # recall/HRR/maint clients, the BlindWriters, and the AEAD entity store, plus the reconcile

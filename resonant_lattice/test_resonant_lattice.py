@@ -5451,6 +5451,89 @@ def test_verbatim_block_differing_blocks_the_near_identity_merge():
         s2.close()
 
 
+def test_rank_fusion_lets_a_keyword_only_hit_outrank_vector_hits():
+    """A keyword-only hit must be able to WIN, and under score fusion it structurally cannot.
+
+    relevance = base + boost, where a keyword-only hit gets base = min_similarity and at most
+    keyword_weight of boost. On a profile with min_similarity 0.30 and keyword_weight 0.25 its
+    ceiling is 0.55, while ordinary vector hits score ~0.77 -- so no keyword match, however
+    perfect, can outrank a mediocre vector match. The two channels are not on comparable
+    scales and adding them pretends they are.
+
+    MEASURED: a wanted fact sat at cosine rank 197 of 34,474 while the keyword pass ranked it
+    20th. Fixing the keyword pass made it RETRIEVED and it still never appeared, because
+    fusion then scored it 0.44 against ~0.77 and dropped it every time.
+
+    RRF compares POSITIONS, so 1st-by-keyword competes with 1st-by-vector. Vectors here are
+    constructed with exact cosines rather than the pseudo-random helper, so the vector
+    ordering is known and the assertion cannot pass by luck. Off (k=0) must reproduce today's
+    ordering exactly -- asserted in the same test so the default is pinned.
+    """
+    import math
+    s = _fresh_store()
+    try:
+        dim = s.vector_dim
+
+        def vec(c, axis):
+            """Unit vector at exactly cosine c from the query vector e0.
+
+            Each candidate gets its OWN orthogonal second axis, so cos(v_i, v_j) = c_i*c_j
+            and the decoys stay far apart from each other. Sharing one axis puts them all
+            in a single plane at ~0.99 to one another, and add_or_reinforce_fact then
+            correctly MERGES them - which silently collapses the fixture to two rows.
+            """
+            v = [0.0] * dim
+            v[0] = c
+            v[axis] = math.sqrt(max(0.0, 1.0 - c * c))
+            return v
+
+        q_vec = vec(1.0, 1)
+        # Decoys embed close to the query but share no significant words with it.
+        decoys = [("Alpha subsystem telemetry buffers flush on a schedule.", 0.90, 1),
+                  ("Beta subsystem telemetry buffers rotate their journals.", 0.85, 2),
+                  ("Gamma subsystem telemetry buffers compress old segments.", 0.80, 3)]
+        ids = {}
+        for text, c, axis in decoys:
+            _a, fid = s.add_or_reinforce_fact(text, vec(c, axis), entities=[])
+            ids[text.split()[0]] = fid
+        # The target is lexically perfect for the query and orthogonal to it in vector space,
+        # so the vector pass cannot reach it at all: only the keyword channel can.
+        target_text = ("Rescaling divides a ciphertext by the scaling factor to control "
+                       "noise growth after multiplication.")
+        _a, target_id = s.add_or_reinforce_fact(target_text, vec(0.0, 4), entities=[])
+        assert len({target_id, *ids.values()}) == 4, "fixture collapsed: facts merged"
+
+        query = "rescaling ciphertext scaling factor noise growth multiplication"
+
+        from retrieval import LatticeRetriever
+
+        class _R(LatticeRetriever):
+            def _get_embedding(self, t):
+                return q_vec
+
+        def order(k):
+            r = _R(s, "http://x", "nomic", rank_fusion_k=k)
+            return [h["id"] for h in r.search(query, limit=10)]
+
+        off = order(0.0)
+        on = order(60.0)
+
+        assert target_id in off, "premise broken: keyword pass did not retrieve the target"
+        # OFF: every vector hit outranks it, because 0.55 < 0.80.
+        assert off.index(target_id) == len(off) - 1, (
+            "under score fusion the keyword-only hit should sink to last, got %r" % (off,))
+        # ON: it must beat the weaker vector hits (2nd and 3rd by cosine).
+        assert on.index(target_id) < on.index(ids["Beta"]), (
+            "rank fusion did not lift the keyword-only hit above the 2nd vector hit: %r" % (on,))
+        assert on.index(target_id) < on.index(ids["Gamma"]), on
+        # And k=0 must be exactly today's ordering: relevance descending.
+        assert off == sorted(off, key=lambda i: -(0.90 if i == ids["Alpha"] else
+                                                  0.85 if i == ids["Beta"] else
+                                                  0.80 if i == ids["Gamma"] else 0.0)), off
+    finally:
+        s.close()
+
+
 def test_keyword_channel_fires_on_a_natural_language_question():
     """The hybrid's FTS half must contribute on a QUESTION, not only on an exact string.
 

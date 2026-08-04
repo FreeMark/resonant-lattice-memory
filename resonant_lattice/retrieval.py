@@ -70,7 +70,8 @@ class LatticeRetriever:
 
     def __init__(self, store: LatticeStore, ollama_endpoint: str, embed_model: str,
                  min_similarity: float = 0.30, freshness_halflife: float = 0.0,
-                 embed_timeout: float = 30.0, embed_keep_alive: str = "10m"):
+                 embed_timeout: float = 30.0, embed_keep_alive: str = "10m",
+                 rank_fusion_k: float = 0.0):
         self.store = store
         self.ollama_endpoint = ollama_endpoint
         self.embed_model = embed_model
@@ -90,6 +91,14 @@ class LatticeRetriever:
         # disables the nudge entirely (pure similarity ranking). Cycle-driven -
         # read from last_confirmed_cycle vs the meta memory_cycle, never wall-clock.
         self.freshness_halflife = float(freshness_halflife)
+        # Reciprocal rank fusion constant. 0 = OFF, which is the ordering every profile
+        # has today. When set (60 is the paper's value and the usual default), results are
+        # ordered by fused RANK across the vector and keyword channels instead of by the
+        # additive relevance score - because that score cannot rank a keyword-only hit at
+        # all: it is floored at min_similarity and can gain at most keyword_weight, a
+        # ceiling below what ordinary vector hits already score. `_score` itself is
+        # untouched, so tiers, relevance_margin and the redundancy gate are unaffected.
+        self.rank_fusion_k = float(rank_fusion_k)
 
     @staticmethod
     def _freshness_penalty(staleness: float, halflife: float,
@@ -199,6 +208,14 @@ class LatticeRetriever:
         # ── All SQL work inside the lock ──────────────────────────────
         with self.store._lock:
             results_dict: Dict[int, Dict] = {}
+            # Each channel's OWN ranking, kept for reciprocal-rank fusion. Recorded even
+            # when fusion is off: it costs two dict writes and makes the axis observable.
+            vec_rank: Dict[int, int] = {}
+            fts_rank: Dict[int, int] = {}
+            # 0 = off, preserving the exact ordering every existing profile has today.
+            # 60 is the constant from the original RRF paper and the usual default; it is
+            # deliberately large so that differences deep in a list stay small.
+            rank_fusion_k = float(getattr(self, "rank_fusion_k", 0) or 0)
 
             # 1. Primary: Vector Search
             if vec_bytes:
@@ -220,6 +237,7 @@ class LatticeRetriever:
                         if row["distance"] is not None and row["distance"] > max_dist:
                             continue  # below recall floor - k-NN filler, not a match
                         results_dict[row["id"]] = dict(row)
+                        vec_rank.setdefault(row["id"], len(vec_rank) + 1)
                 except Exception as e:
                     logger.error("Vector search failed: %s", e)
 
@@ -292,6 +310,7 @@ class LatticeRetriever:
 
                     for row in fts_rows:
                         fid = row["id"]
+                        fts_rank.setdefault(fid, len(fts_rank) + 1)
                         if fid not in results_dict:
                             results_dict[fid] = dict(row)
 
@@ -331,10 +350,36 @@ class LatticeRetriever:
                     if f_sig:
                         boost = float(keyword_weight) * (len(q_sig & f_sig) / len(q_sig))
                 r["_score"] = base + boost
+                # Reciprocal rank fusion, as an ORDERING only. `_score` above stays exactly
+                # as it was: the tier labels, relevance_margin and the redundancy gate all
+                # read it, and it is the only ABSOLUTE signal in the system - the sourdough
+                # sentinel is caught precisely because its best hit scores 0.52, below the
+                # 0.75 gate. Set-relative schemes (min-max, z-score) would map that same
+                # hit to 1.0 and destroy the distinction, which is why they are not used
+                # here despite producing a tidier-looking number.
+                #
+                # WHAT THIS FIXES. `_score` cannot rank a keyword-only hit at all: such a
+                # hit is floored at min_similarity and can gain at most keyword_weight, so
+                # on a profile with min_similarity 0.30 its ceiling is 0.55 while ordinary
+                # vector hits score ~0.77. Measured: the one question whose answer the
+                # vector pass misses (cosine rank 197 of 34,474) is found by the keyword
+                # pass at rank 20, scores 0.44, and is discarded every time. RRF compares
+                # POSITIONS instead of scores, so "20th by keyword" can beat "3rd by
+                # vector" - which is the entire reason two channels are run.
+                fid_ = r.get("id")
+                r["_rrf"] = ((1.0 / (rank_fusion_k + vec_rank[fid_]) if fid_ in vec_rank else 0.0)
+                             + (1.0 / (rank_fusion_k + fts_rank[fid_]) if fid_ in fts_rank else 0.0))
                 scored.append(r)
             # Two-axis ranking: contextual relevance first, resonance (established strength) tiebreak.
-            scored.sort(key=lambda h: (h["_score"], float(h.get("resonance_count") or 0.0)),
-                        reverse=True)
+            # With fusion enabled the ORDER comes from the fused rank instead, relevance falling
+            # back to a tiebreak; every downstream consumer still reads the same `_score`.
+            if rank_fusion_k > 0:
+                scored.sort(key=lambda h: (h["_rrf"], h["_score"],
+                                           float(h.get("resonance_count") or 0.0)),
+                            reverse=True)
+            else:
+                scored.sort(key=lambda h: (h["_score"], float(h.get("resonance_count") or 0.0)),
+                            reverse=True)
             # Buried-but-pluckable (P2b): a DORMANT fact (resonance below dormant_floor - decayed,
             # long un-recalled) is withheld from normal recall UNLESS a STRONG contextual cue
             # (score >= strong_cue) resurfaces it - recognition vs recall, the "intentional

@@ -165,6 +165,23 @@ CONFIG_SCHEMA = [
                     "not silently merge into the stale row). Prefer raising similarity_threshold "
                     "if you want broader merge behavior, not lowering reinforce alone.",
      "default": 0.95},
+    {"key": "rank_fusion_k",
+     "description": "Reciprocal rank fusion constant for hybrid search. 0 = OFF (results are "
+                    "ordered by the additive relevance score, the behaviour every profile has "
+                    "today). When set - 60 is the original paper's value and the usual default - "
+                    "results are ORDERED by fused rank across the vector and keyword channels, "
+                    "while the relevance score itself is untouched, so relevance tiers, "
+                    "relevance_margin and the redundancy gate all keep reading the same absolute "
+                    "number. Fixes a structural defect in score fusion: a keyword-only hit is "
+                    "floored at recall_floor and can gain at most keyword_weight, so its ceiling "
+                    "sits BELOW what ordinary vector hits score and it can never rank, no matter "
+                    "how well it matched. Measured on a 34,474-fact corpus: a wanted fact at "
+                    "cosine rank 197 was found by the keyword pass at rank 20 and discarded every "
+                    "time. Rank fusion is used rather than min-max or z-score normalisation "
+                    "because those are SET-RELATIVE - they map the best hit of any query to 1.0, "
+                    "including a query with no relevant answer at all, destroying the absolute "
+                    "signal the gates depend on.",
+     "default": 0.0},
     {"key": "merge_verbatim_delimiter",
      "description": "If set, whatever follows this delimiter in a fact's content is a "
                     "VERBATIM block that the caller's embedding does not cover, and two "
