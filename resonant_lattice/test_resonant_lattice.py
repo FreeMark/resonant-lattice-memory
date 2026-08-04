@@ -5390,6 +5390,67 @@ def test_store_empty_entities_means_none_not_derive_them():
         s.close()
 
 
+def test_verbatim_block_differing_blocks_the_near_identity_merge():
+    """Two facts with the SAME embedding but different verbatim blocks must not fold.
+
+    The near-identity merge folds on embedding similarity, which assumes the vector covers
+    the whole content. The math ingest deliberately embeds only a prose gist and appends the
+    exact formula after "[TEX]", so notation stays out of the vector and the entity graph --
+    which means near-identity in vector space says nothing about the formula.
+
+    MEASURED: epsilon_b = b*2N/p - floor(b*2N/p) and epsilon_i = a_i*2N/p - floor(a_i*2N/p),
+    two different formulas from one paper, produce gists differing by two characters. At
+    0.952 cosine the merge folded them and DROPPED one formula, so asking for the second
+    returned the first. The multi-digit-number guard cannot catch this: mathematics is
+    distinguished by SYMBOLS, and "2N" contributes no multi-digit number.
+
+    Numbers are single-digit and entities are explicitly empty here, so neither of the other
+    two merge guards can fire -- if this passes, it is the verbatim guard doing it.
+    """
+    GIST = "The formula defines epsilon as a fractional part of a value times 2N over p."
+    A = GIST + "\n\n[TEX]\n\\epsilon_{b} = \\frac{b \\cdot 2N}{p}"
+    B = GIST + "\n\n[TEX]\n\\epsilon_{i} = \\frac{a_{i} \\cdot 2N}{p}"
+
+    s = _fresh_store(merge_verbatim_delimiter="[TEX]")
+    try:
+        e = _emb(s, GIST)                      # ONE vector, as identical gists would give
+        act_a, fid_a = s.add_or_reinforce_fact(A, e, entities=[])
+        act_b, fid_b = s.add_or_reinforce_fact(B, e, entities=[])
+        assert fid_a != fid_b, (
+            "a differing formula folded into the existing fact and was lost (%s -> %s)"
+            % (act_b, fid_b))
+        assert "reinforced" not in act_b, act_b
+    finally:
+        s.close()
+
+    # Whitespace-only difference must STILL reinforce -- the guard compares formulas, not
+    # formatting. Isolated in its own store on purpose: once A and B are both present at
+    # the same embedding, _find_semantic_match's top-1 is an arbitrary pick between them,
+    # so a third insert here would test tie-breaking rather than the guard.
+    s1 = _fresh_store(merge_verbatim_delimiter="[TEX]")
+    try:
+        e = _emb(s1, GIST)
+        _, fid_a = s1.add_or_reinforce_fact(A, e, entities=[])
+        C = GIST + "\n\n[TEX]\n\\epsilon_{b}  =  \\frac{b \\cdot 2N}{p}\n"
+        act_c, fid_c = s1.add_or_reinforce_fact(C, e, entities=[])
+        assert fid_c == fid_a, "whitespace-only difference must still reinforce, got %s" % act_c
+        assert "reinforced" in act_c, act_c
+    finally:
+        s1.close()
+
+    # Unset (the default) -> every existing profile keeps exactly its current behaviour.
+    s2 = _fresh_store()
+    try:
+        assert s2.merge_verbatim_delimiter == "", s2.merge_verbatim_delimiter
+        e = _emb(s2, GIST)
+        _, fid_a = s2.add_or_reinforce_fact(A, e, entities=[])
+        act_b, fid_b = s2.add_or_reinforce_fact(B, e, entities=[])
+        assert fid_b == fid_a and "reinforced" in act_b, (
+            "with the guard off this must fold as before, got %s -> %s" % (act_b, fid_b))
+    finally:
+        s2.close()
+
+
 def test_search_tool_overfetches_its_pool_then_truncates():
     """The explicit search tool must CONSIDER more than it RETURNS.
 

@@ -85,6 +85,44 @@ class FactsMixin:
             return True
         return new_n <= old_n or old_n <= new_n
 
+    def _verbatim_compatible_for_merge(self, existing_id: int, new_content: str) -> bool:
+        """Guard the near-identity merge when the embedding covers only PART of the content.
+
+        The merge above folds on embedding similarity, which assumes the vector represents
+        the whole content. A caller may deliberately embed only a prefix: the math ingest
+        embeds a prose gist and appends the exact formula after a delimiter, so that notation
+        never enters the vector or the entity graph. For those facts, near-identity in
+        embedding space says nothing at all about the half the vector never saw.
+
+        MEASURED. Two formulas from one paper - epsilon_b = b*2N/p - floor(b*2N/p) and
+        epsilon_i = a_i*2N/p - floor(a_i*2N/p) - produce gists differing by two characters.
+        They sit at 0.952 cosine, so the merge folded them and DROPPED one formula outright;
+        a query for the second then returned the first. Adjacent, plausible, and wrong. The
+        multi-digit-number guard above cannot catch it, because mathematics is distinguished
+        by SYMBOLS and its constants are single digits ("2N" contributes nothing).
+
+        Compares the verbatim blocks ignoring whitespace only. Deliberately not
+        markup-aware: normalising LaTeX (\\gets vs \\leftarrow) belongs to the caller, and
+        erring toward keeping both costs a redundant row while erring the other way costs a
+        formula.
+
+        Off unless `merge_verbatim_delimiter` is set, so profiles that do not use it keep
+        exactly their current behaviour.
+        """
+        delim = str(getattr(self, "merge_verbatim_delimiter", "") or "")
+        if not delim:
+            return True
+        new_c = new_content or ""
+        if delim not in new_c:
+            return True
+        row = self._conn.execute(
+            "SELECT content FROM semantic_facts WHERE id = ?", (existing_id,)).fetchone()
+        old_c = (row["content"] if row else "") or ""
+        if delim not in old_c:
+            return True
+        strip = lambda t: re.sub(r"\s+", "", t.split(delim, 1)[1])   # noqa: E731
+        return strip(new_c) == strip(old_c)
+
     def add_or_reinforce_fact(
         self,
         content: str,
@@ -135,15 +173,19 @@ class FactsMixin:
             top = self._find_semantic_match(embedding, threshold=0.0)
             if (top and top["similarity"] >= self.reinforce_threshold
                     and self._entities_compatible_for_merge(top["id"], entities)
-                    and self._specifics_compatible_for_merge(top["id"], content)):
-                # near-identical, same subject, same specifics -> safe to fold together
+                    and self._specifics_compatible_for_merge(top["id"], content)
+                    and self._verbatim_compatible_for_merge(top["id"], content)):
+                # near-identical, same subject, same specifics, same verbatim block
+                # -> safe to fold together
                 self._reinforce_fact(top["id"])
                 self._link_entities(top["id"], entities)
                 return "reinforced (semantic)", top["id"]
             # Near-identical but NOT safe to merge -> INSERT a separate fact rather
             # than conflate: either the entity sets DIVERGE (different companies =
-            # cross-entity contamination) or a hard NUMBER changed (a value update
-            # that must not be dropped as a reinforcement of the stale value).
+            # cross-entity contamination), or a hard NUMBER changed (a value update
+            # that must not be dropped as a reinforcement of the stale value), or the
+            # VERBATIM block the embedding never covered differs (two distinct formulas
+            # under near-identical prose).
 
             # Phase 3 salience: novelty = 1 - top_similarity (fully novel when there
             # is no neighbour at all). A surprising fact imprints harder on first

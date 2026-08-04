@@ -752,6 +752,8 @@ class LatticeMemoryProvider(ToolHandlerMixin, ConsolidationMixin, RecallMixin,
                 promotion_threshold=self._promotion_resonance_threshold,  # maps to store's internal promotion_threshold param
                 similarity_threshold=self._similarity_threshold,
                 reinforce_threshold=self._reinforce_threshold,     # near-identity merge gate
+                merge_verbatim_delimiter=str(self._config.get(   # never fold across a differing verbatim block
+                    "merge_verbatim_delimiter", DEFAULTS["merge_verbatim_delimiter"]) or ""),
                 embed_model=self._embed_model,
                 hrr_dim=self._hrr_dim,
                 conflict_sim_low=self._conflict_sim_low,

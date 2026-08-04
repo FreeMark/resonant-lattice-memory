@@ -165,6 +165,15 @@ CONFIG_SCHEMA = [
                     "not silently merge into the stale row). Prefer raising similarity_threshold "
                     "if you want broader merge behavior, not lowering reinforce alone.",
      "default": 0.95},
+    {"key": "merge_verbatim_delimiter",
+     "description": "If set, whatever follows this delimiter in a fact's content is a "
+                    "VERBATIM block that the caller's embedding does not cover, and two "
+                    "near-identical facts whose verbatim blocks differ are stored separately "
+                    "instead of folded. For callers that deliberately embed only part of the "
+                    "content - e.g. a prose gist with the exact formula appended, so notation "
+                    "stays out of the vector and the entity graph. Empty = off, which is the "
+                    "behaviour of every profile that does not set it.",
+     "default": ""},
     {"key": "conflict_decay_floor",
      "description": "Resonance floor during conflict bleed (0.0 = lethal duel; "
                     ">0 = non-lethal, resolve via feedback)",

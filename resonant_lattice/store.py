@@ -74,6 +74,7 @@ class LatticeStore(SchemaMixin, FactsMixin, DreamCycleMixin, AbstractionMixin,
         promotion_threshold: int = _STORE_DEFAULTS.get("promotion_resonance_threshold", 4),
         similarity_threshold: float = _STORE_DEFAULTS.get("similarity_threshold", 0.78),
         reinforce_threshold: float = _STORE_DEFAULTS.get("reinforce_threshold", 0.95),
+        merge_verbatim_delimiter: str = _STORE_DEFAULTS.get("merge_verbatim_delimiter", ""),
         embed_model: str = _STORE_DEFAULTS.get("embed_model", "nomic-embed-text"),
         hrr_dim: int = _STORE_DEFAULTS.get("hrr_dim", 1024),
         conflict_sim_low: float = _STORE_DEFAULTS.get("conflict_sim_low", 0.55),
@@ -161,6 +162,9 @@ class LatticeStore(SchemaMixin, FactsMixin, DreamCycleMixin, AbstractionMixin,
                 "mid-band near-matches stay separate for conflict detection.",
                 _req_reinforce, self.reinforce_threshold, float(similarity_threshold),
             )
+        # Content after this delimiter is verbatim material the caller's embedding does not
+        # cover, so near-identity in vector space says nothing about it. Empty = off.
+        self.merge_verbatim_delimiter = str(merge_verbatim_delimiter or "")
         self.embed_model = embed_model
         self.hrr_dim = int(hrr_dim)                        # HRR phase-vector dim (distinct from embedding vector_dim)
         self.degraded = False                              # set True on embedding-dim mismatch (observable via stats)
