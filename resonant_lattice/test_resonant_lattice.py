@@ -5451,6 +5451,62 @@ def test_verbatim_block_differing_blocks_the_near_identity_merge():
         s2.close()
 
 
+def test_keyword_channel_fires_on_a_natural_language_question():
+    """The hybrid's FTS half must contribute on a QUESTION, not only on an exact string.
+
+    search() documents both passes as always running, "keyword catches exact technical names
+    that embed poorly". But it only tried two query forms: the whole query as a PHRASE, and
+    every token joined with AND -- stopwords included, and FTS5's default tokenizer does not
+    stem, so "encoded" never matches a fact that says "encoding".
+
+    MEASURED on a 34,474-fact corpus over nine natural-language questions: both forms returned
+    ZERO rows for every one. Retrieval was dense-only in practice, precisely where the
+    docstring promises a union. On the one question whose answer the vector pass misses, that
+    answer sits at cosine rank 197 of 34,474 while ranking 20th by keyword -- reachable the
+    whole time, through a channel that never fired.
+
+    min_similarity is pinned at 0.99 against deterministic pseudo-embeddings, so the vector
+    pass returns NOTHING and anything that comes back must have come from FTS. The phrase and
+    AND forms are asserted empty first, so the test cannot pass for the wrong reason.
+    """
+    s = _fresh_store()
+    try:
+        target = ("Rescaling divides a ciphertext by the scaling factor and drops one modulus "
+                  "level, controlling noise growth after a homomorphic multiplication.")
+        for c in (target,
+                  "Bootstrapping refreshes a ciphertext whose level is exhausted.",
+                  "The transmission overhead of encrypted tokens is dominated by ciphertext size.",
+                  "A relinearisation key reduces a degree-two ciphertext back to degree one."):
+            s.add_or_reinforce_fact(c, _emb(s, c), entities=[])
+
+        q = "How does rescaling control noise growth after a multiplication?"
+
+        # The two pre-existing forms must both find nothing -- otherwise this test would
+        # pass without exercising the fallback at all.
+        sql = ("SELECT f.id FROM semantic_fts fts JOIN semantic_facts f ON f.id = fts.rowid "
+               "WHERE semantic_fts MATCH ? LIMIT 10")
+        phrase = s._conn.execute(sql, ('"%s"' % q,)).fetchall()
+        toks = [t for t in q.split() if len(t) > 1]
+        andq = s._conn.execute(sql, (" AND ".join('"%s"' % t for t in toks),)).fetchall()
+        assert not phrase, "phrase form unexpectedly matched; test premise broken"
+        assert not andq, "AND form unexpectedly matched; test premise broken"
+
+        from retrieval import LatticeRetriever
+
+        class _R(LatticeRetriever):
+            def _get_embedding(self, t):
+                return _emb(s, t)
+
+        # 0.99 against pseudo-random unit vectors => the vector pass contributes nothing.
+        hits = _R(s, "http://x", "nomic", min_similarity=0.99).search(q, limit=10)
+        got = [h for h in hits if "rescaling divides" in (h["content"] or "").lower()]
+        assert got, ("the keyword channel returned nothing for a natural-language question; "
+                     "hybrid retrieval is dense-only (%d hits: %r)"
+                     % (len(hits), [h["content"][:40] for h in hits]))
+    finally:
+        s.close()
+
+
 def test_search_tool_overfetches_its_pool_then_truncates():
     """The explicit search tool must CONSIDER more than it RETURNS.
 

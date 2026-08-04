@@ -259,6 +259,37 @@ class LatticeRetriever:
                                 fts_sql, (and_query, limit)
                             ).fetchall()
 
+                    # Attempt 3: OR over SIGNIFICANT tokens.
+                    #
+                    # Without this the keyword half of the hybrid is dead for anything
+                    # shaped like a question. Attempt 1 needs the whole sentence to appear
+                    # verbatim; attempt 2 needs EVERY token present, stopwords included,
+                    # and FTS5's default tokenizer does not stem - so "encoded" will not
+                    # match a fact that says "encoding".
+                    #
+                    # MEASURED on a 34,474-fact corpus, nine natural-language questions:
+                    # attempts 1 and 2 returned ZERO rows for every single one. Retrieval
+                    # was therefore dense-only in practice, exactly where the docstring
+                    # above promises a union. Dropping stopwords and OR-ing what is left
+                    # put the wanted fact in the FTS top-25 for 8 of the 9 - including the
+                    # one question the vector pass misses outright, where the answer sits
+                    # at cosine rank 197 of 34,474 but ranks 20th by keyword.
+                    #
+                    # Safe by construction: it only runs when the stricter attempts found
+                    # NOTHING, so no query that works today changes, and FTS-only hits
+                    # enter the union at the recall floor - they cannot outrank a strong
+                    # vector hit, only rescue a query that had no keyword candidates.
+                    # Reuses _significant_tokens - the SAME helper the keyword boost below
+                    # scores on - so the terms that FIND a candidate are the terms that
+                    # then rank it, rather than two different notions of "significant".
+                    if not fts_rows:
+                        significant = sorted(_significant_tokens(clean_query))
+                        if significant:
+                            or_query = " OR ".join(f'"{t}"' for t in significant)
+                            fts_rows = self.store._conn.execute(
+                                fts_sql, (or_query, limit)
+                            ).fetchall()
+
                     for row in fts_rows:
                         fid = row["id"]
                         if fid not in results_dict:
