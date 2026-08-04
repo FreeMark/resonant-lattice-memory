@@ -111,7 +111,20 @@ class FactsMixin:
             return "skipped", -1
 
         with self._lock:
-            entities = entities or self._extract_entities(content)
+            # None means "derive them for me"; an EMPTY LIST means "this fact genuinely
+            # has none". `entities or ...` conflated the two, because [] is falsy - so a
+            # caller that had already computed entities and found none silently got them
+            # re-extracted from `content` instead.
+            #
+            # Measured: an ingest passing entities derived from the PROSE half of each fact
+            # (deliberately, to keep LaTeX out of the graph) hit this on 1,030 of 4,719
+            # facts. The fallback then mined the raw LaTeX, making the caller's own "[TEX]"
+            # delimiter the single most common entity in the lattice (1,051 facts) and
+            # adding 108 entity names containing backslashes (`\lceil`, `\zeta`, `\quad`).
+            # The guarantee the caller was relying on failed silently for a fifth of its
+            # writes.
+            if entities is None:
+                entities = self._extract_entities(content)
 
             # 1. Semantic similarity check first (fast vector lookup).
             #    Fetch the top-1 neighbour (threshold 0.0) so the SAME lookup both

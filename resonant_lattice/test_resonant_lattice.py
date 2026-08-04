@@ -5349,6 +5349,47 @@ def test_store_canonical_tool_dispatch():
         handler._store.close()
 
 
+def test_store_empty_entities_means_none_not_derive_them():
+    """`entities=[]` must mean "this fact has none", not "go and find some".
+
+    The two were conflated by `entities = entities or self._extract_entities(content)`,
+    because an empty list is falsy. A caller that deliberately derives entities from part
+    of the content -- to keep notation OUT of the entity graph -- got the opposite of what
+    it asked for whenever that part yielded nothing.
+
+    Measured on a real ingest: 1,030 of 4,719 facts fell through the fallback, which then
+    mined the raw LaTeX and made the caller's own "[TEX]" delimiter the most common entity
+    in the lattice, plus 108 entity names containing backslashes.
+    """
+    s = _fresh_store()
+    try:
+        content = "Zorbulator ships with Framistan v4 and a Widgetron core. [TEX] \\mathbf{x}"
+        # None -> derive from content (unchanged legacy behaviour)
+        _, fid_auto = s.add_or_reinforce_fact(content, _emb(s, content), entities=None)
+        auto = {r["name"] for r in s._conn.execute(
+            "SELECT e.name FROM fact_entities fe JOIN entities e ON e.entity_id=fe.entity_id "
+            "WHERE fe.fact_id=?", (fid_auto,))}
+        assert auto, "deriving from content should still find entities"
+
+        # [] -> the caller means NONE. Nothing may be linked.
+        c2 = content + " (variant two)"
+        _, fid_empty = s.add_or_reinforce_fact(c2, _emb(s, c2), entities=[])
+        empty = list(s._conn.execute(
+            "SELECT 1 FROM fact_entities WHERE fact_id=?", (fid_empty,)))
+        assert empty == [], "entities=[] must link nothing, got %d rows" % len(empty)
+
+        # An explicit list is still honoured verbatim.
+        c3 = content + " (variant three)"
+        _, fid_given = s.add_or_reinforce_fact(c3, _emb(s, c3),
+                                               entities=["chosen_one"])
+        given = {r["name"] for r in s._conn.execute(
+            "SELECT e.name FROM fact_entities fe JOIN entities e ON e.entity_id=fe.entity_id "
+            "WHERE fe.fact_id=?", (fid_given,))}
+        assert given == {"chosen_one"}, given
+    finally:
+        s.close()
+
+
 def test_search_tool_overfetches_its_pool_then_truncates():
     """The explicit search tool must CONSIDER more than it RETURNS.
 
