@@ -156,6 +156,59 @@ _QUERY_REL_KEYWORDS: List[Tuple["re.Pattern", str]] = [
 ]
 
 
+_EDGE_PUNCT = "\"'.,;:!?"
+_CLOSERS = {")": "(", "]": "[", "}": "{"}
+_OPENERS = {v: k for k, v in _CLOSERS.items()}
+
+
+def _wraps_whole(s: str, op: str, cl: str) -> bool:
+    """Does the leading `op` pair with the TRAILING `cl`, wrapping the entire span?"""
+    depth = 0
+    for i, ch in enumerate(s):
+        if ch == op:
+            depth += 1
+        elif ch == cl:
+            depth -= 1
+            if depth == 0 and i != len(s) - 1:
+                return False        # closed early: "(a)(b)" is not one wrapped span
+    return depth == 0
+
+
+def _trim_edges(s: str) -> str:
+    """Trim wrapping punctuation WITHOUT unbalancing a bracketed expression.
+
+    This was `s.strip("\"'.,;:!?()[]{}")`, and `str.strip(chars)` has no notion of balance:
+    it eats any of those characters from either end regardless of what they pair with. An
+    argument that legitimately ENDS in a bracket therefore lost it --
+
+        B_Ks2_YASHE(t)  ->  B_Ks2_YASHE(t
+        o(ln log n)     ->  o(ln log n
+        3 * 2^{64}      ->  3 * 2^{64
+
+    Measured on a live 10,572-triple graph: 630 arguments (5.96%) left unbalanced, every one
+    missing exactly its trailing delimiter. The extractor's output was correct in each case;
+    this normaliser corrupted it, so the damage looked like a model defect and was not.
+
+    The original intent is kept: quotes and sentence punctuation always go, and a pair that
+    wraps the WHOLE span still goes ("(foo)" -> "foo"). What no longer happens is removing
+    one half of a pair whose partner is inside the span.
+    """
+    prev = None
+    while s and s != prev:
+        prev = s
+        s = s.strip().strip(_EDGE_PUNCT).strip()
+        # A matched pair around the whole span is decoration -- drop both together.
+        while len(s) >= 2 and s[0] in _OPENERS and s[-1] == _OPENERS[s[0]] \
+                and _wraps_whole(s, s[0], s[-1]):
+            s = s[1:-1].strip()
+        # A lone closer at the end (or opener at the front) with no partner is stray.
+        if s and s[-1] in _CLOSERS and s.count(_CLOSERS[s[-1]]) < s.count(s[-1]):
+            s = s[:-1]
+        if s and s[0] in _OPENERS and s.count(_OPENERS[s[0]]) < s.count(s[0]):
+            s = s[1:]
+    return s.strip()
+
+
 def _resolve_arg(span: str, ent_set: set, side: str,
                  is_value: bool = False) -> Tuple[Optional[str], bool]:
     """Normalize one captured argument and try to ground it to a known entity.
@@ -201,7 +254,7 @@ def _resolve_arg(span: str, ent_set: set, side: str,
             s = s[len(det):]
             break
 
-    s = s.strip().strip("\"'.,;:!?()[]{}").strip()
+    s = _trim_edges(s)
     if len(s) < 2:
         return None, False
 

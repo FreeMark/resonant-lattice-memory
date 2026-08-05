@@ -4235,6 +4235,50 @@ def test_attribute_object_keeps_its_value():
     print("  attribute object OK: value kept verbatim, node path unchanged")
 
 
+def test_arg_trimming_does_not_unbalance_brackets():
+    """A trailing bracket that PAIRS with one inside the span must survive normalisation.
+
+    This was `s.strip("\"'.,;:!?()[]{}")`, and `str.strip(chars)` has no notion of balance --
+    it removed any of those characters from either end regardless of their partner. Measured
+    on a live 10,572-triple graph: 630 arguments (5.96%) left unbalanced, every one missing
+    exactly its trailing delimiter (`B_Ks2_YASHE(t)` -> `B_Ks2_YASHE(t`, `o(ln log n)` ->
+    `o(ln log n`, `3 * 2^{64}` -> `3 * 2^{64`). The extractor's output was correct in every
+    case; the normaliser corrupted it, so the damage read as a model defect and was not.
+    """
+    try:
+        rel = _load("store_relations")
+    except Exception as e:
+        print(f"  SKIP bracket balance: {e}"); return
+    T = rel._trim_edges
+
+    # 1. the regression: a paired trailing delimiter is kept
+    for s in ("B_Ks2_YASHE(t)", "o(ln log n)", "3 * 2^{64}", "x(x)", "sqrt(m)",
+              "twiddle factor at brev(i)", "2(phi_max + e_f) sqrt(m)", "(a+b)*c"):
+        assert T(s) == s, f"balanced span corrupted: {s!r} -> {T(s)!r}"
+
+    # 2. the original intent is preserved
+    assert T('"foo"') == "foo"
+    assert T("foo.") == "foo"
+    assert T("(foo)") == "foo"           # a pair wrapping the WHOLE span is decoration
+    assert T("[foo]") == "foo"
+    assert T("((nested))") == "nested"
+    assert T("the value, ") == "the value"
+
+    # 3. a genuinely stray delimiter still goes
+    assert T("foo)") == "foo"
+    assert T("(foo") == "foo"
+
+    # 4. two adjacent groups are NOT one wrapped span
+    assert T("(a)(b)") == "(a)(b)"
+
+    # 5. reaches the real entry point, not just the helper
+    ents = {"yashe"}
+    assert rel._resolve_arg("B_Ks2_YASHE(t)", ents, "obj", is_value=True)[0] \
+        == "b_ks2_yashe(t)"
+    assert T("") == ""
+    print("  bracket balance OK: paired delimiters kept, stray ones still trimmed")
+
+
 def test_alias_must_cover_the_span_before_replacing_it():
     """A short alias must not swallow a composite identifier.
 
