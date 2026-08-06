@@ -27,6 +27,23 @@ ready-made preset profiles (Scholar, Sovereign Vault, Overnight, Low-VRAM, and m
 
 ## What's new
 
+- **v1.7.5 (2026-08-06): trimming an argument must not unbalance its brackets.**
+  `_resolve_arg` trimmed relation arguments with `s.strip("\"'.,;:!?()[]{}")`.
+  `str.strip(chars)` has no notion of balance, so an argument that legitimately *ends* in a
+  closing bracket lost it — `B_Ks2_YASHE(t)` becomes `B_Ks2_YASHE(t`, `o(ln log n)` becomes
+  `o(ln log n`, `3 * 2^{64}` becomes `3 * 2^{64`. Measured on a live 74,813-fact corpus,
+  **630 of 10,572 stored arguments (5.96%)** were corrupted this way — and **the extractor
+  had been correct every time**. The damage was entirely in the normalizer. Trimming now
+  removes a bracket only when doing so leaves the argument balanced.
+  - **The repair recovered zero structure, and that is the interesting part.** The
+    prediction was that truncation had split one object into two graph nodes. It had not:
+    the corruption was **uniform** — every instance of a given argument truncated
+    identically — so there were **0 collisions** to merge. The fix therefore buys
+    correctness (the identifier matches the paper it came from) and prevents *future*
+    fragmentation between old corrupted rows and every correct row written from now on.
+  - 1,055 arguments repaired; **51 deliberately left alone**, being unmatched *closers*
+    with no single correct completion. Suite 204 to **210**.
+
 - **v1.7.4 (2026-08-03): relation extraction and relational query, both unblocked.** Three
   silent failures, each found by measuring a live corpus rather than by an error.
   - **A model that thinks out loud no longer loses every triple.** `_llm_extract_triples`
